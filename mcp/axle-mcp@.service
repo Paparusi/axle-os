@@ -1,0 +1,48 @@
+[Unit]
+Description=Máy chủ MCP của agent %i (user ag-%i)
+Requires=axle-mcp@%i.socket
+After=axle-mcp@%i.socket
+
+[Service]
+User=ag-%i
+Group=ag-%i
+# Node hệ thống, code /opt/axle — đều root sở hữu, agent không sửa được.
+ExecStart=/usr/bin/node /opt/axle/mcp/http.js
+Environment=AXLE_CLIENT=%i
+# Nhật ký công cụ ra stdout → journal: agent không sửa được
+Environment=AXLE_AUDIT=-
+# Vault + duyệt qua socket RIÊNG của agent (nhóm ag-%i): dịch vụ biết chắc ai gọi
+Environment=AXLE_VAULT_SOCKET=/run/axle-vault-agents/%i.sock
+Environment=AXLE_APPROVE_SOCKET=/run/axle-approve-agents/%i.sock
+Restart=on-failure
+RestartSec=2
+
+# Chỉ thấy home của chính mình: /home là tmpfs rỗng, gắn lại đúng /home/ag-%i
+ProtectHome=tmpfs
+BindPaths=/home/ag-%i
+ProtectSystem=strict
+ReadWritePaths=/home/ag-%i
+PrivateTmp=yes
+PrivateDevices=yes
+# Không sudo, không leo quyền
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+RestrictSUIDSGID=yes
+# Không thấy tiến trình của người khác; không mạng ngoài (chỉ Unix socket)
+ProtectProc=invisible
+RestrictAddressFamilies=AF_UNIX
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+# Mỗi agent một phần tài nguyên
+MemoryMax=512M
+TasksMax=64
+CPUQuota=100%

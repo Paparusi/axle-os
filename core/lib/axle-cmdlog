@@ -1,0 +1,107 @@
+#!/usr/bin/python3
+# Đọc nhật ký lệnh (auditd, khoá axle-cmd) cho user thường qua sudo NOPASSWD — chỉ đọc.
+#   axle-cmdlog [--since recent|today|yesterday|this-week|boot] [--limit N] [--agent] [--tim chữ]
+# --agent: chỉ lệnh chạy không qua bàn phím (tty none) — đa số là agent, script, cổng MCP.
+import argparse, datetime, pwd, re, subprocess, sys
+
+p = argparse.ArgumentParser(prog="axle cmdlog")
+p.add_argument("--since", default="today", choices=["recent", "today", "yesterday", "this-week", "boot"])
+p.add_argument("--limit", type=int, default=50)
+p.add_argument("--agent", action="store_true")
+p.add_argument("--tim", default="", help="chỉ giữ dòng chứa chữ này (lọc TRƯỚC khi cắt --limit)")
+a = p.parse_args()
+limit = max(1, min(a.limit, 2000))
+
+# --input-logs + stdin rỗng: ausearch mà thấy stdin là pipe thì ĐỌC NHẬT KÝ TỪ STDIN (không đọc file),
+# chạy qua SSH không bàn phím là trúng — vừa ra "không có gì", vừa ăn mất stdin của script gọi nó.
+r = subprocess.run(["/usr/sbin/ausearch", "--input-logs", "-k", "axle-cmd", "--start", a.since, "--raw"],
+                   capture_output=True, text=True, errors="replace", stdin=subprocess.DEVNULL)
+if r.returncode not in (0, 1):  # 1 = không có sự kiện nào
+    sys.exit(r.stderr.strip() or "ausearch lỗi")
+
+FIELD = re.compile(r'(\w+(?:\[\d+\])?)=("[^"]*"|\S+)')
+MSG = re.compile(r"msg=audit\((\d+)\.\d+:(\d+)\)")
+HEX = re.compile(r"^[0-9A-F]+$")
+
+def val(v):
+    if v.startswith('"'):
+        return v[1:-1]
+    if len(v) % 2 == 0 and HEX.match(v):  # auditd mã hex khi có khoảng trắng / ký tự lạ
+        return bytes.fromhex(v).decode("utf-8", "replace")
+    return v
+
+events = {}
+for line in r.stdout.splitlines():
+    m = MSG.search(line)
+    t = re.match(r"type=(\w+)", line)
+    if not m or not t:
+        continue
+    ev = events.setdefault(m.group(2), {"ts": int(m.group(1)), "args": {}})
+    f = {k: v for k, v in FIELD.findall(line.split("):", 1)[1] if "):" in line else "")}
+    if t.group(1) == "SYSCALL":
+        ev.update(tty=f.get("tty", "?"), uid=f.get("uid"), ses=f.get("ses"), ok=f.get("success") == "yes", exe=val(f.get("exe", '""')))
+    elif t.group(1) == "EXECVE":
+        for k, v in f.items():
+            mm = re.fullmatch(r"a(\d+)(?:\[(\d+)\])?", k)
+            if mm:
+                i, part = int(mm.group(1)), int(mm.group(2) or 0)
+                ev["args"].setdefault(i, {})[part] = val(v)
+    elif t.group(1) == "CWD":
+        ev["cwd"] = val(f.get("cwd", '""'))
+
+import os
+try:  # rút gọn thư mục home của người gọi thành ~ (sudo đặt SUDO_USER)
+    home = pwd.getpwnam(os.environ.get("SUDO_USER", "")).pw_dir
+except KeyError:
+    home = None
+# Phiên đăng nhập nào là của trợ lý chính (cổng MCP ghi lúc mở phiên) → gắn [tên]
+assistant_ses = {}
+try:
+    import json
+    for line in open(os.path.join(home or "/nonexistent", ".local/state/axle/sessions.jsonl")):
+        try:
+            j = json.loads(line); assistant_ses[str(j["ses"])] = j["agent"]
+        except (ValueError, KeyError):
+            pass
+except OSError:
+    pass
+rows = []
+for serial in sorted(events, key=int):
+    ev = events[serial]
+    if "tty" not in ev:
+        continue
+    if a.agent and ev["tty"] not in ("(none)", "none"):
+        continue
+    argv = [("".join(parts[k] for k in sorted(parts))) for _, parts in sorted(ev["args"].items())]
+    # exec thất bại không có bản ghi EXECVE → không đối số: đó là bash dò PATH (thử /usr/local/sbin/x…), bỏ.
+    if not argv and not ev.get("ok"):
+        continue
+    # Ẩn đúng chuỗi lệnh của chính việc XEM nhật ký này + bước PAM kiểm hạn mật khẩu mỗi lần sudo.
+    # Không ẩn gì khác: đây là nhật ký an ninh.
+    if (any(x == "/usr/local/lib/axle/axle-cmdlog" for x in argv)
+            or argv[:4] == ["/usr/sbin/ausearch", "--input-logs", "-k", "axle-cmd"]
+            or (ev.get("exe") == "/usr/sbin/unix_chkpwd" and argv[-1:] == ["chkexpiry"])):
+        continue
+    cmd = " ".join(x if re.fullmatch(r"[\w@%+=:,./~-]+", x) else "'" + x.replace("'", "'\\''") + "'" for x in argv)
+    cwd = ev.get("cwd", "?")
+    if home and cwd.startswith(home):
+        cwd = "~" + cwd[len(home):]
+    uid = ev.get("uid")
+    if uid == "0":
+        who = "root"
+    else:
+        try:
+            who = pwd.getpwuid(int(uid)).pw_name
+        except (KeyError, TypeError, ValueError):
+            who = uid or "?"
+    me = os.environ.get("SUDO_USER", "")
+    when = datetime.datetime.fromtimestamp(ev["ts"]).strftime("%d/%m %H:%M:%S")
+    tty = "agent" if ev["tty"] in ("(none)", "none") else ev["tty"]
+    tag = "" if who in (me, "root") else f"[{who}] "
+    if ev.get("ses") in assistant_ses:
+        tag = f"[{assistant_ses[ev['ses']]}] " + tag
+    rows.append(f"{when} {'✓' if ev.get('ok') else '✗'} {tty:<6} {tag}{cwd}{' #' if who == 'root' else ' $'} {cmd[:400]}")
+
+if a.tim:
+    rows = [r for r in rows if a.tim in r]
+print("\n".join(rows[-limit:]) if rows else "Chưa có lệnh nào trong khoảng này")

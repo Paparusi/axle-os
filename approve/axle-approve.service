@@ -1,0 +1,23 @@
+[Unit]
+Description=Axle duyệt qua Telegram — agent xin việc có thể phá, chủ bấm duyệt mới chạy
+After=network-online.target axle-vault.service
+Wants=network-online.target axle-vault.service
+
+[Service]
+# Root: việc đã duyệt có thể cần quyền root (khởi động lại dịch vụ, lệnh --asRoot).
+# Group axle-agent: socket 0660 → chỉ agent trong nhóm này xin được.
+User=root
+Group=axle-agent
+ExecStart=/usr/bin/node /opt/axle/approve/daemon.js
+RuntimeDirectory=axle-approve
+RuntimeDirectoryMode=0750
+LogsDirectory=axle-approve
+LogsDirectoryMode=0750
+# Luật duyệt đã nhớ + trạng thái tin tóm tắt (root 0700)
+StateDirectory=axle-approve
+StateDirectoryMode=0700
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

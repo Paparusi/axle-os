@@ -1,0 +1,22 @@
+# Ảnh cài và sản phẩm dựng — không bao giờ commit
+*.iso
+*.qcow2
+*.fd
+out/
+cache/
+work/
+# Bí mật
+*.env
+*.hash
+*.key
+*.pem
+secrets/
+node_modules/
+__pycache__/
+# iOS: dựng ra, không commit (dự án Xcode sinh bằng XcodeGen trên CI)
+ios/**/.build/
+ios/**/.swiftpm/
+ios/**/*.xcodeproj/
+ios/**/DerivedData/
+ios/Axle/Info.plist
+ios/Axle/Axle.entitlements

@@ -1,0 +1,51 @@
+[Unit]
+Description=Axle vault — giữ khoá, gọi HTTP hộ agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# User riêng: agent (admin_1) không đọc được /var/lib/axle-vault.
+# Group axle-agent: socket 0660 → chỉ thành viên nhóm này nối vào được.
+User=axle-vault
+Group=axle-agent
+# Node của hệ thống (root sở hữu) — KHÔNG dùng Node trong home agent, agent sửa được nó.
+ExecStart=/usr/bin/node /opt/axle/vault/daemon.js
+Environment=AXLE_VAULT_DIR=/var/lib/axle-vault
+Environment=AXLE_VAULT_SOCKET=/run/axle-vault/vault.sock
+Environment=AXLE_VAULT_LOG=/var/log/axle-vault/access.log
+RuntimeDirectory=axle-vault
+RuntimeDirectoryMode=0750
+UMask=0027
+Restart=on-failure
+RestartSec=2
+
+# Khoá chặt
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ReadWritePaths=/var/log/axle-vault
+ReadOnlyPaths=/var/lib/axle-vault
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+ProtectHostname=yes
+ProtectClock=yes
+ProtectKernelLogs=yes
+ProtectProc=invisible
+ProcSubset=pid
+PrivateUsers=yes
+# Không đặt MemoryDenyWriteExecute: V8 (JIT của Node) cần bộ nhớ vừa ghi vừa chạy
+
+[Install]
+WantedBy=multi-user.target

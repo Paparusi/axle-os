@@ -1,0 +1,15 @@
+[Unit]
+Description=Socket MCP của agent %i (chỉ cửa trước axle-gw nối được)
+
+[Socket]
+# root:axle-gw 0660 — agent (ag-%i) KHÔNG sở hữu socket của chính nó, không nối thẳng được, phải qua cửa trước.
+ListenStream=/run/axle-mcp/%i.sock
+SocketUser=root
+SocketGroup=axle-gw
+SocketMode=0660
+DirectoryMode=0755
+# Thu hồi agent thì xoá luôn file socket (mặc định systemd để lại)
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

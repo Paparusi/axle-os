@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Cửa hẹp vào snapper cho user thường qua sudo NOPASSWD (xem /etc/sudoers.d/axle).
+# Chỉ vài thao tác cố định, đối số kiểm chặt. KHÔNG cho gọi snapper trực tiếp: `snapper create --command …`
+# chạy lệnh tuỳ ý bằng root.
+set -euo pipefail
+S=(/usr/bin/snapper -c root)
+case "${1:-}" in
+  list)   "${S[@]}" list ;;
+  csv)    "${S[@]}" --csvout list --columns number,date,description ;;
+  create) d="${2:-}"
+          [ -n "$d" ] && [ "${#d}" -le 120 ] || { echo "Mô tả 1-120 ký tự" >&2; exit 2; }
+          "${S[@]}" create -t single -c number -d "$d" --print-number ;;
+  status) [[ "${2:-}" =~ ^[0-9]+$ ]] || { echo "Cần số snapshot" >&2; exit 2; }
+          "${S[@]}" status "$2..0" ;;
+  *)      echo "Dùng: axle-snap list | csv | create <mô tả> | status <số>" >&2; exit 2 ;;
+esac

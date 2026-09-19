@@ -1,0 +1,549 @@
+#!/usr/bin/env node
+// Duyệt qua Telegram: agent xin làm việc có thể phá → Bi bấm ✅/❌ trên Telegram → mới chạy.
+// Chạy bằng root (systemd), nghe Unix socket nhóm axle-agent. Gọi Telegram QUA VAULT với {{secret.…}}
+// nên chính dịch vụ này cũng không cầm token bot.
+//
+// An toàn:
+// - chỉ nút bấm từ đúng tài khoản chủ (owner) mới có tác dụng
+// - mỗi yêu cầu một mã ngẫu nhiên riêng (nonce) trong nút bấm, hết hạn sau expireSec
+// - duyệt việc nào chạy ĐÚNG việc đó: nội dung chốt lúc xin, không nhận sửa sau
+import { createServer, request as httpRequest } from 'node:http';
+import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
+import { appendFileSync, chownSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, chmodSync } from 'node:fs';
+import path from 'node:path';
+import { hostname } from 'node:os';
+import { addRule, addSession, autoLabel, canRemember, canSession, describeRule, findAuto, keyboard, loadRules, prune,
+  saveRules, tierLine, tierOf, writeDurable } from './rules.js';
+import { buildDigest } from './digest.js';
+import { createAppChannel } from './app-channel.js';
+import { requestHash } from '../app/proto.js';
+
+const CFG_FILE = process.env.AXLE_APPROVE_CONFIG || '/etc/axle/approve.json';
+const SOCKET = process.env.AXLE_APPROVE_SOCKET || '/run/axle-approve/approve.sock';
+const VAULT = process.env.AXLE_VAULT_SOCKET || '/run/axle-vault/vault.sock';
+const LOG = process.env.AXLE_APPROVE_LOG || '/var/log/axle-approve/approvals.jsonl';
+const UNIT = /^[A-Za-z0-9@._:-]{1,128}$/;
+const AGENT_DIR = process.env.AXLE_APPROVE_AGENT_DIR || '/run/axle-approve-agents';
+const CLIENTS = process.env.AXLE_MCP_CLIENTS || '/etc/axle/mcp-clients.json';
+const STATE = process.env.AXLE_AGENTS_STATE || '/etc/axle/agents-state.json';
+const suspendedList = () => { try { return JSON.parse(readFileSync(STATE, 'utf8')).suspended ?? []; } catch { return []; } };
+// Tên agent của một yêu cầu: agent phụ theo socket; trợ lý chính theo nhãn ssh:<tên> (khoá SSH ép, không tự khai được)
+const agentOf = (r) => r.who?.agent || /^ssh:([a-z][a-z0-9-]{1,20})$/.exec(r.client || '')?.[1] || null;
+
+const ownerUser = () => { try { return readFileSync('/etc/axle/owner', 'utf8').trim() || 'admin_1'; } catch { return 'admin_1'; } };
+const cfg = () => ({ api: 'https://api.telegram.org', tokenSecret: 'AXLE_TG_TOKEN', expireSec: 600, user: ownerUser(),
+  ...(existsSync(CFG_FILE) ? JSON.parse(readFileSync(CFG_FILE, 'utf8')) : {}) });
+const log = (e) => { try { appendFileSync(LOG, JSON.stringify({ ts: new Date().toISOString(), ...e }) + '\n'); } catch { /* bỏ qua */ } };
+const cap = (s, n) => (s.length > n ? `${s.slice(0, n)}\n… (cắt ${s.length - n} ký tự)` : s);
+
+// ---------- việc được phép xin ----------
+function runProc(cmd, args, opts) {
+  return new Promise((resolve) => {
+    const p = spawn(cmd, args, { ...opts, stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '';
+    const add = (d) => { if (out.length < 65536) out += d; };
+    p.stdout.on('data', add); p.stderr.on('data', add);
+    const timer = setTimeout(() => { p.kill('SIGKILL'); out += '\n[quá 120 giây, đã dừng]'; }, 120_000);
+    p.on('close', (code) => { clearTimeout(timer); resolve({ exitCode: code, output: out }); });
+    p.on('error', (e) => { clearTimeout(timer); resolve({ exitCode: -1, output: e.message }); });
+  });
+}
+
+const SNAPPER = ['/usr/bin/snapper', '-c', 'root'];
+// Trong home agent, những chỗ không bao giờ cho xoá (khoá, cấu hình, công cụ, nhật ký, thùng rác).
+const PROTECTED = ['.ssh', '.gnupg', '.aws', '.docker', '.kube', '.config', '.pm2', '.claude', '.nvm',
+  'brain/vault', '.local/state/axle', '.local/share/axle-trash'];
+// Người xin: chủ máy (socket chính) hoặc agent riêng (socket riêng của agent, nhóm ag-<tên>).
+const ownerWho = () => ({ agent: null, user: cfg().user, home: `/home/${cfg().user}` });
+const agentWho = (name) => ({ agent: name, user: `ag-${name}`, home: `/home/ag-${name}` });
+const whoLabel = (w) => (w.agent ? `user ${w.user}, hộp cát` : `user ${w.user}`);
+// Thư mục được cấp cho agent phụ (còn hạn): /etc/axle/grants/<tên>.json
+const GRANTS_DIR = process.env.AXLE_GRANTS_DIR || '/etc/axle/grants';
+function dirsOf(who) {
+  if (!who.agent) return [];
+  try {
+    const g = JSON.parse(readFileSync(path.join(GRANTS_DIR, `${who.agent}.json`), 'utf8'));
+    return (g.dirs ?? []).filter((d) => !d.until || Date.parse(d.until) > Date.now());
+  } catch { return []; }
+}
+const within = (p, root) => p === root || p.startsWith(`${root}/`);
+
+const ACTIONS = {
+  run_command: {
+    validate(p, who) {
+      if (typeof p.command !== 'string' || !p.command.trim() || p.command.length > 4000) throw new Error('Lệnh 1-4000 ký tự');
+      if (p.cwd != null && (typeof p.cwd !== 'string' || !p.cwd.startsWith('/'))) throw new Error('cwd phải là đường dẫn tuyệt đối');
+      const cwd = path.resolve(p.cwd || `${who.home}/work`);
+      if (who.agent && !p.asRoot && !within(cwd, who.home) && !dirsOf(who).some((d) => within(cwd, d.path))) {
+        throw new Error(`Agent chỉ chạy lệnh trong ${who.home} hoặc thư mục được cấp`);
+      }
+      return { command: p.command, cwd, asRoot: p.asRoot === true };
+    },
+    describe: (p, who) => `chạy lệnh${p.asRoot ? ' ⚠️ BẰNG QUYỀN ROOT' : ` bằng ${whoLabel(who)}`}\nThư mục: ${p.cwd}\nLệnh:\n${p.command}`,
+    exec(p, who) {
+      if (!existsSync(p.cwd) || !statSync(p.cwd).isDirectory()) return { exitCode: -1, output: `Không có thư mục ${p.cwd}` };
+      if (p.asRoot) return runProc('bash', ['-lc', p.command], { cwd: p.cwd });
+      if (!who.agent) return runProc('runuser', ['-u', who.user, '--', 'bash', '-lc', p.command], { cwd: p.cwd });
+      // Agent riêng: chạy trong hộp cát giống máy chủ MCP của nó — chỉ thấy home mình, hệ thống chỉ-đọc, không leo quyền
+      return runProc('systemd-run', ['--quiet', '--wait', '--pipe', '--collect', `--uid=${who.user}`, `--gid=${who.user}`,
+        `--working-directory=${p.cwd}`, '-p', 'ProtectHome=tmpfs', '-p', `BindPaths=${who.home}`, '-p', 'ProtectSystem=strict',
+        '-p', `ReadWritePaths=${who.home}`, '-p', 'PrivateTmp=yes', '-p', 'NoNewPrivileges=yes', '-p', 'ProtectProc=invisible',
+        ...dirsOf(who).flatMap((d) => (d.mode === 'rw'
+          ? ['-p', `BindPaths=${d.path}`, '-p', `ReadWritePaths=${d.path}`] : ['-p', `BindReadOnlyPaths=${d.path}`])),
+        '-p', 'RuntimeMaxSec=120', '--', 'bash', '-lc', p.command], {});
+    },
+  },
+  snapshot_undo: {
+    validate(p, who) {
+      if (who.agent) throw new Error('Undo snapshot là việc toàn hệ thống: chỉ chủ máy được xin');
+      if (!Number.isInteger(p.number) || p.number < 1) throw new Error('Cần số snapshot');
+      return { number: p.number };
+    },
+    // Chụp mốc NGAY LÚC XIN: duyệt thì chỉ đảo đúng các thay đổi N→mốc mà chủ đã thấy trong tin nhắn.
+    async preview(p) {
+      const mark = await runProc(SNAPPER[0], [...SNAPPER.slice(1), 'create', '-t', 'single', '-c', 'number',
+        '-d', `mốc xin undo về #${p.number}`, '--print-number'], {});
+      if (mark.exitCode) throw new Error(`Không chụp được mốc: ${mark.output.trim()}`);
+      p.mark = Number(mark.output.trim());
+      const st = await runProc(SNAPPER[0], [...SNAPPER.slice(1), 'status', `${p.number}..${p.mark}`], {});
+      if (st.exitCode) throw new Error(`Không có snapshot #${p.number}: ${st.output.trim().slice(0, 200)}`);
+      const rows = st.output.trim().split('\n').filter(Boolean);
+      if (!rows.length) throw new Error(`Không có gì thay đổi kể từ snapshot #${p.number}`);
+      return `\n${rows.length} thay đổi sẽ bị đảo lại:\n${rows.slice(0, 15).join('\n')}${rows.length > 15 ? `\n… và ${rows.length - 15} thay đổi nữa` : ''}`;
+    },
+    describe: (p) => `đưa file hệ thống về như snapshot #${p.number} (/home, nhật ký, Docker, vault không bị đụng)`,
+    async exec(p) {
+      const pre = await runProc(SNAPPER[0], [...SNAPPER.slice(1), 'create', '-t', 'single', '-c', 'number',
+        '-d', `trước khi undo về #${p.number}`, '--print-number'], {});
+      if (pre.exitCode) return pre;
+      const r = await runProc(SNAPPER[0], [...SNAPPER.slice(1), 'undochange', `${p.number}..${p.mark}`], {});
+      return { exitCode: r.exitCode, output: `${r.output.trim()}\nMuốn quay lại như trước khi undo: snapshot_undo ${pre.output.trim()}` };
+    },
+  },
+  file_delete: {
+    validate(p, who) {
+      if (typeof p.path !== 'string' || !p.path.startsWith('/')) throw new Error('Cần đường dẫn tuyệt đối');
+      const abs = path.resolve(p.path);
+      let parent;
+      try { parent = realpathSync(path.dirname(abs)); } catch { throw new Error(`Không tồn tại: ${p.path}`); }
+      const target = path.join(parent, path.basename(abs));   // thư mục cha đi theo symlink; bản thân mục thì không
+      const h = who.home;
+      const rwDirs = dirsOf(who).filter((d) => d.mode === 'rw').map((d) => d.path);
+      if (!target.startsWith(`${h}/`) && !rwDirs.some((r) => target.startsWith(`${r}/`))) {
+        throw new Error(`Chỉ xoá trong ${h}${rwDirs.length ? ' hoặc thư mục được ghi' : ''}`);
+      }
+      if (target === `${h}/work` || PROTECTED.some((d) => target === `${h}/${d}` || target.startsWith(`${h}/${d}/`)
+        || `${h}/${d}`.startsWith(`${target}/`))) throw new Error('Vùng được bảo vệ, không xoá');
+      try { lstatSync(target); } catch { throw new Error(`Không tồn tại: ${p.path}`); }
+      return { path: target };
+    },
+    async preview(p) {
+      const st = lstatSync(p.path);
+      p.isDir = st.isDirectory() && !st.isSymbolicLink();
+      if (st.isSymbolicLink()) return '\nLoại: symlink (chỉ xoá cái link)';
+      if (!st.isDirectory()) return `\nLoại: file, ${st.size} byte`;
+      const n = await runProc('find', [p.path, '-mindepth', '1'], {});
+      return `\nLoại: thư mục, ${n.output.split('\n').filter(Boolean).length} mục bên trong`;
+    },
+    describe: (p) => `xoá (chuyển vào thùng rác) ${p.path}`,
+    exec(p, who) {
+      const dst = `${who.home}/.local/share/axle-trash/${new Date().toISOString().replace(/[:.]/g, '-')}${p.path}`;
+      // Chạy bằng user của người xin: không bao giờ động được vào thứ họ vốn không có quyền.
+      return runProc('runuser', ['-u', who.user, '--', 'bash', '-c',
+        'mkdir -p -- "$(dirname -- "$2")" && mv -- "$1" "$2" && echo "Đã chuyển vào thùng rác: $2"', '_', p.path, dst], {});
+    },
+  },
+  service_restart: {
+    validate(p, _who) {
+      if (typeof p.unit !== 'string' || !UNIT.test(p.unit)) throw new Error('Tên dịch vụ không hợp lệ');
+      return { unit: p.unit };
+    },
+    describe: (p) => `khởi động lại dịch vụ ${p.unit}`,
+    async exec(p) {
+      const r = await runProc('systemctl', ['restart', p.unit], {});
+      const s = await runProc('systemctl', ['is-active', p.unit], {});
+      return { exitCode: r.exitCode, output: `${r.output}trạng thái sau khi khởi động lại: ${s.output.trim()}` };
+    },
+  },
+};
+
+// ---------- Telegram qua vault ----------
+function vaultRequest(payload) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(payload);
+    const req = httpRequest({ socketPath: VAULT, path: '/request', method: 'POST',
+      headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(data) } }, (res) => {
+      let body = '';
+      res.on('data', (c) => { body += c; });
+      res.on('end', () => {
+        try {
+          const j = JSON.parse(body);
+          return res.statusCode === 200 ? resolve(j) : reject(new Error(j.error || `vault ${res.statusCode}`));
+        } catch { return reject(new Error('vault trả lời lạ')); }
+      });
+    });
+    req.on('error', (e) => reject(new Error(`không nối được vault: ${e.code || e.message}`)));
+    req.end(data);
+  });
+}
+
+async function tg(method, body) {
+  const c = cfg();
+  const r = await vaultRequest({ method: 'POST', url: `${c.api}/bot{{secret.${c.tokenSecret}}}/${method}`,
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const j = JSON.parse(r.body || '{}');
+  if (!j.ok) throw new Error(`Telegram ${method}: ${j.description || r.status}`);
+  return j.result;
+}
+
+// ---------- yêu cầu đang chờ ----------
+const requests = new Map();   // id → { id, nonce, action, params, client, created, state, result, messageId, text }
+const waiters = new Map();    // id → [resolve…]
+const FINAL = new Set(['done', 'failed', 'rejected', 'expired']);
+
+function setState(r, state, result) {
+  r.state = state;
+  if (result !== undefined) r.result = result;
+  log({ id: r.id, state, action: r.action, client: r.client, ...(result ? { exitCode: result.exitCode } : {}) });
+  if (r.toApp && state !== 'pending') app.broadcast({ type: 'update', id: r.id, state }).catch(() => {});
+  for (const w of waiters.get(r.id) ?? []) w();
+  waiters.delete(r.id);
+}
+
+async function finishMessage(r, line) {
+  if (!r.messageId) return;          // yêu cầu không gửi qua Telegram (chỉ app / tại máy)
+  try { await tg('editMessageText', { chat_id: cfg().owner, message_id: r.messageId, text: cap(`${r.text}\n\n${line}`, 4000) }); }
+  catch (e) { log({ id: r.id, warn: `sửa tin nhắn: ${e.message}` }); }
+}
+
+async function decide(r, approve, note = '') {
+  if (!approve) { setState(r, 'rejected'); return finishMessage(r, '❌ Đã từ chối'); }
+  setState(r, 'running');
+  await finishMessage(r, `✅ Đã duyệt${note} · đang chạy…`);
+  let res;
+  try { res = await ACTIONS[r.action].exec(r.params, r.who); } catch (e) { res = { exitCode: -1, output: e.message }; }
+  setState(r, res.exitCode === 0 ? 'done' : 'failed', res);
+  await finishMessage(r, `✅ Đã duyệt${note} → ${res.exitCode === 0 ? 'xong' : `lỗi (mã ${res.exitCode})`}\n${cap(res.output.trim(), 1500)}`);
+}
+
+// Tự duyệt theo luật/phiên: chạy luôn, không gửi tin (gom vào tin tóm tắt)
+async function runAuto(r) {
+  setState(r, 'running');
+  let res;
+  try { res = await ACTIONS[r.action].exec(r.params, r.who); } catch (e) { res = { exitCode: -1, output: e.message }; }
+  setState(r, res.exitCode === 0 ? 'done' : 'failed', res);
+}
+
+async function createRequest({ action, params, client }, who) {
+  const c = cfg();
+  if (!c.owner && !app.enabled()) {
+    throw new Error('Máy chưa có kênh duyệt nào: ghép app (sudo axle app pair) hoặc Telegram (sudo axle approve setup --owner <id>)');
+  }
+  const A = ACTIONS[action];
+  if (!A) throw new Error(`Không có việc ${action}`);
+  const clean = A.validate(params ?? {}, who);
+  const extra = A.preview ? await A.preview(clean, who) : '';
+  const id = randomBytes(4).toString('hex');
+  // Agent riêng: tên lấy theo SOCKET nó dùng, không tin tên tự khai
+  const label = who.agent ? `http:${who.agent} (user ${who.user})` : String(client || '?').slice(0, 64);
+  const name = who.agent || /^ssh:([a-z][a-z0-9-]{1,20})$/.exec(label)?.[1];
+  if (name && suspendedList().includes(name)) throw new Error(`Agent ${name} đang bị tạm dừng`);
+  const r = { id, nonce: randomBytes(8).toString('hex'), action, params: clean, client: label, who,
+    created: Date.now(), state: 'pending' };
+  const auto = findAuto(r, loadRules());
+  if (auto) {
+    r.auto = auto;
+    requests.set(id, r);
+    log({ id, state: 'auto', action, client: r.client, params: clean, by: autoLabel(auto) });
+    runAuto(r);
+    return r;
+  }
+  r.text = `🔐 ${hostname()} · cần duyệt #${id}\nAgent: ${r.client}\nViệc: ${A.describe(clean, who)}${extra}\n${tierLine(r)}\nHết hạn sau ${c.expireSec < 120 ? `${c.expireSec} giây` : `${Math.round(c.expireSec / 60)} phút`}`;
+  r.hash = requestHash(r);
+  if (c.owner) {
+    const msg = await tg('sendMessage', { chat_id: c.owner, text: cap(r.text, 4000), reply_markup: { inline_keyboard: keyboard(r) } });
+    r.messageId = msg.message_id;
+  }
+  if (app.enabled()) {
+    r.toApp = true;
+    app.broadcast({ type: 'request', id: r.id, hash: r.hash, tier: tierOf(r), agent: r.client, action: r.action, params: r.params, text: r.text,
+      buttons: keyboard(r).flat().map((b) => b.callback_data.slice(-1)).join(''), expires: r.created + c.expireSec * 1000 }).catch(() => {});
+  }
+  requests.set(id, r);
+  log({ id, state: 'pending', action, client: r.client, params: clean });
+  return r;
+}
+
+// Áp một quyết định (Telegram / app / tại máy). d: a lần này · h 1 giờ · l luôn · r từ chối. Bậc 3 bỏ qua h/l.
+function applyDecision(r, d, via) {
+  if (d === 'r') { decide(r, false); return 'Đã từ chối'; }
+  let note = via;
+  if (d === 'h' && canSession(r)) {
+    const R = loadRules(); const sid = addSession(R, r); saveRules(R);
+    note += ` · 1 giờ (phiên #${sid})`;
+  } else if (d === 'l' && canRemember(r)) {
+    const R = loadRules(); const rid = addRule(R, r); saveRules(R);
+    note += ` · luôn việc này (luật #${rid})`;
+  }
+  decide(r, true, note);
+  return `Đã duyệt${note}`;
+}
+
+// ---------- kênh app (docs/APP-DUYET.md) ----------
+const app = createAppChannel({
+  log, hostname: hostname(),
+  onDecision(d, msg) {
+    const r = requests.get(msg.id);
+    if (!r || !r.toApp) return log({ warn: `app: ${d.name} quyết định yêu cầu không có #${msg.id}` });
+    if (r.state !== 'pending') return app.sendTo(d.id, { type: 'update', id: r.id, state: r.state });
+    const bad = app.verifyDecision(d, msg, r);
+    if (bad) return log({ id: r.id, warn: `app: bỏ quyết định từ ${d.name}: ${bad}` });
+    if (Date.now() - r.created > cfg().expireSec * 1000) { setState(r, 'expired'); return finishMessage(r, '⌛ Hết hạn, không chạy'); }
+    log({ id: r.id, app: `quyết định ${msg.decision} từ ${d.name}` });
+    applyDecision(r, msg.decision, ` · qua app ${d.name}`);
+  },
+  async onCommand(d, msg) {
+    const out = await runAxle(['agent', msg.type === 'stop' ? 'stop' : 'start', msg.agent]);
+    log({ app: `${msg.type} ${msg.agent} từ ${d.name}`, exitCode: out.exitCode });
+    app.sendTo(d.id, { type: 'command-result', cmd: msg.type, agent: msg.agent, ok: out.exitCode === 0, text: out.output.trim() });
+    app.broadcast({ type: 'agents', list: agentList() }).catch(() => {});
+  },
+  onHello(d) { app.sendTo(d.id, { type: 'agents', list: agentList() }); },
+});
+app.start();
+
+// Danh sách agent cho app (màn Agent / dừng khẩn cấp): tên, vai, đang tạm dừng không. Không gửi token/băm token.
+function agentList() {
+  let clients = {};
+  try { clients = JSON.parse(readFileSync(CLIENTS, 'utf8')); } catch { /* chưa có agent */ }
+  const sus = suspendedList();
+  return Object.entries(clients).map(([name, c]) => ({ name, role: c.role === 'chinh' ? 'chinh' : 'phu', user: c.user || null,
+    suspended: sus.includes(name) }));
+}
+
+// Lệnh của chủ qua Telegram: /agents, /dung <tên>, /mo <tên>. Chỉ tài khoản chủ, chỉ chat riêng.
+const runAxle = (args) => runProc('/usr/local/bin/axle', args, {});
+async function handleMessage(msg) {
+  const c = cfg();
+  if (Number(msg.from?.id) !== Number(c.owner) || msg.chat?.type !== 'private') {
+    log({ warn: `tin nhắn từ người lạ ${msg.from?.id}, bỏ qua` });
+    return;
+  }
+  const [cmd, arg] = String(msg.text || '').trim().split(/\s+/);
+  const reply = (text) => tg('sendMessage', { chat_id: c.owner, text: cap(text || '(trống)', 4000) }).catch(() => {});
+  if (cmd === '/agents') return reply((await runAxle(['agents'])).output.trim());
+  if (cmd === '/dung' || cmd === '/mo') {
+    if (!/^[a-z][a-z0-9-]{1,20}$/.test(arg || '')) return reply(`Cú pháp: ${cmd} <tên agent>`);
+    const r = await runAxle(['agent', cmd === '/dung' ? 'stop' : 'start', arg]);
+    log({ cmd, agent: arg, exitCode: r.exitCode });
+    return reply(r.output.trim());
+  }
+  if (cmd === '/luat') {
+    const R = loadRules();
+    const rows = [...R.rules.map((x) => describeRule(x, false)), ...R.sessions.map((x) => describeRule(x, true))];
+    return reply(rows.length ? `Đang nhớ:\n${rows.join('\n')}\n\nXoá: /quen <số> · /quen tat` : 'Chưa nhớ luật hay phiên nào');
+  }
+  if (cmd === '/quen') {
+    const R = loadRules();
+    if (arg === 'tat') { R.rules = []; R.sessions = []; saveRules(R); log({ cmd, all: true }); return reply('Đã quên mọi luật + phiên. Từ giờ việc nào cũng hỏi lại.'); }
+    const id = Number(arg);
+    const had = R.rules.length + R.sessions.length;
+    R.rules = R.rules.filter((x) => x.id !== id); R.sessions = R.sessions.filter((x) => x.id !== id);
+    if (R.rules.length + R.sessions.length === had) return reply(`Không có luật/phiên #${arg ?? ''}`);
+    saveRules(R); log({ cmd, id });
+    return reply(`Đã quên #${id}. Việc đó sẽ phải hỏi lại.`);
+  }
+  if (cmd === '/tomtat') return reply(digestText(Date.now() - 24 * 3600 * 1000));
+  return reply('Lệnh: /agents · /dung <tên> · /mo <tên> · /luat · /quen <số|tat> · /tomtat');
+}
+
+// Nhận nút bấm. Chỉ chủ; đúng mã; còn hạn; chưa quyết.
+async function pollTelegram() {
+  let offset = 0;
+  for (;;) {
+    try {
+      if (!cfg().owner) { await new Promise((s) => setTimeout(s, 5000)); continue; }
+      const updates = await tg('getUpdates', { offset, timeout: 20, allowed_updates: ['callback_query', 'message'] });
+      for (const u of updates) {
+        offset = u.update_id + 1;
+        if (u.message) { await handleMessage(u.message); continue; }
+        const q = u.callback_query;
+        if (!q) continue;
+        const [id, nonce, d] = String(q.data || '').split(':');
+        const r = requests.get(id);
+        const fromOwner = Number(q.from?.id) === Number(cfg().owner);
+        let answer = 'Không hợp lệ';
+        if (!fromOwner) log({ id, warn: `nút bấm từ người lạ ${q.from?.id}, bỏ qua` });
+        else if (!r || r.nonce !== nonce) answer = 'Yêu cầu không tồn tại';
+        else if (r.state !== 'pending') answer = `Đã xử lý (${r.state})`;
+        else if (Date.now() - r.created > cfg().expireSec * 1000) { answer = 'Đã hết hạn'; setState(r, 'expired'); finishMessage(r, '⌛ Hết hạn, không chạy'); }
+        else answer = applyDecision(r, d, '');
+        tg('answerCallbackQuery', { callback_query_id: q.id, text: answer }).catch(() => {});
+      }
+    } catch (e) {
+      log({ warn: `getUpdates: ${e.message}` });
+      await new Promise((s) => setTimeout(s, 3000));
+    }
+  }
+}
+
+setInterval(() => {
+  const now = Date.now();
+  for (const r of requests.values()) {
+    if (r.state === 'pending' && now - r.created > cfg().expireSec * 1000) { setState(r, 'expired'); finishMessage(r, '⌛ Hết hạn, không chạy'); }
+    if (FINAL.has(r.state) && now - r.created > 24 * 3600 * 1000) requests.delete(r.id);
+  }
+}, 2000);
+
+// ---------- socket cho agent ----------
+const view = (r) => ({ id: r.id, state: r.state, action: r.action, ...(r.auto ? { auto: autoLabel(r.auto) } : {}),
+  ...(r.result ? { exitCode: r.result.exitCode, output: r.result.output } : {}) });
+
+function makeServer(who) {
+  return createServer(async (req, res) => {
+    const send = (code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
+    try {
+      const url = new URL(req.url, 'http://x');
+      if (req.method === 'POST' && url.pathname === '/request') {
+        let body = '';
+        for await (const c of req) { body += c; if (body.length > 65536) return send(413, { error: 'quá lớn' }); }
+        return send(200, view(await createRequest(JSON.parse(body || '{}'), who ?? ownerWho())));
+      }
+      const m = /^\/status\/([0-9a-f]{8})$/.exec(url.pathname);
+      if (req.method === 'GET' && m) {
+        const r = requests.get(m[1]);
+        // agent chỉ xem được yêu cầu của chính nó
+        if (!r || (who?.agent && r.who.agent !== who.agent)) return send(404, { error: 'Không có yêu cầu này' });
+        const wait = Math.min(Number(url.searchParams.get('wait') || 0), 110) * 1000;
+        if (wait && !FINAL.has(r.state)) {
+          await new Promise((resolve) => {
+            const t = setTimeout(resolve, wait);
+            const done = () => { clearTimeout(t); resolve(); };
+            waiters.set(r.id, [...(waiters.get(r.id) ?? []), done]);
+          });
+          // 'running' là trạng thái giữa: chờ thêm tới khi xong (lệnh tối đa 120 giây)
+          if (r.state === 'running') {
+            await new Promise((resolve) => {
+              const t = setTimeout(resolve, 125_000);
+              waiters.set(r.id, [...(waiters.get(r.id) ?? []), () => { clearTimeout(t); resolve(); }]);
+            });
+          }
+        }
+        return send(200, view(r));
+      }
+      send(404, { error: 'Không có đường này' });
+    } catch (e) {
+      send(400, { error: e.message });
+    }
+  });
+}
+
+if (existsSync(SOCKET)) unlinkSync(SOCKET);
+makeServer(null).listen(SOCKET, () => { chmodSync(SOCKET, 0o660); console.log(`axle-approve nghe ở ${SOCKET}`); });
+
+// Socket quản trị: root 0600 — ghép cặp app, gỡ điện thoại, duyệt tại máy (`sudo axle duyet`, mức tin cậy T3).
+// Agent (kể cả trợ lý chính chạy bằng quyền chủ) KHÔNG chạm được: không có đường tự duyệt.
+const ADMIN_SOCKET = process.env.AXLE_APPROVE_ADMIN_SOCKET || '/run/axle-approve/admin.sock';
+const adminServer = createServer(async (req, res) => {
+  const send = (code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
+  try {
+    const url = new URL(req.url, 'http://x');
+    let raw = '';
+    for await (const c of req) raw += c;
+    const body = raw ? JSON.parse(raw) : {};
+    switch (`${req.method} ${url.pathname}`) {
+      case 'POST /pair/start': return send(200, await app.startPair());
+      case 'GET /pair/wait': {
+        const x = await app.waitPair(Math.min(Number(url.searchParams.get('timeout') || 120), 600) * 1000);
+        return x ? send(200, x) : send(408, { error: 'Chưa thấy điện thoại nào quét mã' });
+      }
+      case 'POST /pair/confirm': return send(200, { device: await app.confirmPair(body.pendingId, body.ok === true) });
+      case 'GET /devices': return send(200, app.devices());
+      case 'POST /devices/remove': return send(200, await app.removeDevice(body.id));
+      case 'GET /pending':
+        return send(200, [...requests.values()].filter((r) => r.state === 'pending').map((r) => ({
+          id: r.id, tier: tierOf(r), client: r.client, text: r.text, buttons: keyboard(r).flat().map((b) => b.callback_data.slice(-1)).join(''),
+          ageSec: Math.round((Date.now() - r.created) / 1000) })));
+      case 'POST /decide': {
+        const r = requests.get(body.id);
+        if (!r || r.state !== 'pending') return send(404, { error: 'Không có yêu cầu đang chờ này' });
+        if (!['a', 'h', 'l', 'r'].includes(body.decision)) return send(400, { error: 'a | h | l | r' });
+        log({ id: r.id, console: `quyết định ${body.decision} tại máy` });
+        return send(200, { result: applyDecision(r, body.decision, ' · tại máy') });
+      }
+      default: return send(404, { error: 'Không có đường này' });
+    }
+  } catch (e) { send(400, { error: e.message }); }
+});
+if (existsSync(ADMIN_SOCKET)) unlinkSync(ADMIN_SOCKET);
+adminServer.listen(ADMIN_SOCKET, () => { chmodSync(ADMIN_SOCKET, 0o600); });
+
+// Socket riêng từng agent: root:ag-<tên> 0660 → chỉ agent đó nối được, danh tính = socket. Đồng bộ theo sổ agent.
+const agentServers = new Map();
+function syncAgentSockets() {
+  let names = [];
+  try { names = Object.entries(JSON.parse(readFileSync(CLIENTS, 'utf8'))).filter(([, c]) => c.user).map(([n]) => n); } catch { /* chưa có sổ */ }
+  mkdirSync(AGENT_DIR, { recursive: true, mode: 0o755 });
+  for (const n of names) {
+    if (agentServers.has(n) || !/^[a-z][a-z0-9-]{1,20}$/.test(n)) continue;
+    const gid = groupId(`ag-${n}`);
+    if (gid == null) continue;
+    const sock = path.join(AGENT_DIR, `${n}.sock`);
+    if (existsSync(sock)) unlinkSync(sock);
+    const srv = makeServer(agentWho(n));
+    srv.listen(sock, () => { chownSync(sock, 0, gid); chmodSync(sock, 0o660); });
+    agentServers.set(n, { srv, sock });
+  }
+  for (const [n, { srv, sock }] of agentServers) {
+    if (names.includes(n)) continue;
+    srv.close(); try { unlinkSync(sock); } catch { /* đã xoá */ } agentServers.delete(n);
+  }
+}
+function groupId(name) {
+  const line = readFileSync('/etc/group', 'utf8').split('\n').find((l) => l.startsWith(`${name}:`));
+  return line ? Number(line.split(':')[2]) : null;
+}
+function cancelSuspended() {
+  const sus = suspendedList();
+  for (const r of requests.values()) {
+    if (r.state === 'pending' && sus.includes(agentOf(r))) { setState(r, 'rejected'); finishMessage(r, '⛔ Agent đã bị dừng khẩn cấp, huỷ'); }
+  }
+}
+syncAgentSockets();
+// Luật/phiên còn sống: agent phụ còn trong sổ; trợ lý chính (ssh:<tên>) còn trong sổ; chủ máy thì giữ
+function pruneRules() {
+  let names = [];
+  try { names = Object.keys(JSON.parse(readFileSync(CLIENTS, 'utf8'))); } catch { return; }
+  const isLive = (k) => {
+    const m = /^(?:phu:|chu:ssh:)([a-z][a-z0-9-]{1,20})$/.exec(k);
+    return m ? names.includes(m[1]) : true;
+  };
+  const R = loadRules();
+  if (prune(R, isLive)) saveRules(R);
+}
+
+const STATE_FILE = process.env.AXLE_APPROVE_STATE || '/var/lib/axle-approve/state.json';
+function digestText(sinceMs) {
+  return buildDigest({ sinceMs, owner: cfg().user, host: hostname(), approvalsLog: LOG,
+    vaultLog: '/var/log/axle-vault/access.log', rules: loadRules() });
+}
+async function maybeDigest() {
+  const c = cfg();
+  const hour = c.digestHour ?? 21;
+  if (hour == null || hour === false || !c.owner) return;
+  const now = new Date();
+  const today = now.toLocaleDateString('sv-SE');
+  let st = {};
+  try { st = JSON.parse(readFileSync(STATE_FILE, 'utf8')); } catch { /* chưa có */ }
+  if (now.getHours() !== hour || st.lastDigest === today) return;
+  const since = st.lastDigestAt ? Date.parse(st.lastDigestAt) : Date.now() - 24 * 3600 * 1000;
+  await tg('sendMessage', { chat_id: c.owner, text: cap(digestText(since), 4000) }).catch((e) => log({ warn: `tóm tắt: ${e.message}` }));
+  writeDurable(STATE_FILE, JSON.stringify({ lastDigest: today, lastDigestAt: now.toISOString() }));
+}
+
+setInterval(() => { syncAgentSockets(); cancelSuspended(); pruneRules(); }, 3000);
+setInterval(() => { maybeDigest().catch(() => {}); }, 60_000);
+// Rút quyền hết hạn (thư mục: gỡ ACL + tháo khỏi hộp cát; mạng: bỏ khỏi danh sách)
+setInterval(() => { runAxle(['agent', 'expire']).then((r) => { if (r.output.trim()) log({ expire: r.output.trim() }); }); }, 60_000);
+pollTelegram();

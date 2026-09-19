@@ -1,0 +1,687 @@
+#!/usr/bin/env bash
+# axle — lệnh điều khiển máy Axle.
+set -euo pipefail
+
+SNAP=(sudo snapper -c root)          # cần mật khẩu: chỉ dùng cho undo
+QSNAP=(sudo -n /usr/local/lib/axle/axle-snap)   # cửa hẹp, không cần mật khẩu
+AUDIT="${AXLE_AUDIT:-$HOME/.local/state/axle/audit.jsonl}"
+
+usage() {
+  cat <<'EOF'
+axle status              tình trạng máy: hệ điều hành, ổ, RAM, snapshot, mạng, dịch vụ
+axle snapshot "mô tả"    chụp snapshot hệ thống ngay
+axle snapshots           liệt kê 20 snapshot gần nhất
+axle diff <số>           file hệ thống nào đã đổi kể từ snapshot <số>
+axle undo <số> [--yes]   đưa file hệ thống về như lúc snapshot <số>
+                         (/home, /var/log, Docker, vault, Tailscale không bị đụng; tự chụp snapshot trước khi undo)
+axle net up              vào mạng riêng (Tailscale), in link đăng nhập
+axle mcp                 chạy cổng MCP (stdio) cho agent; từ máy khác:
+                           claude mcp add axle -- ssh admin_1@<máy> axle mcp
+axle agents              các agent (user riêng ag-<tên>, token HTTP) + công cụ được cấp + đang chạy?
+sudo axle agent add TEN --vai chinh [--key "ssh-ed25519 AAAA…"]
+                         trợ lý chính: quyền của chủ (trừ vùng bí mật), khoá SSH chỉ mở cổng MCP
+sudo axle agent add TEN [--vai phu] --preset status|files|full | --tools a,b,c
+                         agent phụ: user ag-TEN trong hộp cát + token (hiện MỘT lần)
+sudo axle agent grant TEN thu-muc <đường dẫn> --doc|--ghi [--han 30m|1h|7d|luon]
+sudo axle agent grant TEN mang <tên miền> [--han …]
+                         cấp thư mục / tên miền được gọi (agent phụ chỉ gọi ra được tên miền được cấp)
+sudo axle agent revoke TEN thu-muc <đường dẫn> | mang <tên miền>
+axle agent grants TEN    quyền đang cấp cho agent
+sudo axle agent stop|start TEN
+                         dừng khẩn cấp / mở lại (Telegram: /dung TEN, /mo TEN)
+sudo axle agent rm TEN [--purge]
+                         thu hồi token, tắt máy chủ của agent; --purge xoá luôn user + home
+sudo axle mcp serve on|off|status
+                         mở/tắt cổng HTTP ra mạng Tailscale (HTTPS, cổng 8443)
+axle audit [n]           n lần gọi công cụ gần nhất của agent (mặc định 20)
+axle cmdlog [--agent] [--since today|recent|yesterday|this-week|boot] [--limit N] [--tim chữ]
+                         mọi lệnh đã chạy (nhật ký nhân Linux, agent không xoá được);
+                         --agent: chỉ lệnh chạy không qua bàn phím
+axle vault               tên các khoá trong vault và nơi mỗi khoá được gửi tới (không hiện giá trị)
+sudo axle vault set TEN --host api.x.com[,.y.com] [--desc "mô tả"] [--agents a,b]
+                         thêm/đổi khoá; giá trị gõ ẩn hoặc đưa qua stdin, không bao giờ qua đối số
+sudo axle vault grant|revoke TEN AGENT
+                         cho/thôi cho một agent riêng dùng khoá (mặc định chỉ chủ máy dùng)
+sudo axle vault rm TEN   xoá khoá
+axle vault log [n]       n lần vault gọi hộ gần nhất (khoá nào, tới đâu, kết quả)
+sudo axle approve setup --owner <id Telegram> [--expire giây] [--api URL] [--tomtat <giờ 0-23>|tat]
+                         nối duyệt qua Telegram (token bot: sudo axle vault set AXLE_TG_TOKEN --host api.telegram.org)
+sudo axle approve test   gửi thử một tin Telegram
+axle approve log [n]     n lần xin duyệt gần nhất
+sudo axle approve rules  luật "luôn" + phiên "1 giờ" đang nhớ (Telegram: /luat)
+sudo axle approve forget <số>|tat
+                         quên một luật/phiên hoặc tất cả (Telegram: /quen)
+sudo axle app setup --relay <url>
+                         đặt trạm chuyển tiếp cho app Axle trên điện thoại
+sudo axle app pair       in mã QR để app quét; khớp mã đối chiếu 6 số rồi gõ yes
+sudo axle app devices | remove <id>
+                         điện thoại đã ghép / gỡ một điện thoại
+sudo axle duyet [<id> a|h|l|r]
+                         xem và duyệt yêu cầu ngay tại máy (dùng được cả khi mọi kênh khác hỏng)
+axle version             bản Axle đang chạy
+sudo axle update [--from <url>]   cập nhật lên bản phát hành mới (kiểm chữ ký, chụp hệ thống trước, không hạ cấp)
+EOF
+}
+
+status() {
+  local root_used ram snaps last ts
+  root_used="$(df -h / | awk 'NR==2{print $3" / "$2" ("$5")"}')"
+  ram="$(free -h | awk '/^Mem:/{print $3" / "$2}')"
+  snaps="$("${QSNAP[@]}" csv 2>/dev/null | tail -n +2 || true)"
+  last="$(tail -n1 <<<"$snaps" | cut -d, -f2- | sed 's/,/ · /')"
+  ts="$(tailscale ip -4 2>/dev/null | head -1 || true)"
+  row "Máy"        "$(hostname) · Axle $(cat /etc/axle/version 2>/dev/null || echo ?)"
+  row "Hệ"         "$(. /etc/os-release && echo "$PRETTY_NAME") · bật $(uptime -p | sed 's/^up //')"
+  row "Ổ gốc"      "$root_used · $(stat -f -c %T /)"
+  row "RAM"        "$ram"
+  row "Snapshot"   "$(grep -c . <<<"$snaps" || true) cái · mới nhất: ${last:-chưa có}"
+  row "Mạng riêng" "${ts:-chưa vào (axle net up)}"
+  row "Docker"     "$(docker ps -q 2>/dev/null | wc -l) container đang chạy"
+  row "PM2"        "$(bash -c '. ~/.nvm/nvm.sh 2>/dev/null; pm2 jlist 2>/dev/null' | jq 'length' 2>/dev/null || echo 0) tiến trình"
+  row "Lỗi"        "$(systemctl --failed --no-legend | wc -l) dịch vụ hỏng"
+}
+
+# căn cột theo số KÝ TỰ (printf %-Ns đếm byte nên lệch với chữ có dấu)
+row() { printf '%s%*s %s\n' "$1" $((12 - ${#1})) '' "$2"; }
+
+VAULT_FILE=/var/lib/axle-vault/secrets.json
+VAULT_SOCK=/run/axle-vault/vault.sock
+
+# Ghi file quan trọng kiểu nguyên tử + chịu mất điện: stdin → file tạm cùng thư mục → ép xuống đĩa →
+# giữ bản cũ ở .bak → thay → ép thư mục. Mất điện giữa chừng thì còn bản cũ hoặc bản mới, không bao giờ file rỗng.
+atomic_write() {   # $1 đích, $2 chủ:nhóm, $3 quyền
+  local dst="$1" tmp="$1.tmp.$$"
+  cat > "$tmp"
+  [ -s "$tmp" ] || { rm -f "$tmp"; echo "Từ chối ghi rỗng vào $dst" >&2; return 1; }
+  chown "$2" "$tmp"; chmod "$3" "$tmp"; sync "$tmp"
+  if [ -s "$dst" ]; then cp -p "$dst" "$dst.bak"; sync "$dst.bak"; fi
+  mv -f "$tmp" "$dst"; sync "$(dirname "$dst")"
+}
+
+# systemctl start trả về khi tiến trình vừa chạy, lúc vault CHƯA mở socket → chờ tới khi vault trả lời thật
+vault_wait() {
+  local i
+  for i in $(seq 1 50); do
+    curl -sf --unix-socket "$VAULT_SOCK" http://vault/secrets >/dev/null 2>&1 && return 0
+    sleep 0.1
+  done
+  echo "Vault không lên sau 5 giây: systemctl status axle-vault" >&2; return 1
+}
+
+vault_cmd() {
+  local sub="${1:-list}"; shift || true
+  case "$sub" in
+    list)
+      curl -sf --unix-socket "$VAULT_SOCK" http://vault/secrets \
+        | jq -r 'if length == 0 then "Vault trống" else .[] | "\(.name) → \(.hosts | join(", "))\(if .desc != "" then " · " + .desc else "" end)\(if (.agents // []) | length > 0 then " · agent: " + (.agents | join(",")) else "" end)" end' \
+        || { echo "Không nối được vault: systemctl status axle-vault" >&2; exit 1; } ;;
+    set)
+      [ "$(id -u)" = 0 ] || { echo "Cần sudo: sudo axle vault set $*" >&2; exit 1; }
+      local name="${1:-}" hosts="" desc="" value agents="-"
+      shift || true
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --host) hosts="${2:-}"; shift 2 ;;
+          --desc) desc="${2:-}"; shift 2 ;;
+          --agents) agents="${2:-}"; shift 2 ;;
+          *) echo "Không hiểu: $1" >&2; exit 2 ;;
+        esac
+      done
+      [[ "$name" =~ ^[A-Z][A-Z0-9_]{1,63}$ ]] || { echo "Tên khoá: CHỮ_HOA_SỐ, vd GITHUB_TOKEN" >&2; exit 2; }
+      local hosts_json
+      hosts_json="$(printf '%s' "$hosts" | jq -Rc 'split(",") | map(gsub("^\\s+|\\s+$"; "") | ascii_downcase) | map(select(length > 0))')"
+      [ "$(jq length <<<"$hosts_json")" -gt 0 ] || { echo "Cần --host: tên miền khoá được gửi tới" >&2; exit 2; }
+      jq -e 'all(test("^\\.?[a-z0-9-]+(\\.[a-z0-9-]+)*$"))' <<<"$hosts_json" >/dev/null \
+        || { echo "Tên miền không hợp lệ: $hosts" >&2; exit 2; }
+      if [ -t 0 ]; then read -rsp "Giá trị $name (gõ ẩn): " value; echo; else IFS= read -r value || true; fi
+      [ -n "$value" ] || { echo "Giá trị trống, không lưu" >&2; exit 2; }
+      [ -s "$VAULT_FILE" ] || echo '{}' | atomic_write "$VAULT_FILE" axle-vault:axle-vault 600
+      # printf là lệnh có sẵn của bash: giá trị không bao giờ hiện trong danh sách tiến trình
+      local agents_json=null
+      [ "$agents" = "-" ] || agents_json="$(printf '%s' "$agents" | jq -Rc 'split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')"
+      # --agents không đưa → giữ danh sách agent cũ của khoá (đổi giá trị không vô tình thu hồi quyền)
+      printf '%s' "$value" | jq --arg n "$name" --arg d "$desc" --argjson h "$hosts_json" --argjson a "$agents_json" --rawfile v /dev/stdin \
+        '.[$n] = {value: $v, hosts: $h, desc: $d, agents: ($a // .[$n].agents // []), updated: (now | todate)}' "$VAULT_FILE" \
+        | atomic_write "$VAULT_FILE" axle-vault:axle-vault 600
+      echo "Đã lưu $name → $(jq -r 'join(", ")' <<<"$hosts_json")" ;;
+    grant|revoke)
+      [ "$(id -u)" = 0 ] || { echo "Cần sudo" >&2; exit 1; }
+      local name="${1:-}" agent="${2:-}"
+      jq -e --arg n "$name" 'has($n)' "$VAULT_FILE" >/dev/null || { echo "Không có khoá $name" >&2; exit 1; }
+      [[ "$agent" =~ ^[a-z][a-z0-9-]{1,20}$ ]] || { echo "Cần tên agent" >&2; exit 2; }
+      if [ "$sub" = grant ]; then
+        jq -e --arg a "$agent" 'has($a)' "$MCP_CLIENTS" >/dev/null || { echo "Không có agent $agent (axle agents)" >&2; exit 1; }
+        jq --arg n "$name" --arg a "$agent" '.[$n].agents = ((.[$n].agents // []) + [$a] | unique)' "$VAULT_FILE" \
+          | atomic_write "$VAULT_FILE" axle-vault:axle-vault 600
+      else
+        jq --arg n "$name" --arg a "$agent" '.[$n].agents = ((.[$n].agents // []) - [$a])' "$VAULT_FILE" \
+          | atomic_write "$VAULT_FILE" axle-vault:axle-vault 600
+      fi
+      echo "$name · agent: $(jq -r --arg n "$name" '.[$n].agents | join(",")' "$VAULT_FILE")" ;;
+    rm)
+      [ "$(id -u)" = 0 ] || { echo "Cần sudo: sudo axle vault rm $*" >&2; exit 1; }
+      jq -e --arg n "${1:-}" 'has($n)' "$VAULT_FILE" >/dev/null || { echo "Không có khoá ${1:-}" >&2; exit 1; }
+      jq --arg n "$1" 'del(.[$n])' "$VAULT_FILE" | atomic_write "$VAULT_FILE" axle-vault:axle-vault 600
+      echo "Đã xoá $1" ;;
+    log)
+      tail -n "${1:-20}" /var/log/axle-vault/access.log 2>/dev/null \
+        | jq -r '"\(.ts | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601 | localtime | strftime("%d/%m %H:%M:%S")) \(if .refused then "✗ từ chối: " + .refused elif .error then "✗ \(.method) \(.host)\(.path) \(.used|join(",")): " + .error else "✓ \(.method) \(.host)\(.path) \(.used|join(",")) → \(.status) \(.ms)ms" end)"' ;;
+    *) usage; exit 2 ;;
+  esac
+}
+
+MCP_CLIENTS=/etc/axle/mcp-clients.json
+MCP_TOOLS=/etc/axle/mcp-tools.json
+
+mcp_cmd() {
+  case "${1:-stdio}" in
+    stdio|--as)
+      # --as <tên>: chỉ authorized_keys của trợ lý chính dùng (command="axle mcp --as <tên>"); tên đi theo khoá
+      [ "${1:-}" = --as ] && export AXLE_AS="${2:-}"
+      . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1 || true
+      exec node /opt/axle/mcp/server.js ;;
+    serve)
+      case "${2:-status}" in
+        on)     sudo tailscale serve --bg --https=8443 http://127.0.0.1:8765
+                echo "Mạng Tailscale gọi được: https://$(tailscale status --json | jq -r '.Self.DNSName | rtrimstr(".")'):8443/mcp" ;;
+        off)    sudo tailscale serve --https=8443 off ;;
+        status) tailscale serve status ;;
+        *)      usage; exit 2 ;;
+      esac ;;
+    client|clients) echo "Đã đổi: dùng axle agents / sudo axle agent add|rm" >&2; exit 2 ;;
+    *) usage; exit 2 ;;
+  esac
+}
+
+# Công cụ cấp được cho agent riêng. Snapshot, Docker, log: chỉ chủ máy (việc toàn hệ thống / quyền ngang root).
+AGENT_TOOLS='["system_status","service_status","file_list","file_read","file_search","file_write","vault_list","http_request","run_command","service_restart","file_delete","approval_status"]'
+
+save_clients() { atomic_write "$MCP_CLIENTS" root:axle-gw 0640; }   # cửa trước đọc được, agent thì không
+
+# Luật auditd cho từng user agent: máy chủ agent chạy từ systemd (không có auid) nên lọc theo uid.
+agent_audit_rules() {
+  local f=/etc/audit/rules.d/51-axle-agents.rules u uid
+  [ -d /etc/audit/rules.d ] || return 0   # auditd chưa cài (provision cài sau) → bước auditd sẽ nạp
+  echo "# Axle: mọi lệnh chạy bằng user của agent (sinh bởi axle agent, đừng sửa tay)" > "$f"
+  for u in $(jq -r '.[].user // empty' "$MCP_CLIENTS"); do
+    uid="$(id -u "$u" 2>/dev/null)" || continue
+    printf '%s\n' "-a always,exit -F arch=b64 -S execve,execveat -F uid=$uid -F key=axle-cmd" \
+                  "-a always,exit -F arch=b32 -S execve,execveat -F uid=$uid -F key=axle-cmd" >> "$f"
+  done
+  if systemctl cat audit-rules.service >/dev/null 2>&1; then systemctl restart audit-rules.service
+  else augenrules --load >/dev/null 2>&1 || true; fi
+}
+
+AGENTS_STATE=/etc/axle/agents-state.json
+OWNER_USER="$(cat /etc/axle/owner 2>/dev/null || echo admin_1)"
+OWNER_AK="/home/$OWNER_USER/.ssh/authorized_keys"
+
+# Sổ agent (root:axle-gw 0640) — người thường đọc thì tự xin sudo
+read_clients() { if [ -r "$MCP_CLIENTS" ]; then cat "$MCP_CLIENTS"; else sudo cat "$MCP_CLIENTS"; fi; }
+
+suspend_set() {   # $1 tên, $2 on|off — /etc/axle/agents-state.json (0644: cửa trước, cổng MCP, dịch vụ duyệt cùng đọc)
+  [ -s "$AGENTS_STATE" ] || echo '{"suspended":[]}' | atomic_write "$AGENTS_STATE" root:root 0644
+  if [ "$2" = on ]; then jq --arg n "$1" '.suspended = ((.suspended // []) + [$n] | unique)' "$AGENTS_STATE"
+  else jq --arg n "$1" '.suspended = ((.suspended // []) - [$n])' "$AGENTS_STATE"; fi | atomic_write "$AGENTS_STATE" root:root 0644
+}
+
+kill_assistant() {   # diệt mọi phiên MCP đang chạy của trợ lý chính $1 (tiến trình mang AXLE_AS=$1)
+  local f
+  for f in $(grep -lsz "^AXLE_AS=$1\$" /proc/[0-9]*/environ 2>/dev/null); do
+    f="${f#/proc/}"; kill "${f%%/*}" 2>/dev/null || true
+  done
+}
+
+ak_remove() { [ -f "$OWNER_AK" ] && sed -i "/ axle-agent:$1\$/d" "$OWNER_AK" || true; }
+ak_add() {   # $1 tên, $2 "kiểu base64" — khoá chỉ chạy được `axle mcp --as $1`, không shell, không chuyển cổng
+  ak_remove "$1"
+  install -d -o "$OWNER_USER" -g "$OWNER_USER" -m 0700 "/home/$OWNER_USER/.ssh"
+  printf 'command="/usr/local/bin/axle mcp --as %s",restrict %s axle-agent:%s\n' "$1" "$2" "$1" >> "$OWNER_AK"
+  chown "$OWNER_USER:$OWNER_USER" "$OWNER_AK"; chmod 0600 "$OWNER_AK"
+}
+
+agent_role() { read_clients | jq -r --arg n "$1" '.[$n].role // (if .[$n] then "phu" else "" end)'; }
+
+GRANTS_DIR=/etc/axle/grants
+# Trong home chủ: không bao giờ cấp các chỗ này — kể cả cấp thư mục CHA chứa chúng (cấp ~ là lộ ~/.ssh)
+PROTECTED_REL=".ssh .gnupg .aws .docker .kube .config .pm2 .claude .nvm brain/vault .local/state/axle .local/share/axle-trash"
+
+grants_read() { local f="$GRANTS_DIR/$1.json"; if [ -f "$f" ]; then cat "$f"; else echo '{"dirs":[],"net":[]}'; fi; }
+grants_write() {   # stdin → /etc/axle/grants/<tên>.json (root 0644: cổng MCP, vault, dịch vụ duyệt cùng đọc; chỉ root sửa)
+  install -d -m 0755 "$GRANTS_DIR"
+  atomic_write "$GRANTS_DIR/$1.json" root:root 0644
+}
+
+han_to_json() {   # 30s 15m 1h 7d luon → "ISO" | null
+  case "${1:-luon}" in
+    luon) echo null ;;
+    *[0-9][smhd])
+      local n="${1%?}" u
+      case "${1: -1}" in s) u=seconds ;; m) u=minutes ;; h) u=hours ;; d) u=days ;; esac
+      echo "\"$(date -u -d "+$n $u" +%FT%TZ)\"" ;;
+    *) echo "--han: 30s | 15m | 1h | 7d | luon" >&2; exit 2 ;;
+  esac
+}
+
+# Đưa quyền thư mục của agent PHỤ xuống hệ điều hành: ACL cho user agent + gắn đúng các thư mục vào hộp cát.
+agent_apply_dirs() {
+  local name="$1" user="ag-$1" g d mode dropin="/etc/systemd/system/axle-mcp@$1.service.d"
+  g="$(grants_read "$name")"
+  mkdir -p "$dropin"
+  {
+    echo "# Sinh bởi axle agent grant — đừng sửa tay"
+    echo "[Service]"
+    jq -r '.dirs[] | select(.until == null or (.until | fromdateiso8601) > now) | "\(.mode) \(.path)"' <<<"$g" \
+      | while read -r mode d; do
+          if [ "$mode" = rw ]; then echo "BindPaths=$d"; echo "ReadWritePaths=$d"; else echo "BindReadOnlyPaths=$d"; fi
+        done
+  } > "$dropin/50-grants.conf"
+  local granted; granted="$(jq -r '.dirs[] | select(.until == null or (.until | fromdateiso8601) > now) | .path' <<<"$g")"
+  jq -r '.dirs[] | select(.until == null or (.until | fromdateiso8601) > now) | "\(.mode) \(.path)"' <<<"$g" \
+    | while read -r mode d; do
+        if [ "$mode" = rw ]; then
+          setfacl -R -m "u:$user:rwX" "$d"; setfacl -R -d -m "u:$user:rwX,u:$OWNER_USER:rwX" "$d"
+        else
+          setfacl -R -m "u:$user:rX" "$d"; setfacl -R -d -m "u:$user:rX" "$d"
+        fi
+        # đi xuyên qua các thư mục cha (chỉ --x: vào được, không liệt kê được) — NHƯNG không hạ quyền thư mục cha
+        # mà chính nó đã được cấp (cấp demo đọc + demo/data ghi: bước đi xuyên của data không được đè demo thành --x)
+        local p="$d" k skip
+        while p="$(dirname "$p")"; [ "$p" != / ] && [ "$p" != /home ]; do
+          skip=0
+          for k in $granted; do if [ "$p" = "$k" ] || [[ "$p" == "$k"/* ]]; then skip=1; break; fi; done
+          [ "$skip" = 1 ] || setfacl -m "u:$user:--x" "$p"
+        done
+      done
+  systemctl daemon-reload
+  systemctl try-restart "axle-mcp@$name.service" 2>/dev/null || true
+}
+
+# Gỡ ACL của agent khỏi một thư mục (và quyền đi xuyên ở cha nếu không còn quyền nào khác cần)
+agent_unacl_dir() {
+  local name="$1" user="ag-$1" d="$2" p keep
+  [ -d "$d" ] || return 0
+  setfacl -R -x "u:$user" "$d" 2>/dev/null || true
+  setfacl -R -d -x "u:$user" "$d" 2>/dev/null || true
+  keep="$(grants_read "$name" | jq -r '.dirs[].path')"
+  p="$d"
+  while p="$(dirname "$p")"; [ "$p" != / ] && [ "$p" != /home ]; do
+    grep -qxF -e "$p" <<<"$(for k in $keep; do x="$k"; while x="$(dirname "$x")"; [ "$x" != / ]; do echo "$x"; done; done)" \
+      || setfacl -x "u:$user" "$p" 2>/dev/null || true
+  done
+}
+
+grant_cmd() {   # axle agent grant|revoke <tên> thu-muc <đường dẫn> [--doc|--ghi] | mang <tên miền> [--han …]
+  [ "$(id -u)" = 0 ] || { echo "Cần sudo" >&2; exit 1; }
+  local act="$1" name="$2" kind="${3:-}" what="${4:-}" role
+  shift 4 || true
+  role="$(agent_role "$name")"
+  [ -n "$role" ] || { echo "Không có agent $name" >&2; exit 1; }
+  local mode="" han="luon"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --doc) mode=ro; shift ;;
+      --ghi) mode=rw; shift ;;
+      --han) han="${2:-}"; shift 2 ;;
+      *) echo "Không hiểu: $1" >&2; exit 2 ;;
+    esac
+  done
+  local g; g="$(grants_read "$name")"
+  case "$kind" in
+    thu-muc)
+      [[ "$what" == "~"* ]] && what="/home/$OWNER_USER${what#\~}"
+      local d; d="$(realpath -e -- "$what" 2>/dev/null)" || { echo "Không có thư mục: $what" >&2; exit 1; }
+      if [ "$act" = grant ]; then
+        [ -d "$d" ] || { echo "Không phải thư mục: $d" >&2; exit 1; }
+        [ -n "$mode" ] || { echo "Cần --doc (chỉ đọc) hoặc --ghi (đọc + ghi)" >&2; exit 2; }
+        # kiểm vùng bí mật TRƯỚC: cấp cả home phải báo đúng lý do "chứa vùng bí mật"
+        local rel p
+        for rel in $PROTECTED_REL; do
+          p="/home/$OWNER_USER/$rel"
+          if [ "$d" = "$p" ] || [[ "$d" == "$p"/* ]] || [[ "$p" == "$d"/* ]]; then
+            echo "Không cấp: $d là (hoặc chứa) vùng bí mật $p" >&2; exit 1
+          fi
+        done
+        case "$d" in "/home/$OWNER_USER"/*|/srv/*) ;; *) echo "Chỉ cấp thư mục trong /home/$OWNER_USER hoặc /srv" >&2; exit 1 ;; esac
+        local until; until="$(han_to_json "$han")"
+        jq --arg p "$d" --arg m "$mode" --argjson u "$until" \
+          '.dirs = ([.dirs[] | select(.path != $p)] + [{path: $p, mode: $m, until: $u}])' <<<"$g" | grants_write "$name"
+        [ "$role" = phu ] && agent_apply_dirs "$name"
+        echo "Đã cấp $name $( [ "$mode" = rw ] && echo 'đọc + ghi' || echo 'chỉ đọc' ) $d$( [ "$until" = null ] || echo " tới $(jq -r . <<<"$until")")"
+      else
+        jq --arg p "$d" '.dirs = [.dirs[] | select(.path != $p)]' <<<"$g" | grants_write "$name"
+        if [ "$role" = phu ]; then agent_unacl_dir "$name" "$d"; agent_apply_dirs "$name"; fi
+        echo "Đã rút quyền $name với $d"
+      fi ;;
+    mang)
+      local h; h="$(tr 'A-Z' 'a-z' <<<"$what")"
+      [[ "$h" =~ ^\.?[a-z0-9-]+(\.[a-z0-9-]+)*$ ]] || { echo "Tên miền không hợp lệ: $what" >&2; exit 2; }
+      if [ "$act" = grant ]; then
+        local until; until="$(han_to_json "$han")"
+        jq --arg h "$h" --argjson u "$until" '.net = ([.net[] | select(.host != $h)] + [{host: $h, until: $u}])' <<<"$g" | grants_write "$name"
+        echo "Đã cho $name gọi tới $h$( [ "$until" = null ] || echo " tới $(jq -r . <<<"$until")")"
+      else
+        jq --arg h "$h" '.net = [.net[] | select(.host != $h)]' <<<"$g" | grants_write "$name"
+        echo "Đã chặn $name gọi tới $h"
+      fi ;;
+    *) echo "Cấp gì: thu-muc <đường dẫn> --doc|--ghi | mang <tên miền>" >&2; exit 2 ;;
+  esac
+}
+
+grants_expire() {   # dịch vụ duyệt gọi mỗi phút: rút mọi quyền đã hết hạn
+  [ "$(id -u)" = 0 ] || { echo "Cần sudo" >&2; exit 1; }
+  local f name g d
+  for f in "$GRANTS_DIR"/*.json; do
+    [ -f "$f" ] || continue
+    name="$(basename "$f" .json)"; g="$(cat "$f")"
+    local gone; gone="$(jq -r '.dirs[] | select(.until != null and (.until | fromdateiso8601) <= now) | .path' <<<"$g")"
+    local netgone; netgone="$(jq -r '[.net[] | select(.until != null and (.until | fromdateiso8601) <= now)] | length' <<<"$g")"
+    [ -n "$gone" ] || [ "$netgone" != 0 ] || continue
+    jq '.dirs = [.dirs[] | select(.until == null or (.until | fromdateiso8601) > now)]
+        | .net = [.net[] | select(.until == null or (.until | fromdateiso8601) > now)]' <<<"$g" | grants_write "$name"
+    if [ "$(agent_role "$name")" = phu ]; then
+      for d in $gone; do agent_unacl_dir "$name" "$d"; done
+      agent_apply_dirs "$name"
+    fi
+    echo "Hết hạn: $name ${gone//$'\n'/ } $( [ "$netgone" != 0 ] && echo "+ $netgone tên miền")"
+  done
+}
+
+grants_show() {
+  local g; g="$(grants_read "$1")"
+  jq -r '(.dirs[] | "thư mục \(.path) · \(if .mode == "rw" then "đọc + ghi" else "chỉ đọc" end) · \(.until // "không hạn")"),
+         (.net[] | "mạng \(.host) · \(.until // "không hạn")")' <<<"$g"
+}
+
+agent_cmd() {
+  case "${1:-list}" in
+    list)
+      local st; st="$(cat "$AGENTS_STATE" 2>/dev/null || echo '{}')"
+      read_clients | jq -r --argjson st "$st" 'if length == 0 then "Chưa có agent nào" else to_entries[] | .key as $k |
+        "\($k)\t\(.value.role // "phu")\t\(.value.user // "-")\t\((.value.tools // []) | join(","))\t\(.value.created[0:10])\t\(if (($st.suspended // []) | index($k)) then "TẠM DỪNG" else "" end)" end' \
+        | while IFS=$'\t' read -r n r u t c s; do
+            [ "$n" = "Chưa có agent nào" ] && { echo "$n"; continue; }
+            if [ "$r" = chinh ]; then
+              printf '%s · trợ lý chính (quyền của %s, khoá SSH chỉ mở MCP) · tạo %s · %s\n' "$n" "$OWNER_USER" "$c" "${s:-sẵn sàng}"
+            else
+              printf '%s · agent phụ %s · %s · tạo %s · %s\n' "$n" "$u" "$t" "$c" "${s:-$(systemctl is-active "axle-mcp@$n.socket" 2>/dev/null)}"
+            fi
+          done ;;
+    add)
+      [ "$(id -u)" = 0 ] || { echo "Cần sudo" >&2; exit 1; }
+      local name="${2:-}" tools="" preset="" vai=phu key=""
+      [[ "$name" =~ ^[a-z][a-z0-9-]{1,20}$ ]] || { echo "Tên: chữ thường/số/-, 2-21 ký tự, vd conflux" >&2; exit 2; }
+      shift 2
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --tools) tools="${2:-}"; shift 2 ;;
+          --preset) preset="${2:-}"; shift 2 ;;
+          --vai) vai="${2:-}"; shift 2 ;;
+          --key) key="${2:-}"; shift 2 ;;
+          *) echo "Không hiểu: $1" >&2; exit 2 ;;
+        esac
+      done
+      case "$vai" in chinh|phu) ;; *) echo "--vai: chinh | phu" >&2; exit 2 ;; esac
+
+      if [ "$vai" = chinh ]; then
+        local pub priv="" kd fp
+        if [ -n "$key" ]; then
+          pub="$(awk '{print $1" "$2}' <<<"$key")"
+        else
+          kd="$(mktemp -d)"
+          ssh-keygen -q -t ed25519 -N "" -C "axle-agent:$name" -f "$kd/k"
+          pub="$(awk '{print $1" "$2}' "$kd/k.pub")"; priv="$(cat "$kd/k")"; rm -rf "$kd"
+        fi
+        [[ "$pub" =~ ^(ssh-ed25519|ecdsa-sha2-nistp256|ssh-rsa)\ [A-Za-z0-9+/=]+$ ]] || { echo "--key: khoá công khai SSH không hợp lệ" >&2; exit 2; }
+        ak_add "$name" "$pub"
+        fp="$(ssh-keygen -lf /dev/stdin <<<"$pub" | awk '{print $2}')"
+        read_clients | jq --arg n "$name" --arg f "$fp" '.[$n] = {role: "chinh", key: $f, created: (now | todate)}' | save_clients
+        suspend_set "$name" off
+        echo "Trợ lý chính $name → chạy bằng quyền của $OWNER_USER, thấy mọi thứ trừ vùng bí mật; khoá chỉ mở cổng MCP"
+        if [ -n "$priv" ]; then
+          echo "Khoá SSH riêng (chỉ hiện MỘT lần — lưu vào máy của trợ lý, chmod 600):"
+          echo "$priv"
+        fi
+        echo "Nối: ssh -i <khoá> $OWNER_USER@<máy> axle mcp"
+        echo "Claude Code: claude mcp add axle -- ssh -i <khoá> $OWNER_USER@<máy> axle mcp"
+        return
+      fi
+
+      local list
+      case "$preset" in
+        status) list='["system_status","service_status"]' ;;
+        files)  list='["system_status","service_status","file_list","file_read","file_search","file_write"]' ;;
+        full)   list="$AGENT_TOOLS" ;;
+        "")     list="$(printf '%s' "$tools" | jq -Rc 'split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')" ;;
+        *)      echo "Preset: status | files | full" >&2; exit 2 ;;
+      esac
+      [ "$(jq length <<<"$list")" -gt 0 ] || { echo "Cần --preset hoặc --tools" >&2; exit 2; }
+      local bad
+      bad="$(jq -r --argjson ok "$AGENT_TOOLS" '[.[] | select(. as $t | $ok | index($t) | not)] | join(", ")' <<<"$list")"
+      [ -z "$bad" ] || { echo "Chưa cấp được cho agent phụ: $bad (chỉ: $(jq -r 'join(", ")' <<<"$AGENT_TOOLS"))" >&2; exit 2; }
+      local user="ag-$name"
+      if ! id "$user" >/dev/null 2>&1; then
+        useradd --create-home --home-dir "/home/$user" --shell /usr/sbin/nologin --user-group "$user"
+        chmod 0700 "/home/$user"
+        install -d -o "$user" -g "$user" -m 0700 "/home/$user/work"
+      fi
+      local token hash
+      token="axle_$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')"
+      hash="$(printf '%s' "$token" | sha256sum | cut -d' ' -f1)"
+      read_clients | jq --arg n "$name" --arg h "$hash" --argjson t "$list" --arg u "$user" \
+        '.[$n] = {role: "phu", hash: $h, tools: $t, user: $u, created: (now | todate)}' | save_clients
+      suspend_set "$name" off
+      agent_audit_rules
+      systemctl enable --now "axle-mcp@$name.socket" >/dev/null 2>&1
+      # systemd không trao socket mới cho dịch vụ đang chạy → dừng vault, bật socket agent, chạy lại
+      systemctl stop axle-vault
+      systemctl enable --now "axle-vault-agent@$name.socket" >/dev/null 2>&1
+      systemctl start axle-vault; vault_wait
+      echo "Agent phụ $name → user $user (hộp cát, không sudo, không Docker)"
+      echo "Công cụ: $(jq -r 'join(", ")' <<<"$list")"
+      echo "Token (chỉ hiện MỘT lần, lưu ngay vào vault của agent đó):"
+      echo "$token"
+      echo "Gọi: POST http(s)://<máy>/mcp · header Authorization: Bearer <token>" ;;
+    rm)
+      [ "$(id -u)" = 0 ] || { echo "Cần sudo" >&2; exit 1; }
+      local name="${2:-}" role
+      role="$(agent_role "$name")"
+      [ -n "$role" ] || { echo "Không có agent $name" >&2; exit 1; }
+      if [ "$role" = phu ]; then
+        for d in $(grants_read "$name" | jq -r '.dirs[].path'); do agent_unacl_dir "$name" "$d"; done
+        rm -rf "/etc/systemd/system/axle-mcp@$name.service.d"
+      fi
+      rm -f "$GRANTS_DIR/$name.json"
+      read_clients | jq --arg n "$name" 'del(.[$n])' | save_clients
+      suspend_set "$name" off
+      if [ "$role" = chinh ]; then
+        ak_remove "$name"; kill_assistant "$name"
+        echo "Đã thu hồi trợ lý chính $name: xoá khoá SSH, ngắt mọi phiên đang chạy"; return
+      fi
+      systemctl disable --now "axle-mcp@$name.socket" "axle-mcp@$name.service" >/dev/null 2>&1 || true
+      # vault còn giữ socket cũ của agent tới khi khởi động lại → dừng, tắt socket, chạy lại
+      systemctl stop axle-vault
+      systemctl disable --now "axle-vault-agent@$name.socket" >/dev/null 2>&1 || true
+      systemctl start axle-vault; vault_wait
+      # thu hồi luôn quyền dùng khoá của agent này
+      jq --arg a "$name" 'map_values(.agents = ((.agents // []) - [$a]))' "$VAULT_FILE" | atomic_write "$VAULT_FILE" axle-vault:axle-vault 600
+      agent_audit_rules
+      if [ "${3:-}" = "--purge" ]; then userdel -r "ag-$name" 2>/dev/null; echo "Đã xoá agent $name, user + home"
+      else echo "Đã thu hồi agent $name (giữ user ag-$name + home để tra cứu; --purge để xoá)"; fi ;;
+    grant|revoke) grant_cmd "$@" ;;
+    grants)       [ -n "${2:-}" ] || { echo "axle agent grants <tên>" >&2; exit 2; }; grants_show "$2" ;;
+    expire)       grants_expire ;;
+    stop|start)   # dừng khẩn cấp / mở lại (Telegram /dung, /mo gọi vào đây)
+      [ "$(id -u)" = 0 ] || { echo "Cần sudo" >&2; exit 1; }
+      local name="${2:-}" role
+      role="$(agent_role "$name")"
+      [ -n "$role" ] || { echo "Không có agent $name" >&2; exit 1; }
+      if [ "$1" = stop ]; then
+        suspend_set "$name" on
+        if [ "$role" = chinh ]; then kill_assistant "$name"
+        else systemctl stop "axle-mcp@$name.socket" "axle-mcp@$name.service" >/dev/null 2>&1 || true; fi
+        echo "⛔ Đã dừng $name: ngắt phiên đang chạy, chặn mọi kết nối mới, huỷ yêu cầu đang chờ duyệt"
+      else
+        suspend_set "$name" off
+        [ "$role" = chinh ] || systemctl start "axle-mcp@$name.socket" >/dev/null 2>&1 || true
+        echo "▶ Đã mở lại $name"
+      fi ;;
+    resync)   # provision gọi: bật lại socket + luật auditd cho mọi agent phụ trong sổ
+      [ "$(id -u)" = 0 ] || { echo "Cần sudo" >&2; exit 1; }
+      local was=0; systemctl is-active -q axle-vault && was=1
+      systemctl stop axle-vault 2>/dev/null || true
+      for n in $(jq -r 'to_entries[] | select(.value.user) | .key' "$MCP_CLIENTS"); do
+        systemctl enable --now "axle-mcp@$n.socket" "axle-vault-agent@$n.socket" >/dev/null 2>&1
+        agent_apply_dirs "$n" >/dev/null 2>&1 || true
+      done
+      [ "$was" = 1 ] && { systemctl start axle-vault; vault_wait; }
+      agent_audit_rules ;;
+    *) usage; exit 2 ;;
+  esac
+}
+
+APPROVE_CFG=/etc/axle/approve.json
+
+approve_cmd() {
+  case "${1:-log}" in
+    setup)
+      [ "$(id -u)" = 0 ] || { echo "Cần sudo" >&2; exit 1; }
+      shift
+      local owner="" expire=600 api="https://api.telegram.org" digest=21
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --owner) owner="${2:-}"; shift 2 ;;
+          --expire) expire="${2:-}"; shift 2 ;;
+          --api) api="${2:-}"; shift 2 ;;
+          --tomtat) digest="${2:-}"; shift 2 ;;
+          *) echo "Không hiểu: $1" >&2; exit 2 ;;
+        esac
+      done
+      [[ "$owner" =~ ^[0-9]{3,20}$ ]] || { echo "--owner: id số của tài khoản Telegram (hỏi @userinfobot)" >&2; exit 2; }
+      [[ "$expire" =~ ^[0-9]+$ ]] && [ "$expire" -ge 10 ] || { echo "--expire: số giây ≥ 10" >&2; exit 2; }
+      [[ "$digest" =~ ^([0-9]|1[0-9]|2[0-3]|tat)$ ]] || { echo "--tomtat: giờ gửi tin tóm tắt (0–23) hoặc tat" >&2; exit 2; }
+      jq -n --argjson o "$owner" --argjson e "$expire" --arg a "$api" --arg u "${SUDO_USER:-$OWNER_USER}" --arg d "$digest" \
+        '{owner: $o, expireSec: $e, api: $a, user: $u, tokenSecret: "AXLE_TG_TOKEN",
+          digestHour: (if $d == "tat" then false else ($d | tonumber) end)}' > "$APPROVE_CFG"
+      chmod 0644 "$APPROVE_CFG"
+      echo "Đã lưu: chủ $owner, hết hạn sau ${expire}s. Token bot phải có trong vault: axle vault" ;;
+    test)
+      [ "$(id -u)" = 0 ] || { echo "Cần sudo" >&2; exit 1; }
+      local owner api
+      owner="$(jq -r .owner "$APPROVE_CFG")"; api="$(jq -r .api "$APPROVE_CFG")"
+      jq -n --arg u "$api/bot{{secret.AXLE_TG_TOKEN}}/sendMessage" --arg b "$(jq -nc --arg c "$owner" --arg t "✅ $(hostname): Axle nối Telegram được rồi" '{chat_id: $c, text: $t}')" \
+        '{method: "POST", url: $u, headers: {"content-type": "application/json"}, body: $b}' \
+        | curl -sf --unix-socket "$VAULT_SOCK" -H 'content-type: application/json' --data-binary @- http://vault/request \
+        | jq -r '"Telegram trả: HTTP \(.status)"' ;;
+    rules)
+      [ "$(id -u)" = 0 ] || { echo "Cần sudo (luật nằm ở /var/lib/axle-approve, chỉ root đọc)" >&2; exit 1; }
+      jq -r '(.rules[] | "#\(.id) luôn · \(.key) · \(.action) \(.match | tostring)"),
+             (.sessions[] | "#\(.id) phiên tới \(.until) · \(.key) · \(.action) \(.scope | tostring)")' \
+        /var/lib/axle-approve/rules.json 2>/dev/null || echo "Chưa nhớ luật nào" ;;
+    forget)
+      [ "$(id -u)" = 0 ] || { echo "Cần sudo" >&2; exit 1; }
+      local f=/var/lib/axle-approve/rules.json
+      [ -s "$f" ] || { echo "Chưa nhớ luật nào"; return; }
+      if [ "${2:-}" = tat ]; then jq '.rules = [] | .sessions = []' "$f" | atomic_write "$f" root:root 0600; echo "Đã quên mọi luật + phiên"
+      else
+        [[ "${2:-}" =~ ^[0-9]+$ ]] || { echo "sudo axle approve forget <số>|tat" >&2; exit 2; }
+        jq --argjson i "$2" '.rules = [.rules[] | select(.id != $i)] | .sessions = [.sessions[] | select(.id != $i)]' "$f" \
+          | atomic_write "$f" root:root 0600
+        echo "Đã quên #$2"
+      fi ;;
+    log)
+      tail -n "${2:-20}" /var/log/axle-approve/approvals.jsonl 2>/dev/null \
+        | jq -r '"\(.ts | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601 | localtime | strftime("%d/%m %H:%M:%S")) #\(.id // "-") \(.state // .app // .console // .warn // "") \(.action // "") \(.client // "") \(if .params then (.params | tostring) else "" end)"' ;;
+    *) usage; exit 2 ;;
+  esac
+}
+
+ADMIN_SOCK=/run/axle-approve/admin.sock
+admin_call() {   # $1 METHOD, $2 đường, $3 thân (tuỳ chọn) — socket quản trị chỉ root dùng được
+  curl -s --unix-socket "$ADMIN_SOCK" -X "$1" -H 'content-type: application/json' ${3:+--data-binary "$3"} "http://x$2"
+}
+
+app_cmd() {   # sudo axle app setup|pair|confirm|devices|remove
+  [ "$(id -u)" = 0 ] || { echo "Cần sudo" >&2; exit 1; }
+  case "${1:-devices}" in
+    setup)
+      [ "${2:-}" = --relay ] && [[ "${3:-}" =~ ^https?://[A-Za-z0-9.:-]+(/.*)?$ ]] || { echo "sudo axle app setup --relay https://trạm" >&2; exit 2; }
+      jq -n --arg r "${3%/}" '{relay: $r}' | atomic_write /etc/axle/app.json root:root 0644
+      echo "Trạm chuyển tiếp: ${3%/}. Ghép điện thoại: sudo axle app pair" ;;
+    pair)
+      local out qr w pid sas name
+      out="$(admin_call POST /pair/start)"
+      qr="$(jq -r '.qr // empty' <<<"$out")"
+      [ -n "$qr" ] || { echo "$(jq -r '.error // "lỗi"' <<<"$out")" >&2; exit 1; }
+      echo "Mở app Axle trên điện thoại → Ghép máy → quét mã (hạn 10 phút):"
+      command -v qrencode >/dev/null && qrencode -t ansiutf8 "$qr"
+      echo "$qr"
+      echo "Đang chờ điện thoại…"
+      w="$(admin_call GET "/pair/wait?timeout=600")"
+      pid="$(jq -r '.pendingId // empty' <<<"$w")"
+      [ -n "$pid" ] || { echo "$(jq -r '.error // "hết giờ"' <<<"$w")" >&2; exit 1; }
+      sas="$(jq -r .sas <<<"$w")"; name="$(jq -r .name <<<"$w")"
+      echo "Điện thoại \"$name\" muốn ghép. Mã đối chiếu: ${sas:0:3} ${sas:3:3}"
+      if [ "${2:-}" = --khong-hoi ]; then echo "Xác nhận sau: sudo axle app confirm $pid"; return; fi
+      local a; read -rp "Điện thoại có hiện ĐÚNG mã ${sas:0:3} ${sas:3:3} không? (gõ yes) " a
+      if [ "$a" = yes ]; then app_cmd confirm "$pid"; else admin_call POST /pair/confirm "$(jq -nc --arg p "$pid" '{pendingId: $p, ok: false}')" >/dev/null; echo "Huỷ ghép cặp"; fi ;;
+    confirm)
+      local r; r="$(admin_call POST /pair/confirm "$(jq -nc --arg p "${2:-}" '{pendingId: $p, ok: true}')")"
+      jq -e .device >/dev/null <<<"$r" && echo "✅ Đã ghép \"$(jq -r .device.name <<<"$r")\" — từ giờ yêu cầu duyệt gửi tới điện thoại này" \
+        || { echo "$(jq -r '.error // "lỗi"' <<<"$r")" >&2; exit 1; } ;;
+    devices)
+      admin_call GET /devices | jq -r 'if length == 0 then "Chưa ghép điện thoại nào" else .[] | "\(.id) · \(.name) · ghép \(.pairedAt[0:16])" end' ;;
+    remove)
+      local r; r="$(admin_call POST /devices/remove "$(jq -nc --arg i "${2:-}" '{id: $i}')")"
+      jq -e .name >/dev/null <<<"$r" && echo "Đã gỡ \"$(jq -r .name <<<"$r")\"" || { echo "$(jq -r '.error // "lỗi"' <<<"$r")" >&2; exit 1; } ;;
+    *) usage; exit 2 ;;
+  esac
+}
+
+duyet_cmd() {   # sudo axle duyet [<id> a|h|l|r] — duyệt ngay tại máy (mức tin cậy cao nhất: mật khẩu sudo)
+  [ "$(id -u)" = 0 ] || { echo "Cần sudo: sudo axle duyet" >&2; exit 1; }
+  if [ -z "${1:-}" ]; then
+    admin_call GET /pending | jq -r 'if length == 0 then "Không có yêu cầu nào đang chờ" else .[] |
+      "#\(.id) · bậc \(.tier) · \(.client) · \(.ageSec) giây trước · nút: \(.buttons)\n\(.text | split("\n") | map("    " + .) | join("\n"))\n" end'
+    echo "Duyệt: sudo axle duyet <id> a (lần này) | h (1 giờ) | l (luôn) | r (từ chối)"
+    return
+  fi
+  local r; r="$(admin_call POST /decide "$(jq -nc --arg i "$1" --arg d "${2:-}" '{id: $i, decision: $d}')")"
+  jq -e .result >/dev/null <<<"$r" && jq -r .result <<<"$r" || { echo "$(jq -r '.error // "lỗi"' <<<"$r")" >&2; exit 1; }
+}
+
+need_num() { [[ "${1:-}" =~ ^[0-9]+$ ]] || { echo "Cần số snapshot (xem: axle snapshots)" >&2; exit 2; }; }
+
+case "${1:-help}" in
+  status)    status ;;
+  snapshot)  n="$("${QSNAP[@]}" create "${2:-thủ công}")"
+             echo "Đã chụp snapshot #$n" ;;
+  snapshots) "${QSNAP[@]}" list | { head -2; tail -n 20; } ;;
+  diff)      need_num "${2:-}"; "${QSNAP[@]}" status "$2" ;;
+  undo)      need_num "${2:-}"
+             if [ "${3:-}" != "--yes" ]; then
+               echo "Sẽ đổi lại các file sau về như snapshot #$2:"
+               "${QSNAP[@]}" status "$2" | head -30
+               read -rp "Tiếp tục? (gõ yes) " a; [ "$a" = yes ] || { echo "Huỷ"; exit 1; }
+             fi
+             pre="$("${SNAP[@]}" create -t single -c number -d "trước khi undo về #$2" --print-number)"
+             "${SNAP[@]}" undochange "$2..0"
+             echo "Đã đưa về #$2. Muốn quay lại trạng thái vừa rồi: axle undo $pre" ;;
+  net)       [ "${2:-}" = up ] || { usage; exit 2; }; sudo tailscale up ;;
+  mcp)       shift; mcp_cmd "$@" ;;
+  audit)     { [ -f "$AUDIT" ] && tail -n 500 "$AUDIT"
+               journalctl -u 'axle-mcp@*' -u axle-mcp-http -o cat --no-pager -n 500 2>/dev/null | grep '^{' || true
+             } | jq -sc "sort_by(.ts) | .[-${2:-20}:][]" | jq -r '"\(.ts | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601 | localtime | strftime("%d/%m %H:%M:%S")) \(if .ok then "✓" else "✗" end) \(.tool) \(.args // {why: .why} | tostring) \(.ms // 0)ms \(.client // .from // "")"' ;;
+  vault)     shift; vault_cmd "$@" ;;
+  agents)    agent_cmd list ;;
+  agent)     shift; agent_cmd "$@" ;;
+  approve)   shift; approve_cmd "$@" ;;
+  app)       shift; app_cmd "$@" ;;
+  duyet)     shift; duyet_cmd "$@" ;;
+  cmdlog)    shift; exec sudo -n /usr/local/lib/axle/axle-cmdlog "$@" ;;
+  version)   cat /etc/axle/version ;;
+  update)    [ "$(id -u)" = 0 ] || { echo "Cần sudo: sudo axle update" >&2; exit 1; }
+             shift; exec bash /opt/axle/core/install.sh --update "$@" ;;
+  help|-h|--help) usage ;;
+  *)         usage; exit 2 ;;
+esac

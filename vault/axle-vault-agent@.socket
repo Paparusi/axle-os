@@ -1,0 +1,17 @@
+[Unit]
+Description=Socket vault riêng của agent %i (chỉ user ag-%i mở được)
+
+[Socket]
+# Danh tính = socket: nhóm ag-%i, 0660 → chỉ agent %i nối được; vault biết chắc ai gọi mà không cần tin lời khai.
+ListenStream=/run/axle-vault-agents/%i.sock
+SocketUser=root
+SocketGroup=ag-%i
+SocketMode=0660
+DirectoryMode=0755
+# Thu hồi agent thì xoá luôn file socket (mặc định systemd để lại)
+RemoveOnStop=yes
+FileDescriptorName=agent-%i
+Service=axle-vault.service
+
+[Install]
+WantedBy=sockets.target

@@ -1,0 +1,33 @@
+# Axle Server — cài tự động (Ubuntu autoinstall).
+# build/build-iso.sh thay __PASSWORD_HASH__, __SSH_KEY__, __HOSTNAME__ lúc đóng gói.
+# Không có 'autoinstall' trên dòng lệnh nhân → máy hỏi "Continue with autoinstall?" trước khi xoá ổ.
+autoinstall:
+  version: 1
+  locale: en_US.UTF-8
+  timezone: Asia/Ho_Chi_Minh
+  keyboard:
+    layout: us
+  identity:
+    hostname: __HOSTNAME__
+    realname: Bi
+    username: admin_1
+    password: '__PASSWORD_HASH__'
+  ssh:
+    install-server: true
+    allow-pw: true
+    authorized-keys:
+      - '__SSH_KEY__'
+  storage:
+    config:
+      - {type: disk, id: disk0, match: {size: largest}, ptable: gpt, wipe: superblock-recursive, preserve: false}
+      - {type: partition, id: part-esp, device: disk0, number: 1, size: 1G, flag: boot, grub_device: true, preserve: false}
+      - {type: format, id: fmt-esp, volume: part-esp, fstype: fat32, preserve: false}
+      - {type: partition, id: part-root, device: disk0, number: 2, size: -1, preserve: false}
+      - {type: format, id: fmt-root, volume: part-root, fstype: btrfs, preserve: false}
+      - {type: mount, id: mnt-root, device: fmt-root, path: /}
+      - {type: mount, id: mnt-esp, device: fmt-esp, path: /boot/efi}
+  updates: security
+  late-commands:
+    - curtin in-target -- systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
+    - [curtin, in-target, --, sh, -c, "printf '%s\\n' '' '__HOSTNAME__  IP: \\4' '' >> /etc/issue"]
+  shutdown: reboot

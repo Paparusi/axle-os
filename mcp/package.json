@@ -1,0 +1,20 @@
+{
+  "name": "axle-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cổng MCP của Axle: công cụ chung cho mọi agent, có nhật ký",
+  "type": "module",
+  "bin": {
+    "axle-mcp": "server.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "zod": "4.6.5"
+  },
+  "scripts": {
+    "test": "node test-files.mjs && node test-http.mjs && node ../vault/test-lib.mjs && node ../approve/test-rules.mjs && node ../app/test-proto.mjs && ([ ! -f ../relay/server.js ] || node ../app/test-relay.mjs)"
+  }
+}

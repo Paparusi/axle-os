@@ -1,0 +1,13 @@
+{
+  "name": "Axle OS",
+  "tagline": "Your OS. Your Intelligence.",
+  "font": "Inter",
+  "colors": {
+    "axle-blue": "#3B82F6",
+    "cyan": "#06B6D4",
+    "deep-dark": "#0B0F14",
+    "graphite": "#1A1F2B",
+    "slate": "#2A3344",
+    "light": "#E5E7EB"
+  }
+}
