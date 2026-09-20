@@ -492,6 +492,14 @@ const TASKS = {
     // Trả lời cho điện thoại TRƯỚC rồi mới tắt, kẻo app treo ở "đang gửi"
     sau: () => setTimeout(() => runProc('systemctl', ['reboot'], {}), 2000),
   },
+  'tat-may': {
+    ten: 'Tắt máy',
+    // Đây là việc DUY NHẤT trong danh sách không tự quay lại được: máy tắt rồi thì điện thoại hết đường
+    // bật lên, phải tới tận nơi bấm nút nguồn. App phải nói thẳng điều đó trước khi hỏi Face ID.
+    xong: 'Máy đang tắt — bật lại phải tới tận máy',
+    chay: async () => ({ exitCode: 0, output: '' }),
+    sau: () => setTimeout(() => runProc('systemctl', ['poweroff'], {}), 2000),
+  },
 };
 
 // Danh sách agent cho app (màn Agent / dừng khẩn cấp): tên, vai, đang tạm dừng không. Không gửi token/băm token.
