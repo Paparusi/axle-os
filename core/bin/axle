@@ -63,6 +63,8 @@ sudo axle duyet [<id> a|h|l|r]
 axle version             bản Axle đang chạy
 sudo axle update [--from <url>]   cập nhật lên bản phát hành mới (kiểm chữ ký, chụp hệ thống trước, không hạ cấp)
 sudo axle desktop on|off · axle desktop status   lớp giao diện GNOME + gõ tiếng Việt (docs/DESKTOP.md)
+sudo axle agent screen <tên> on|off · axle agent screen <tên> status|anh
+                         màn hình riêng cho agent phụ (nó tự nhìn + bấm, không đụng màn hình của chủ)
 EOF
 }
 
@@ -197,7 +199,7 @@ mcp_cmd() {
 }
 
 # Công cụ cấp được cho agent riêng. Snapshot, Docker, log: chỉ chủ máy (việc toàn hệ thống / quyền ngang root).
-AGENT_TOOLS='["system_status","service_status","file_list","file_read","file_search","file_write","vault_list","http_request","run_command","service_restart","file_delete","approval_status"]'
+AGENT_TOOLS='["system_status","service_status","file_list","file_read","file_search","file_write","vault_list","http_request","run_command","service_restart","file_delete","approval_status","screen_shot","screen_windows","screen_open","screen_click","screen_type","screen_key","screen_scroll"]'
 
 save_clients() { atomic_write "$MCP_CLIENTS" root:axle-gw 0640; }   # cửa trước đọc được, agent thì không
 
@@ -513,6 +515,7 @@ agent_cmd() {
       else echo "Đã thu hồi agent $name (giữ user ag-$name + home để tra cứu; --purge để xoá)"; fi ;;
     grant|revoke) grant_cmd "$@" ;;
     grants)       [ -n "${2:-}" ] || { echo "axle agent grants <tên>" >&2; exit 2; }; grants_show "$2" ;;
+    screen)       shift; exec bash /opt/axle/core/desktop/agent-screen.sh "$@" ;;
     expire)       grants_expire ;;
     stop|start)   # dừng khẩn cấp / mở lại (Telegram /dung, /mo gọi vào đây)
       [ "$(id -u)" = 0 ] || { echo "Cần sudo" >&2; exit 1; }

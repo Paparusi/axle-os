@@ -10,6 +10,7 @@ import { homedir, hostname } from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 import * as files from './files.js';
+import * as screen from './screen.js';
 
 const AUDIT = process.env.AXLE_AUDIT || path.join(homedir(), '.local/state/axle/audit.jsonl');
 const SNAP = process.env.AXLE_SNAP || '/usr/local/lib/axle/axle-snap';
@@ -59,16 +60,21 @@ export function buildServer({ allow, clientName } = {}) {
     server.registerTool(name, config, async (...a) => {
       const args = config.inputSchema ? a[0] : {};
       const t0 = Date.now();
-      let text, ok = true;
+      let out, ok = true;
       try {
-        text = await handler(args, { client: clientName ?? server.server.getClientVersion()?.name });
+        out = await handler(args, { client: clientName ?? server.server.getClientVersion()?.name });
       } catch (e) {
         ok = false;
-        text = `Lỗi: ${e.message}`;
+        out = `Lỗi: ${e.message}`;
       }
       await audit({ ts: new Date().toISOString(), tool: name, args: auditArgs(args), ok, ms: Date.now() - t0,
         client: clientName ?? server.server.getClientVersion()?.name });
-      return { content: [{ type: 'text', text: clip(text) }], isError: !ok };
+      // Công cụ trả ảnh (vd. chụp màn hình agent) → gửi kèm khối image, KHÔNG ghi ảnh vào nhật ký
+      const content = typeof out === 'object' && out?.image
+        ? [{ type: 'image', data: out.image, mimeType: out.mimeType || 'image/png' },
+          ...(out.text ? [{ type: 'text', text: clip(out.text) }] : [])]
+        : [{ type: 'text', text: clip(String(out)) }];
+      return { content, isError: !ok };
     });
   }
 
@@ -337,6 +343,10 @@ export function buildServer({ allow, clientName } = {}) {
     const abs = p === '~' ? homedir() : p.startsWith('~/') ? path.join(homedir(), p.slice(2)) : path.resolve(homedir(), p);
     return askAndWait('file_delete', { path: abs }, client, waitSec);
   });
+
+  // Màn hình riêng của agent (chỉ có khi chủ bật: sudo axle agent screen <tên> on)
+  if (screen.hasDisplay()) screen.register(tool);
+  else for (const [n, ro] of screen.TOOL_NAMES) TOOL_INFO.set(n, { readOnly: ro });
 
   tool('approval_status', {
     title: 'Approval status',

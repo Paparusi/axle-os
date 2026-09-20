@@ -18,6 +18,10 @@ destructive needs your approval, signed by the secure chip in your phone. Server
   tới đúng máy chủ đã cho phép; phản hồi có lọt khoá cũng bị che.
 - **Dừng khẩn cấp** một agent hay tất cả, **cấp quyền có hạn** (thư mục, mạng), **nhật ký lệnh agent không xoá được**
   (auditd), **bản chụp btrfs + `axle undo`**.
+- **Lớp giao diện** (`sudo axle desktop on`): GNOME + gõ tiếng Việt + nhận diện Axle, cài thêm lên máy đang chạy
+  Server, hỏng thì `axle undo`. Kèm **màn hình riêng cho agent** (`sudo axle agent screen <tên> on`): agent nhìn
+  và bấm trong màn hình ảo của chính nó — không thấy màn hình của bạn, không có cửa sổ dòng lệnh, chỉ mở được app
+  bạn cho phép; bạn xem lại bằng ảnh chụp hoặc chiếu trực tiếp.
 
 ## Cài bằng ISO (dễ nhất)
 

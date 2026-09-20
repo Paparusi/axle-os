@@ -29,15 +29,31 @@ trên màn hình thật. Đây là điều quyết định thiết kế bên dư
 
 Ba đường, Axle dùng cả ba nhưng cho việc khác nhau:
 
-### 1. Màn hình RIÊNG của agent (mặc định)
+### 1. Màn hình RIÊNG của agent (mặc định) — ĐÃ LÀM (D2)
 
-Agent phụ có sẵn tài khoản riêng trong hộp cát; Desktop thêm cho nó **một phiên đồ hoạ riêng không gắn màn hình
-thật** (GNOME headless hoặc XFCE trên Xvfb). Agent mở trình duyệt, soạn tài liệu, thao tác thoải mái trong đó.
+Agent phụ có sẵn tài khoản riêng trong hộp cát; `sudo axle agent screen <tên> on` thêm cho nó **một màn hình X ảo
+riêng, không gắn màn hình thật** (Xvfb + openbox, dịch vụ `axle-display@<tên>`, chạy bằng chính user `ag-<tên>`).
 
 - Agent **không thấy** màn hình của chủ: cửa sổ ngân hàng, tin nhắn, mật khẩu của chủ nằm ngoài tầm với.
-- Chủ xem được: cửa sổ "Màn hình của agent" (chiếu luồng PipeWire / RDP tại chỗ), xem trực tiếp và giành lại quyền.
-- Chụp màn hình và bấm phím trong phiên này không cần xin phép ai, vì đó là máy của chính agent → agent làm được
-  việc thật mà không chạm vào đời sống riêng của chủ.
+- Chụp màn hình và bấm phím trong màn hình này không cần xin phép ai, vì đó là máy của chính agent → agent làm
+  được việc thật mà không chạm vào đời sống riêng của chủ. Công cụ MCP: `screen_shot`, `screen_windows`,
+  `screen_open`, `screen_click`, `screen_type`, `screen_key`, `screen_scroll`.
+- Chủ xem được: `sudo axle agent screen <tên> anh` chụp lại màn hình của agent (xem trực tiếp: nhịp D2.1).
+
+**Vì sao X11 (Xvfb) chứ không phải Wayland**: màn hình của agent là hộp cát riêng, ở đó *cần* chụp ảnh và tiêm
+phím thoải mái — đúng thứ Wayland cố tình chặn. Xvfb + xdotool + ImageMagick chạy chắc, nhẹ, không cần portal.
+Màn hình của chủ vẫn là Wayland như GNOME mặc định; hai đường không dính nhau.
+
+**Ba cái chốt để màn hình riêng không thành cửa sau**:
+
+1. **Không có cửa sổ dòng lệnh.** Agent chỉ mở được app trong danh sách chủ cho phép
+   (`/etc/axle/screen-apps.json`: soạn thảo, tệp, văn bản, ảnh). Chạy lệnh vẫn phải qua `run_command` để chủ duyệt.
+2. **App do dịch vụ màn hình mở, không phải agent.** Agent gửi *tên* app qua ống `~/.axle/screen-launch`; dịch vụ
+   đọc danh sách cho phép rồi mới chạy. App nằm trong cgroup của màn hình nên không chết theo máy chủ MCP.
+3. **Trình duyệt phải chủ nói rõ** (`--trinh-duyet`): có trình duyệt là agent nhìn thẳng ra internet, không đi qua
+   vault và không vào nhật ký `http_request` nữa.
+
+Vé vào màn hình là cookie trong `~/.Xauthority` (0600) của từng agent → agent này không ngó được màn hình agent kia.
 
 ### 2. Màn hình THẬT của chủ — chỉ khi chủ cho phép từng lần
 
@@ -60,9 +76,20 @@ Ghi rõ "dựa trên Ubuntu" ở màn giới thiệu; không dùng logo Ubuntu l
 
 ## Nhịp làm
 
-- **D1** Lớp Desktop: `sudo axle desktop on` — GNOME + gõ tiếng Việt (fcitx5-bamboo, Telex) + nhận diện + LibreOffice.
+- **D1 ✔** Lớp Desktop: `sudo axle desktop on` — GNOME + gõ tiếng Việt (IBus Unikey, Telex) + nhận diện + LibreOffice.
   Thử trên máy ảo: cài xong chụp màn hình thật bằng QEMU để nhìn tận mắt.
-- **D2** Màn hình riêng của agent: phiên đồ hoạ cho agent phụ + công cụ MCP `screen_shot`, `screen_click`,
-  `screen_type` (chạy trong phiên của chính agent) + cửa sổ "Màn hình của agent" cho chủ xem.
+  Bài học: đổi ảnh nền thôi thì **vẫn ra Ubuntu**. Phải đụng thêm: `/etc/os-release` (tệp thật, giữ `ID=ubuntu`),
+  tắt `gnome-initial-setup-{first,upgrade}-login` (cửa sổ chào mừng Ubuntu phủ kín màn hình lần đăng nhập đầu),
+  icon `hicolor/*/apps/axle.png` cho màn "Giới thiệu", và `view-app-grid-ubuntu-symbolic` (logo Ubuntu ở nút
+  "Hiện ứng dụng") — chặn bằng `dpkg-divert` để nâng cấp gói không ghi đè lại.
+- **D2 ✔** Màn hình riêng của agent: Xvfb + openbox cho từng agent phụ (`axle agent screen`), 7 công cụ MCP
+  `screen_*`, ống mở app có danh sách trắng. Còn nợ (D2.1): xem trực tiếp màn hình agent (VNC tại chỗ) thay vì
+  chỉ chụp ảnh.
 - **D3** Chia sẻ màn hình thật qua portal: quyền bậc 3 có hạn giờ, thanh báo đang chia sẻ, thu hồi và dừng khẩn cấp.
+  Đường đi đã chốt: dịch vụ `axle-portal` chạy TRONG phiên của chủ (`systemd --user`, không phải root) gọi
+  `org.freedesktop.portal.RemoteDesktop`: CreateSession → SelectDevices → SelectSources → Start (GNOME hiện hộp
+  thoại xin phép, chủ chọn màn hình/cửa sổ) → OpenPipeWireRemote lấy fd hình; ảnh lấy qua `pipewiresrc` của
+  GStreamer, phím/chuột qua `NotifyPointerMotionAbsolute` / `NotifyKeyboardKeysym`. Gói cần:
+  `xdg-desktop-portal-gnome`, `gstreamer1.0-pipewire`, `python3-gi`. Thứ tự duyệt: điện thoại (bậc 3, có hạn giờ)
+  TRƯỚC, rồi mới tới hộp thoại của GNOME — hai lớp, không lớp nào thay được lớp nào.
 - **D4** ISO Desktop công khai + tăng tốc phần cứng (driver GPU, Wi-Fi), đo RAM thật (máy 5 GB chạy GNOME có đủ không).

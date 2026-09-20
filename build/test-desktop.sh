@@ -57,9 +57,10 @@ echo "→ Khởi động lại vào giao diện"
 sudo_vm 'systemctl reboot' >/dev/null 2>&1 || true
 sleep 20
 wait_ssh || { echo "✗ máy ảo không lên lại" >&2; exit 1; }
-sleep 45   # chờ GDM vẽ xong màn đăng nhập
+# Chờ greeter của GDM thực sự vẽ xong rồi mới chụp, kẻo bắt đúng lúc màn hình còn dở
+for _ in $(seq 1 30); do vm 'pgrep -u gdm -f gnome-shell >/dev/null' 2>/dev/null && break; sleep 5; done
+sleep 25
 shot man-dang-nhap
-vm 'grep -q "^logo=" /etc/dconf/db/gdm.d/99-axle' >/dev/null 2>&1 || true
 
 # CHỈ ĐỂ THỬ: bật đăng nhập tự động để chụp được màn hình làm việc (bản thật không bật)
 echo "→ Chụp màn hình làm việc (bật đăng nhập tự động, chỉ trong bài thử)"
@@ -77,7 +78,22 @@ vm 'systemctl is-active --quiet gdm3 || systemctl is-active --quiet gdm'; ok $? 
 vm 'pgrep -f gnome-shell >/dev/null'; ok $? "GNOME Shell đang chạy"
 vm 'dpkg-query -W ibus-unikey >/dev/null 2>&1'; ok $? "bộ gõ tiếng Việt IBus Unikey đã cài"
 vm 'test -f /usr/share/axle/wallpaper.png -a -f /usr/share/axle/logo.png'; ok $? "ảnh nền + logo Axle có trên máy"
+vm 'grep -q "^NAME=\"Axle OS\"" /etc/os-release && grep -q "^ID=ubuntu" /etc/os-release'; ok $? "máy tự xưng Axle OS (giữ ID=ubuntu cho apt/PPA)"
+vm 'test -f /usr/share/icons/hicolor/256x256/apps/axle.png'; ok $? "biểu tượng Axle (màn Giới thiệu)"
+vm 'test -h /etc/systemd/user/gnome-initial-setup-upgrade-login.service'; ok $? "tắt cửa sổ chào mừng Ubuntu đè lên màn hình làm việc"
+vm 'cmp -s /usr/share/icons/Yaru/scalable/actions/view-app-grid-ubuntu-symbolic.svg /usr/share/icons/Yaru/scalable/actions/view-app-grid-symbolic.svg'; ok $? "nút Hiện ứng dụng ở dock không còn logo Ubuntu"
+vm 'bash -s' <<'SH'; ok $? "mọi biểu tượng ghim trên dock đều là app có thật"
+set -e
+apps=$(sed -n "s/^favorite-apps=\[\(.*\)\]$/\1/p" /etc/dconf/db/axle.d/99-axle | tr -d "' " | tr ',' ' ')
+[ -n "$apps" ]
+for a in $apps; do
+  [ -f "/usr/share/applications/$a" ] || [ -f "/var/lib/snapd/desktop/applications/$a" ] || { echo "thiếu: $a"; exit 1; }
+done
+SH
 vm 'test -f /etc/dconf/db/axle && grep -q axle /etc/dconf/profile/user'; ok $? "mặc định giao diện Axle đã biên dịch (dconf)"
+# Kiểm HIỆU LỰC chứ không chỉ kiểm file: đọc đúng như màn đăng nhập đọc (profile gdm)
+[ "$(vm 'DCONF_PROFILE=gdm dconf read /org/gnome/login-screen/logo')" = "'/usr/share/axle/logo.png'" ]
+ok $? "màn đăng nhập THỰC SỰ lấy logo Axle (không phải logo Ubuntu)"
 vm 'readlink -f /usr/share/plymouth/themes/default.plymouth | grep -q axle'; ok $? "màn khởi động dùng bộ Axle"
 vm 'systemctl is-active --quiet axle-approve axle-vault axle-mcp-http'; ok $? "phần Server vẫn chạy nguyên (duyệt, vault, MCP)"
 [ -s "$W/man-dang-nhap.png" ]; ok $? "chụp được màn hình máy ảo ($W/man-dang-nhap.png)"

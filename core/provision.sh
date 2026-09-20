@@ -27,6 +27,7 @@ export DEBIAN_FRONTEND=noninteractive
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 
 . "$HERE/lib/apt.sh"
+. "$HERE/lib/brand.sh"
 apt_hold_timers
 is_subvol() { [ -d "$1" ] && [ "$(stat -f -c %T "$1")" = btrfs ] && [ "$(stat -c %i "$1")" = 256 ]; }
 
@@ -185,6 +186,7 @@ step "Lệnh axle + cổng MCP"
 mkdir -p /etc/axle /opt/axle /usr/local/lib/axle
 if [ -f "$HERE/../VERSION" ]; then cp "$HERE/../VERSION" /etc/axle/version   # cài từ gói phát hành
 else git -C "$HERE/.." rev-parse --short HEAD 2>/dev/null > /etc/axle/version || date +%F > /etc/axle/version; fi
+brand_os_release "$(cut -d' ' -f1 < /etc/axle/version)"   # tên hệ điều hành trong /etc/os-release
 # Chạy từ chính /opt/axle (cài bằng gói phát hành / axle update) thì không chép lên chính mình
 if [ "$(realpath "$HERE/..")" != /opt/axle ]; then
   rsync -a --delete --exclude .git --exclude work --exclude out --exclude cache --exclude node_modules \

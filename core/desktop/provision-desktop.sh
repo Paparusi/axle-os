@@ -13,6 +13,7 @@ AXLE_USER="$(cat /etc/axle/owner 2>/dev/null || getent passwd 1000 | cut -d: -f1
 export DEBIAN_FRONTEND=noninteractive
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 . "$ROOT/core/lib/apt.sh"
+. "$ROOT/core/lib/brand.sh"
 apt_hold_timers
 
 step "Chụp hệ thống trước khi thêm giao diện"
@@ -40,10 +41,35 @@ step "Nhận diện Axle"
 install -d /usr/share/axle
 install -m 0644 "$ROOT/branding/wallpaper-dark.png" /usr/share/axle/wallpaper.png
 install -m 0644 "$ROOT/branding/logo-320.png" /usr/share/axle/logo.png
+# Biểu tượng hệ điều hành (màn "Giới thiệu", cửa sổ hệ thống) — LOGO=axle trong /etc/os-release trỏ về đây
+for s in 48 64 128 256; do
+  [ -f "$ROOT/branding/icons/axle-$s.png" ] &&
+    install -Dm0644 "$ROOT/branding/icons/axle-$s.png" "/usr/share/icons/hicolor/${s}x${s}/apps/axle.png"
+done
+gtk-update-icon-cache -qf /usr/share/icons/hicolor 2>/dev/null || true
+
+brand_os_release   # tên hệ điều hành: "Axle OS ... (dựa trên Ubuntu ...)", giữ ID=ubuntu
+
+# Nút "Hiện ứng dụng" ở thanh dock lấy icon theo chế độ phiên (`view-app-grid-ubuntu-symbolic` = logo Ubuntu).
+# Đổi sang lưới chấm trung tính của Yaru — không mượn nhãn hiệu Ubuntu làm nhận diện Axle.
+UBGRID=/usr/share/icons/Yaru/scalable/actions/view-app-grid-ubuntu-symbolic.svg
+PLAIN=/usr/share/icons/Yaru/scalable/actions/view-app-grid-symbolic.svg
+if [ -f "$PLAIN" ] && [ "$(dpkg-divert --truename "$UBGRID")" = "$UBGRID" ]; then
+  dpkg-divert --quiet --local --rename --divert "$UBGRID.ubuntu" --add "$UBGRID"   # nâng cấp gói không ghi đè
+fi
+[ -f "$PLAIN" ] && [ -f "$UBGRID.ubuntu" ] && install -m 0644 "$PLAIN" "$UBGRID"
+gtk-update-icon-cache -qf /usr/share/icons/Yaru 2>/dev/null || true
+
+# Cửa sổ dòng lệnh: 26.04 thay GNOME Console bằng Ptyxis → chọn cái thật sự có trên máy
+TERM_APP=org.gnome.Ptyxis.desktop
+for c in org.gnome.Ptyxis.desktop org.gnome.Console.desktop org.gnome.Terminal.desktop; do
+  [ -f "/usr/share/applications/$c" ] && { TERM_APP="$c"; break; }
+done
+
 # Mặc định cho mọi người dùng (họ vẫn đổi được): nền tối, màu nhấn Axle Blue, ảnh nền, bộ gõ tiếng Việt
 install -d /etc/dconf/db/axle.d /etc/dconf/db/gdm.d
 rm -f /etc/dconf/db/axle.d/00-axle
-cat > /etc/dconf/db/axle.d/99-axle <<'EOF'
+cat > /etc/dconf/db/axle.d/99-axle <<EOF
 [org/gnome/desktop/background]
 picture-uri='file:///usr/share/axle/wallpaper.png'
 picture-uri-dark='file:///usr/share/axle/wallpaper.png'
@@ -57,6 +83,7 @@ primary-color='#0B0F14'
 [org/gnome/desktop/interface]
 color-scheme='prefer-dark'
 accent-color='blue'
+icon-theme='Yaru-blue-dark'
 clock-show-weekday=true
 
 [org/gnome/desktop/input-sources]
@@ -64,7 +91,7 @@ sources=[('xkb', 'us'), ('ibus', 'Unikey')]
 per-window=false
 
 [org/gnome/shell]
-favorite-apps=['firefox_firefox.desktop', 'org.gnome.Nautilus.desktop', 'org.gnome.Console.desktop', 'libreoffice-writer.desktop']
+favorite-apps=['firefox_firefox.desktop', 'org.gnome.Nautilus.desktop', '$TERM_APP', 'libreoffice-writer.desktop']
 EOF
 rm -f /etc/dconf/db/gdm.d/00-axle
 cat > /etc/dconf/db/gdm.d/99-axle <<'EOF'
@@ -76,10 +103,35 @@ banner-message-text='Axle OS — dựa trên Ubuntu'
 [org/gnome/desktop/interface]
 color-scheme='prefer-dark'
 accent-color='blue'
+icon-theme='Yaru-blue-dark'
+
+# Màn đăng nhập cũng lấy ảnh nền Axle (không thì lúc chưa vẽ xong vẫn là ảnh nền Ubuntu)
+[org/gnome/desktop/background]
+picture-uri='file:///usr/share/axle/wallpaper.png'
+picture-uri-dark='file:///usr/share/axle/wallpaper.png'
+picture-options='zoom'
+primary-color='#0B0F14'
+
+# Màn đăng nhập không cần thanh ứng dụng
+[org/gnome/shell]
+favorite-apps=[]
 EOF
+# Debian/Ubuntu KHÔNG cho màn đăng nhập đọc /etc/dconf/db/gdm: profile của họ (/usr/share/dconf/profile/gdm)
+# chỉ có user-db + file-db greeter-dconf-defaults → mọi thứ mình ghi ở trên bị bỏ qua, màn đăng nhập vẫn
+# nguyên logo Ubuntu. Đặt profile riêng ở /etc (đè /usr/share) và chèn system-db:gdm lên trước file-db.
+{ printf '%s\n' 'user-db:user' 'system-db:gdm'
+  for f in /var/lib/gdm3/greeter-dconf-defaults /var/lib/gdm/greeter-dconf-defaults; do
+    [ -f "$f" ] && printf 'file-db:%s\n' "$f"
+  done
+} > /etc/dconf/profile/gdm
 grep -q '^system-db:axle' /etc/dconf/profile/user 2>/dev/null || printf '%s\n' 'user-db:user' 'system-db:axle' > /etc/dconf/profile/user
 dconf update
-echo "  ảnh nền, màu nhấn, logo màn đăng nhập"
+
+# Lần đăng nhập đầu, Ubuntu bật "gnome-initial-setup --upgrade-user" phủ kín màn hình làm việc bằng cửa sổ chào
+# mừng của Ubuntu (người dùng tưởng máy vẫn là Ubuntu). Tắt cho mọi tài khoản.
+systemctl --global mask gnome-initial-setup-first-login.service gnome-initial-setup-upgrade-login.service >/dev/null 2>&1 || true
+
+echo "  ảnh nền, màu nhấn, logo màn đăng nhập, tên hệ điều hành, biểu tượng"
 
 # Màn khởi động: dùng bộ spinner của Ubuntu nhưng thay hình chìm bằng logo Axle
 if [ -f /usr/share/plymouth/themes/spinner/spinner.plymouth ]; then
