@@ -16,6 +16,18 @@ step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 . "$ROOT/core/lib/brand.sh"
 apt_hold_timers
 
+# Kho gói/cửa hàng snap nấc một cái (408, đứt mạng) là hỏng cả lần cài → thử lại vài lần
+apt_try() {
+  local n=0
+  until aptg install -yq "$@" >/dev/null; do
+    n=$((n + 1))
+    [ "$n" -ge 3 ] && return 1
+    echo "  kho gói lỗi tạm — thử lại lần $n sau 20 giây"
+    sleep 20
+    aptg update -q >/dev/null || true
+  done
+}
+
 step "Chụp hệ thống trước khi thêm giao diện"
 if command -v snapper >/dev/null && snapper -c root list >/dev/null 2>&1; then
   snapper -c root create -t single -c number -d "trước khi cài Axle Desktop" >/dev/null || true
@@ -25,16 +37,30 @@ else
 fi
 
 step "GNOME"
+# Lần trước cài dở (mạng đứt, cửa hàng snap lỗi) thì dpkg còn gói chưa cấu hình xong → dọn trước
+dpkg --configure -a >/dev/null 2>&1 || true
 aptg update -q
-aptg install -yq ubuntu-desktop-minimal gnome-tweaks dconf-cli >/dev/null
+# "firefox-" = KHÔNG kéo gói firefox (nó chỉ là gói vỏ gọi snap): cửa hàng snap lỗi một cái là chết cả
+# lần cài giao diện. Trình duyệt cài riêng ở bước sau, hỏng thì cũng không sao.
+apt_try ubuntu-desktop-minimal firefox- gnome-tweaks dconf-cli || { echo "✗ không cài được GNOME (kho gói lỗi)" >&2; exit 1; }
 echo "  $(dpkg-query -W -f='${Version}' gnome-shell 2>/dev/null)"
 
 step "Gõ tiếng Việt (IBus Unikey) + phông chữ"
 aptg install -yq ibus ibus-unikey fonts-noto-core language-pack-vi fonts-inter >/dev/null
 echo "  ibus-unikey $(dpkg-query -W -f='${Version}' ibus-unikey 2>/dev/null) · gõ Telex, chuyển bộ gõ bằng Super+Space"
 
+step "Trình duyệt"
+BROWSER_APP=""
+if [ -f /var/lib/snapd/desktop/applications/firefox_firefox.desktop ]; then
+  BROWSER_APP=firefox_firefox.desktop; echo "  Firefox (snap) đã có"
+elif snap install firefox >/dev/null 2>&1 || snap install firefox >/dev/null 2>&1; then
+  BROWSER_APP=firefox_firefox.desktop; echo "  Firefox (snap)"
+else
+  echo "  cửa hàng snap đang lỗi — CHƯA có trình duyệt. Cài sau: sudo snap install firefox"
+fi
+
 step "Bộ văn phòng"
-aptg install -yq libreoffice-writer libreoffice-calc libreoffice-impress >/dev/null
+apt_try libreoffice-writer libreoffice-calc libreoffice-impress || echo "  (chưa cài được bộ văn phòng, cài lại sau: sudo apt install libreoffice-writer)"
 echo "  LibreOffice $(dpkg-query -W -f='${Version}' libreoffice-writer 2>/dev/null | cut -d: -f2 | cut -d- -f1)"
 
 step "Nhận diện Axle"
@@ -64,6 +90,13 @@ gtk-update-icon-cache -qf /usr/share/icons/Yaru 2>/dev/null || true
 TERM_APP=org.gnome.Ptyxis.desktop
 for c in org.gnome.Ptyxis.desktop org.gnome.Console.desktop org.gnome.Terminal.desktop; do
   [ -f "/usr/share/applications/$c" ] && { TERM_APP="$c"; break; }
+done
+# Chỉ ghim app CÓ THẬT trên máy (thiếu trình duyệt hay bộ văn phòng thì bỏ, đừng ghim icon rỗng)
+FAVS=""
+for a in "$BROWSER_APP" org.gnome.Nautilus.desktop "$TERM_APP" libreoffice-writer.desktop; do
+  [ -n "$a" ] || continue
+  [ -f "/usr/share/applications/$a" ] || [ -f "/var/lib/snapd/desktop/applications/$a" ] || continue
+  FAVS="$FAVS${FAVS:+, }'$a'"
 done
 
 # Mặc định cho mọi người dùng (họ vẫn đổi được): nền tối, màu nhấn Axle Blue, ảnh nền, bộ gõ tiếng Việt
@@ -124,7 +157,7 @@ sources=[('xkb', 'us'), ('ibus', 'Unikey')]
 per-window=false
 
 [org/gnome/shell]
-favorite-apps=['firefox_firefox.desktop', 'org.gnome.Nautilus.desktop', '$TERM_APP', 'libreoffice-writer.desktop']
+favorite-apps=[$FAVS]
 EOF
 rm -f /etc/dconf/db/gdm.d/00-axle
 cat > /etc/dconf/db/gdm.d/99-axle <<'EOF'

@@ -5,7 +5,11 @@
 APT_TIMERS="apt-daily.timer apt-daily-upgrade.timer"
 apt_hold_timers() {
   systemctl stop $APT_TIMERS 2>/dev/null || true
-  trap 'systemctl start $APT_TIMERS 2>/dev/null || true' EXIT
+  # Dừng luôn lượt cập nhật ĐANG chạy: lần khởi động đầu, unattended-upgrades ôm khoá apt 5–20 phút,
+  # mình đứng chờ y chừng đó. Nó nhận SIGTERM thì gói đang cài vẫn cài nốt rồi mới dừng (dpkg không dở dang),
+  # phần còn lại để lượt sau cài tiếp — không mất bản vá nào.
+  systemctl stop unattended-upgrades.service apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
+  trap 'systemctl start $APT_TIMERS 2>/dev/null || true; systemctl start unattended-upgrades.service 2>/dev/null || true' EXIT
 }
 # Bận = có tiến trình đang GIỮ khoá apt/dpkg, hoặc dịch vụ apt-daily đang chạy. Không dò theo tên tiến trình:
 # unattended-upgrade-shutdown chạy THƯỜNG TRỰC, tên bị cắt còn "unattended-upgr" → dò theo tên là chờ mãi.

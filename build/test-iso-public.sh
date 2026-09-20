@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Thử ISO Axle Server công khai trên máy ảo TRỐNG: dựng bản thử (điền sẵn tài khoản) → cài → khởi động → chờ
 # axle-firstboot cài Axle từ gói trong ISO → kiểm. Không đụng máy ảo gốc của các bài thử khác (work/vm).
-#   AXLE_PASSWORD='...' build/test-iso-public.sh
+#   AXLE_PASSWORD='...' build/test-iso-public.sh [--desktop]
+# --desktop: chọn mục "Cài Axle Desktop" trong menu khởi động (lần khởi động đầu cài luôn lớp giao diện,
+#            lâu hơn nhiều: ~45–60 phút cả bài).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -12,6 +14,8 @@ export LD_LIBRARY_PATH="${Q:+$Q/usr/lib/x86_64-linux-gnu}${LD_LIBRARY_PATH:+:$LD
 QEMU="$Q/usr/bin/qemu-system-x86_64"; IMG="$Q/usr/bin/qemu-img"; OVMF="$Q/usr/share/OVMF"
 PORT=2226
 RELAY_TEST="https://relay.thu.invalid"
+DESK=0; [ "${1:-}" = --desktop ] && DESK=1
+CMDLINE="autoinstall console=ttyS0 ---"; [ "$DESK" = 1 ] && CMDLINE="autoinstall axle.edition=desktop console=ttyS0 ---"
 
 echo "→ Dựng ISO bản thử"
 "$ROOT/build/build-iso-public.sh" --test --relay "$RELAY_TEST" | tail -1
@@ -33,7 +37,7 @@ base=(-L "$Q/usr/share/qemu" -L "$Q/usr/share/seabios" -L "$Q/usr/lib/ipxe/qemu"
 
 echo "→ Cài từ ISO (10–15 phút)"
 "$QEMU" "${base[@]}" -drive "file=$ISO,if=virtio,format=raw,readonly=on" \
-  -kernel "$W/vmlinuz" -initrd "$W/initrd" -append "autoinstall console=ttyS0 ---" \
+  -kernel "$W/vmlinuz" -initrd "$W/initrd" -append "$CMDLINE" \
   -serial "file:$W/install.log" -no-reboot
 # "finish: subiquity/Install/install:" cũng in ra KHI LỖI (kèm câu lỗi) → phải bắt cả dấu hiệu lỗi
 if grep -aqE 'An error occurred|Command execution failure' "$W/install.log"; then
@@ -45,17 +49,26 @@ grep -aq 'finish: subiquity/Install/install: $' "$W/install.log" || grep -aq 'su
   || { echo "✗ Cài KHÔNG xong — xem $W/install.log" >&2; exit 1; }
 echo "  ✓ cài xong"
 
-echo "→ Khởi động máy vừa cài, chờ axle-firstboot cài Axle (tối đa 30 phút)"
+echo "→ Khởi động máy vừa cài, chờ axle-firstboot cài Axle$([ "$DESK" = 1 ] && echo ' + lớp giao diện (45–60 phút)')"
 "$QEMU" "${base[@]}" -serial "file:$W/boot.log" & PID=$!
 SSHO=(-i "$KEY" -p "$PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o ConnectTimeout=5 -o LogLevel=ERROR)
 vm() { ssh "${SSHO[@]}" admin_1@localhost "$@"; }
 trap 'ssh "${SSHO[@]}" admin_1@localhost sync 2>/dev/null; kill $PID 2>/dev/null || true' EXIT
 for _ in $(seq 1 60); do vm true 2>/dev/null && break; sleep 5; done
 done_=0
-for _ in $(seq 1 180); do
+ROUNDS=180; [ "$DESK" = 1 ] && ROUNDS=600   # bản Desktop còn tải GNOME (~1,5GB) rồi tự khởi động lại
+for i in $(seq 1 $ROUNDS); do
   if vm '[ ! -e /opt/axle-installer ] && [ -f /etc/axle/version ]' 2>/dev/null; then done_=1; break; fi
+  # 5 phút một lần in xem đang làm gì, để nhìn log biết máy còn sống hay đã treo
+  if [ $((i % 30)) = 0 ]; then
+    echo "    [$((i / 6)) phút] $(vm 'journalctl -u axle-firstboot --no-pager -o cat 2>/dev/null | grep -E "^(→|==|✓|✗)" | tail -1' 2>/dev/null || echo 'máy chưa trả lời')"
+  fi
   sleep 10
 done
+if [ "$DESK" = 1 ]; then   # bản Desktop tự khởi động lại vào màn đăng nhập → chờ máy lên lại
+  sleep 20
+  for _ in $(seq 1 60); do vm true 2>/dev/null && break; sleep 5; done
+fi
 
 set +e
 fail=0
@@ -71,5 +84,14 @@ vm 'grep -q "sẵn sàng" /etc/issue.d/50-axle.issue && grep -q "Axle Server" /e
 [ "$(vm 'findmnt -no FSTYPE /')" = btrfs ]; ok $? "ổ hệ thống btrfs"
 vm 'journalctl -u axle-firstboot --no-pager -o cat | grep -q "Axle Server .* đã sẵn sàng"'; ok $? "nhật ký firstboot ghi đủ"
 
+if [ "$DESK" = 1 ]; then
+  [ "$(vm 'cat /etc/axle/edition')" = desktop ]; ok $? "máy nhớ mình là bản Desktop (/etc/axle/edition)"
+  vm 'systemctl is-active --quiet gdm3 || systemctl is-active --quiet gdm'; ok $? "màn hình đăng nhập (GDM) chạy ngay sau lần khởi động đầu"
+  [ "$(vm 'systemctl get-default')" = graphical.target ]; ok $? "máy khởi động thẳng vào giao diện"
+  vm 'grep -q "^NAME=\"Axle OS\"" /etc/os-release'; ok $? "máy tự xưng Axle OS"
+  [ "$(vm 'gsettings get org.gnome.shell.extensions.dash-to-dock dock-position')" = "'BOTTOM'" ]
+  ok $? "phong cách Axle: thanh ứng dụng dưới đáy"
+fi
+
 if [ "$fail" != 0 ]; then echo "✗ $fail mục hỏng"; vm 'journalctl -u axle-firstboot --no-pager -o cat | tail -30'; exit 1; fi
-echo "✓ ISO công khai đạt"
+echo "✓ ISO công khai$([ "$DESK" = 1 ] && echo ' (bản Desktop)') đạt"

@@ -82,6 +82,11 @@ menuentry "Cài Axle Server — XOÁ SẠCH ổ lớn nhất trong máy" {
     linux  /casper/vmlinuz autoinstall ---
     initrd /casper/initrd
 }
+menuentry "Cài Axle Desktop (có giao diện) — XOÁ SẠCH ổ lớn nhất trong máy" {
+    set gfxpayload=keep
+    linux  /casper/vmlinuz autoinstall axle.edition=desktop ---
+    initrd /casper/initrd
+}
 menuentry "Trình cài gốc (tự chọn ổ, hỏi trước khi xoá)" {
     set gfxpayload=keep
     linux  /casper/vmlinuz  ---

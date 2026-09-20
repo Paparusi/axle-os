@@ -92,4 +92,25 @@ Ghi rõ "dựa trên Ubuntu" ở màn giới thiệu; không dùng logo Ubuntu l
   GStreamer, phím/chuột qua `NotifyPointerMotionAbsolute` / `NotifyKeyboardKeysym`. Gói cần:
   `xdg-desktop-portal-gnome`, `gstreamer1.0-pipewire`, `python3-gi`. Thứ tự duyệt: điện thoại (bậc 3, có hạn giờ)
   TRƯỚC, rồi mới tới hộp thoại của GNOME — hai lớp, không lớp nào thay được lớp nào.
-- **D4** ISO Desktop công khai + tăng tốc phần cứng (driver GPU, Wi-Fi), đo RAM thật (máy 5 GB chạy GNOME có đủ không).
+- **D4** ISO Desktop công khai: **một ISO, hai mục cài**. Mục "Cài Axle Desktop" thêm `axle.edition=desktop`
+  vào dòng lệnh nhân của trình cài → late-command ghi `/etc/axle/edition` sang máy đích → `axle-firstboot`
+  cài Axle từ gói trong ISO rồi chạy luôn `axle desktop on`, xong tự khởi động lại vào màn đăng nhập.
+  ISO không to thêm; đổi lại lần khởi động đầu cần mạng và lâu hơn 10–25 phút. Mất mạng giữa chừng thì
+  vẫn còn một máy chủ Axle chạy được, firstboot giữ lại để thử tiếp lần sau.
+  Còn nợ: driver GPU/Wi-Fi, đo RAM thật (máy văn phòng 5 GB chạy GNOME có đủ không).
+
+## Phong cách (Bi 20/9: "tinh chỉnh lại phong cách như Mac")
+
+Chỉ dùng thứ GNOME có sẵn — KHÔNG tải theme ngoài, KHÔNG nhái icon/phông của Apple. Tất cả là **mặc định
+hệ thống** (dconf), người dùng đổi lại trong Cài đặt là xong:
+
+| | Ubuntu mặc định | Axle |
+|---|---|---|
+| Thanh ứng dụng | dọc bên trái, luôn hiện | dưới đáy, co giữa, tự ẩn khi cửa sổ chạm (intellihide) |
+| Nút cửa sổ | bên phải | bên trái (đóng · thu nhỏ · phóng to) |
+| Màn hình nền | Home + Thùng rác | để trống |
+| Chữ | Ubuntu Sans | Inter (phông nhận diện Axle, có sẵn trong kho) |
+| Software Updater | tự nhảy lên | tắt (dpkg-divert + `Hidden=true`); bản vá bảo mật vẫn tự cài |
+
+Hai thứ **không** làm được sạch sẽ trên GNOME Wayland: thanh menu chung của app ở đỉnh màn hình, và đồng hồ
+dồn sang góc phải — cả hai đều cần tiện ích ngoài kho.

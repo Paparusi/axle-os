@@ -1,7 +1,10 @@
 [Unit]
 Description=Axle — thiết lập lần đầu sau khi cài bằng ISO (cài Axle từ gói có chữ ký trong ISO)
 Wants=network-online.target
-After=network-online.target
+# PHẢI chạy SAU khi hệ thống khởi động xong. Nếu chạy trong lúc multi-user.target còn dở, mọi gói mình cài
+# mà đòi bật dịch vụ (vd power-profiles-daemon của GNOME) sẽ bị xếp hàng sau target — mà target lại đang chờ
+# chính dịch vụ này → dpkg đứng im vĩnh viễn (bắt được 20/9 trên máy ảo cài từ ISO).
+After=network-online.target multi-user.target
 ConditionPathExists=/opt/axle-installer/install.sh
 
 [Service]

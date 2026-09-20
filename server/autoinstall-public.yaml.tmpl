@@ -27,6 +27,9 @@ autoinstall:
   late-commands:
     - curtin in-target -- systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
     - cp -a /cdrom/axle /target/opt/axle-installer
+    # Mục "Cài Axle Desktop" trong menu khởi động thêm axle.edition=desktop vào dòng lệnh nhân của TRÌNH CÀI;
+    # chép ý đó sang máy đích để lần khởi động đầu biết có cài lớp giao diện hay không.
+    - [sh, -c, "mkdir -p /target/etc/axle && (grep -qw axle.edition=desktop /proc/cmdline && echo desktop || echo server) > /target/etc/axle/edition"]
     - curtin in-target -- install -m 0644 /opt/axle-installer/firstboot/axle-firstboot.service /etc/systemd/system/axle-firstboot.service
     - curtin in-target -- systemctl enable axle-firstboot.service
     - [curtin, in-target, --, sh, -c, "mkdir -p /etc/issue.d && printf '%s\\n' 'Axle Server đang thiết lập lần đầu (5–15 phút, cần mạng) — tiến độ: journalctl -fu axle-firstboot' '' > /etc/issue.d/50-axle.issue"]
