@@ -121,7 +121,9 @@ def man_hinh_dang_khoa():
         return False   # không hỏi được thì thôi, để portal tự quyết
 
 
-def chup(out, timeout_s, im_lang=False):
+def chup(out, timeout_s, im_lang=False, rong=None, chat_luong=None):
+    """rong/chat_luong: chụp ra JPEG thu nhỏ (gửi qua trạm chuyển tiếp, hộp tối đa 64KB).
+    Không truyền thì ra PNG nguyên cỡ như cũ."""
     if man_hinh_dang_khoa():
         loi("màn hình của chủ đang khoá — chủ đang rời máy, không chụp")
     p = Portal(timeout_s)
@@ -160,8 +162,11 @@ def chup(out, timeout_s, im_lang=False):
     Gst.init(None)
     # Dựng ống bằng tay chứ KHÔNG ghép chuỗi: tên tệp có dấu cách hay dấu nháy là gst hiểu sai đường dẫn
     pipe = Gst.Pipeline.new("axle-shot")
+    nho = rong is not None
+    chuoi = (("pipewiresrc", "videoconvert", "videoscale", "jpegenc", "filesink") if nho
+             else ("pipewiresrc", "videoconvert", "pngenc", "filesink"))
     els = {}
-    for ten in ("pipewiresrc", "videoconvert", "pngenc", "filesink"):
+    for ten in chuoi:
         e = Gst.ElementFactory.make(ten, None)
         if e is None:
             loi(f"thiếu phần tử GStreamer '{ten}' (cài: sudo apt install gstreamer1.0-pipewire gstreamer1.0-plugins-good)")
@@ -170,11 +175,21 @@ def chup(out, timeout_s, im_lang=False):
     els["pipewiresrc"].set_property("fd", fd)
     els["pipewiresrc"].set_property("path", str(node_id))
     els["pipewiresrc"].set_property("num-buffers", 1)
-    els["pngenc"].set_property("snapshot", True)
     els["filesink"].set_property("location", out)
-    if not (els["pipewiresrc"].link(els["videoconvert"])
-            and els["videoconvert"].link(els["pngenc"])
-            and els["pngenc"].link(els["filesink"])):
+    if nho:
+        els["jpegenc"].set_property("quality", int(chat_luong or 50))
+        # Ép bề ngang, để cao tự theo tỉ lệ (-1) — không thì ảnh bị bóp méo
+        caps = Gst.Caps.from_string(f"video/x-raw,width={int(rong)},pixel-aspect-ratio=1/1")
+        noi = (els["pipewiresrc"].link(els["videoconvert"])
+               and els["videoconvert"].link(els["videoscale"])
+               and els["videoscale"].link_filtered(els["jpegenc"], caps)
+               and els["jpegenc"].link(els["filesink"]))
+    else:
+        els["pngenc"].set_property("snapshot", True)
+        noi = (els["pipewiresrc"].link(els["videoconvert"])
+               and els["videoconvert"].link(els["pngenc"])
+               and els["pngenc"].link(els["filesink"]))
+    if not noi:
         loi("không nối được ống lấy hình")
     pipe.set_state(Gst.State.PLAYING)
     msg = pipe.get_bus().timed_pop_filtered(12 * Gst.SECOND, Gst.MessageType.EOS | Gst.MessageType.ERROR)

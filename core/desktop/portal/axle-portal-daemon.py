@@ -8,6 +8,7 @@ Vì sao cần: agent chạy bằng user riêng (ag-<tên>), không với tới p
 Ổ cắm: $XDG_RUNTIME_DIR/axle-portal.sock (0600 — chỉ chủ mở được; root thì luôn mở được).
 Lệnh (mỗi dòng một JSON):
     {"cmd":"shot"}    → {"ok":true,"png":"<base64>"}   (lần đầu GNOME hỏi chủ chọn màn hình)
+    {"cmd":"shot","rong":720,"chat_luong":45} → JPEG thu nhỏ (gửi qua trạm, hộp tối đa 64KB)
     {"cmd":"forget"}  → quên giấy phép GNOME đã nhớ, lần sau hỏi lại
     {"cmd":"status"}  → còn giấy phép hay chưa
 """
@@ -56,10 +57,10 @@ def nap_moi_truong_phien():
 KHOA = threading.Lock()   # mỗi lần một lời gọi: portal không thích bị hỏi song song
 
 
-def chup_ra_bytes(timeout_s):
+def chup_ra_bytes(timeout_s, rong=None, chat_luong=None):
     with tempfile.TemporaryDirectory() as d:
-        out = os.path.join(d, "shot.png")
-        portal_lib.chup(out, timeout_s, im_lang=True)
+        out = os.path.join(d, "shot.jpg" if rong else "shot.png")
+        portal_lib.chup(out, timeout_s, im_lang=True, rong=rong, chat_luong=chat_luong)
         with open(out, "rb") as f:
             return f.read()
 
@@ -75,9 +76,13 @@ class Handler(socketserver.StreamRequestHandler):
             cmd = req.get("cmd")
             try:
                 if cmd == "shot":
+                    rong = req.get("rong")
                     with KHOA:
-                        png = chup_ra_bytes(int(req.get("timeout", 60)))
-                    self.tra({"ok": True, "png": base64.b64encode(png).decode()})
+                        anh = chup_ra_bytes(int(req.get("timeout", 60)),
+                                            rong=int(rong) if rong else None,
+                                            chat_luong=req.get("chat_luong"))
+                    self.tra({"ok": True, "png": base64.b64encode(anh).decode(),
+                              "kieu": "jpeg" if rong else "png"})
                 elif cmd == "forget":
                     portal_lib.quen_token()
                     self.tra({"ok": True})

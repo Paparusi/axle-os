@@ -395,8 +395,10 @@ const app = createAppChannel({
     log({ app: 'việc nhanh', task, ten: v.ten, device: d.name });
     const r = await v.chay();
     const ok = r.exitCode === 0;
-    app.sendTo(d.id, { type: 'task-result', task, ok, text: ok ? (v.xong ?? `${v.ten}: xong`) : cap(r.output.trim() || 'máy báo lỗi', 200) });
-    log({ app: 'việc nhanh xong', task, ok, ...(ok ? {} : { output: cap(r.output.trim(), 300) }) });
+    app.sendTo(d.id, { type: 'task-result', task, ok,
+      text: ok ? (v.xong ?? `${v.ten}: xong`) : cap(r.output.trim() || 'máy báo lỗi', 200),
+      ...(ok && r.anh ? { anh: r.anh, rong: r.rong } : {}) });
+    log({ app: 'việc nhanh xong', task, ok, ...(r.byte ? { anhByte: r.byte } : {}), ...(ok ? {} : { output: cap(r.output.trim(), 300) }) });
     v.sau?.();
   },
   async onQuery(d, what) {
@@ -425,6 +427,20 @@ const TASKS = {
     xong: 'Đang cập nhật ở nền — xem lại tình trạng sau vài phút',
     // Chạy tách hẳn khỏi bộ duyệt: bản cập nhật sẽ khởi động lại chính dịch vụ này giữa chừng
     chay: () => runProc('systemd-run', ['--unit=axle-update-tu-app', '--collect', AXLE, 'update'], {}),
+  },
+  'chup-man-hinh': {
+    ten: 'Xem màn hình máy',
+    // Hộp qua trạm chuyển tiếp tối đa 64KB → ảnh phải ≤ ~30KB. Hạ dần cho tới khi vừa, thà mờ còn hơn không có.
+    async chay() {
+      for (const [rong, chatLuong] of [[960, 55], [720, 45], [640, 32]]) {
+        const r = await ownerPortal({ cmd: 'shot', rong, chat_luong: chatLuong, timeout: 60 });
+        if (!r.ok) return { exitCode: 1, output: r.err };
+        const byte = Buffer.byteLength(r.png, 'base64');
+        if (byte <= 30_000) return { exitCode: 0, output: '', anh: r.png, rong, byte };
+        if (rong === 640) return { exitCode: 1, output: `màn hình quá nhiều chi tiết (${Math.round(byte / 1024)}KB) — xem bằng axle screen chup` };
+      }
+      return { exitCode: 1, output: 'không chụp được' };
+    },
   },
   'khoi-dong-lai': {
     ten: 'Khởi động lại máy',
