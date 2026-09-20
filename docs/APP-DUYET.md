@@ -49,6 +49,8 @@ info = "axle-box-v1")`; nội dung = ChaCha20-Poly1305(k, nonce 12 byte ngẫu n
 | máy → app | `state` | `what`, `data` — trả lời câu hỏi trên |
 | app → máy | `task` | `task`, `ts`, **`dsig`** — việc nhanh trong danh sách đóng của máy |
 | máy → app | `task-result` | `task`, `ok`, `text` |
+| app → máy | `shell` | `cmd`, `ts`, **`dsig`** — gõ lệnh; máy mặc định TẮT đường này |
+| máy → app | `shell-result` | `ok`, `code`, `user`, `text` (cắt 1500 ký tự) |
 
 `hash` = sha256 của JSON chuẩn hoá `{ id, action, params, client, nonce }` — **đúng việc đã chốt lúc xin**.
 `taskString` = `axle-task-v1|<id máy>|<tên việc>|<ts>`. Mỗi `(việc, ts)` máy chỉ làm **một lần** (chặn phát lại
@@ -63,6 +65,16 @@ trong cửa sổ 10 phút). Danh sách việc nằm ở phía MÁY và không nh
 
 Không bao giờ nhận chuỗi lệnh từ điện thoại: mất điện thoại (mà mở khoá được) thì kẻ lấy được chừng ấy nút,
 không phải cả cái máy.
+
+`shellString` = `axle-shell-v1|<id máy>|<base64url(sha256(lệnh))>|<ts>` — ký **băm của nội dung lệnh**, nên
+chữ ký chỉ đúng với đúng chuỗi lệnh đó; nối thêm một chữ vào lệnh là chữ ký hỏng.
+
+Gõ lệnh **mặc định TẮT** (`sudo axle app terminal on [--root]`, tắt: `off`). Bật rồi thì:
+chạy bằng **tài khoản chủ**, không phải root, trừ khi chủ tự bật `--root`; hạn 60 giây; kết quả cắt còn
+1500 ký tự cho lọt hộp 64KB; mọi lệnh vào `axle approve log` và `axle cmdlog`.
+
+Đây là chỗ DUY NHẤT trong kênh app cho điện thoại gửi nội dung tuỳ ý sang máy — mấy đường còn lại chỉ gửi
+được tên việc. Vì vậy nó tách riêng, mặc định tắt, và không bật kèm theo bất cứ bước cài đặt nào.
 
 `state` gói tình trạng máy (ổ, RAM, uptime, tải, agent, ảnh hệ thống, dịch vụ hỏng) — 408 byte, có bài thử
 `approve/test-machine-state.mjs` chặn lọt đường dẫn nhà / khoá / mật khẩu ra trạm chuyển tiếp.

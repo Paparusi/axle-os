@@ -79,6 +79,9 @@ export function openMsg(me, boxB64, edPubOf) {
 export const requestHash = (r) => b64u(sha256(canon({ id: r.id, action: r.action, params: r.params, client: r.client, nonce: r.nonce })));
 export const decisionString = (machineId, id, hash, decision, ts) => `axle-approve-v1|${machineId}|${id}|${hash}|${decision}|${ts}`;
 export const commandString = (machineId, cmd, agent, ts) => `axle-command-v1|${machineId}|${cmd}|${agent}|${ts}`;
+// Gõ lệnh từ app (mặc định TẮT — sudo axle app terminal on). Ký BĂM CỦA NỘI DUNG lệnh chứ không chỉ mốc giờ:
+// chữ ký chỉ đúng với đúng chuỗi lệnh đó, không tráo được lệnh sẽ chạy.
+export const shellString = (machineId, cmd, ts) => `axle-shell-v1|${machineId}|${b64u(sha256(cmd))}|${ts}`;
 // Việc nhanh bấm thẳng từ app (khoá máy, chụp ảnh hệ thống, cập nhật, khởi động lại). Điện thoại đã ghép + ký
 // bằng khoá trong chip (Face ID) = mức tin cậy T3, nên máy làm luôn, không hỏi lại qua kênh duyệt.
 export const taskString = (machineId, task, ts) => `axle-task-v1|${machineId}|${task}|${ts}`;

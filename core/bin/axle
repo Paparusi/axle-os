@@ -729,9 +729,33 @@ desktop_cmd() {   # sudo axle desktop on|off|status — lớp giao diện (docs/
   esac
 }
 
-app_cmd() {   # sudo axle app setup|pair|confirm|devices|remove
+app_cmd() {   # sudo axle app setup|pair|confirm|devices|remove|terminal
   [ "$(id -u)" = 0 ] || { echo "Cần sudo" >&2; exit 1; }
   case "${1:-devices}" in
+    # Cho phép gõ lệnh từ app. MẶC ĐỊNH TẮT: đây là thứ duy nhất trong kênh app cho điện thoại gửi nội dung
+    # tuỳ ý sang máy. Mặc định chạy bằng tài khoản chủ; --root thì cân nhắc kỹ, mất điện thoại là mất máy.
+    terminal)
+      case "${2:-status}" in
+        on)
+          local root=false
+          [ "${3:-}" = --root ] && root=true
+          jq -n --argjson r "$root" '{enabled: true, asRoot: $r, timeoutSec: 60}' \
+            | atomic_write /etc/axle/app-terminal.json root:root 0644
+          echo "Gõ lệnh từ app: BẬT · chạy bằng $([ "$root" = true ] && echo 'root ⚠️' || echo "$OWNER_USER")"
+          echo "  Lệnh nào cũng phải ký bằng Face ID và bị ghi vào: axle approve log · axle cmdlog"
+          echo "  Tắt: sudo axle app terminal off" ;;
+        off)
+          rm -f /etc/axle/app-terminal.json
+          echo "Gõ lệnh từ app: TẮT" ;;
+        status)
+          if [ -f /etc/axle/app-terminal.json ]; then
+            echo "Gõ lệnh từ app: BẬT"; sed 's/^/  /' /etc/axle/app-terminal.json
+          else
+            echo "Gõ lệnh từ app: tắt (bật: sudo axle app terminal on [--root])"
+          fi ;;
+        *) echo "sudo axle app terminal on [--root] | off | status" >&2; exit 2 ;;
+      esac
+      return ;;
     setup)
       [ "${2:-}" = --relay ] && [[ "${3:-}" =~ ^https?://[A-Za-z0-9.:-]+(/.*)?$ ]] || { echo "sudo axle app setup --relay https://trạm" >&2; exit 2; }
       jq -n --arg r "${3%/}" '{relay: $r}' | atomic_write /etc/axle/app.json root:root 0644

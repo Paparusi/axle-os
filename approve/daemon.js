@@ -405,12 +405,38 @@ const app = createAppChannel({
     if (what !== 'status') return log({ warn: `app: ${d.name} hỏi chuyện lạ ${what}` });
     app.sendTo(d.id, { type: 'state', what: 'status', data: await machineState() });
   },
+  async onShell(d, cmd) {
+    const t = terminalCfg();
+    if (!t.enabled) {
+      log({ warn: `app: ${d.name} gõ lệnh nhưng terminal đang tắt` });
+      return app.sendTo(d.id, { type: 'shell-result', ok: false, text: 'Terminal đang tắt. Bật ở máy: sudo axle app terminal on' });
+    }
+    const user = t.asRoot ? 'root' : ownerUser();
+    log({ app: 'gõ lệnh từ điện thoại', device: d.name, user, cmd: cap(cmd, 500) });
+    const giay = String(Math.min(Math.max(Number(t.timeoutSec ?? 60), 5), 300));
+    const r = t.asRoot
+      ? await runProc('timeout', [giay, 'bash', '-lc', cmd], { cwd: `/home/${ownerUser()}` })
+      : await runProc('timeout', [giay, 'runuser', '-u', ownerUser(), '--', 'bash', '-lc', cmd], { cwd: `/home/${ownerUser()}` });
+    const ra = r.output.replace(/\s+$/, '');
+    app.sendTo(d.id, { type: 'shell-result', ok: r.exitCode === 0, code: r.exitCode, user,
+      text: cap(ra || '(không in ra gì)', 1500) });
+    log({ app: 'lệnh xong', code: r.exitCode, byte: ra.length });
+  },
 });
 app.start();
 
 // Việc nhanh bấm thẳng từ app (đã ký bằng khoá Face ID trong chip = mức tin cậy T3, khỏi hỏi lại).
 // Danh sách ĐÓNG và không nhận tham số: điện thoại KHÔNG gửi được chuỗi lệnh nào sang máy. Mất điện thoại
 // (mà mở khoá được) thì kẻ lấy được chừng này nút, không phải cả cái máy.
+// Gõ lệnh từ app: MẶC ĐỊNH TẮT (không có tệp = tắt). Bật bằng `sudo axle app terminal on`.
+// Đây là thứ duy nhất trong kênh app cho điện thoại gửi nội dung tuỳ ý sang máy, nên để chủ tự bật, và
+// mặc định chạy bằng tài khoản chủ chứ không root.
+const TERMINAL_CFG = process.env.AXLE_APP_TERMINAL || '/etc/axle/app-terminal.json';
+const terminalCfg = () => {
+  try { return { enabled: false, asRoot: false, timeoutSec: 60, ...JSON.parse(readFileSync(TERMINAL_CFG, 'utf8')) }; }
+  catch { return { enabled: false, asRoot: false, timeoutSec: 60 }; }
+};
+
 const AXLE = '/usr/local/bin/axle';
 const TASKS = {
   'khoa-man-hinh': {

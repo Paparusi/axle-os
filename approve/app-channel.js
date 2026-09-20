@@ -3,7 +3,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import crypto from 'node:crypto';
 import { b64u, commandString, decisionString, idOf, newKeys, openMsg, p256Verify, qrEncode, relayHeaders, requestHash,
-  sas, sealMsg, sha256, taskString } from '../app/proto.js';
+  sas, sealMsg, shellString, sha256, taskString } from '../app/proto.js';
 import { writeDurable } from './rules.js';
 
 const DIR = process.env.AXLE_APPROVE_STATE_DIR || '/var/lib/axle-approve';
@@ -12,7 +12,7 @@ const SKEW = 600_000;   // quyết định phải ký trong 10 phút
 
 const readJson = (f, dflt) => { try { return JSON.parse(readFileSync(f, 'utf8')); } catch { return dflt; } };
 
-export function createAppChannel({ log, hostname, onDecision, onCommand, onHello, onQuery, onTask }) {
+export function createAppChannel({ log, hostname, onDecision, onCommand, onHello, onQuery, onTask, onShell }) {
   const cfg = () => readJson(CFG, {});
   const keysFile = `${DIR}/app-keys.json`; const devFile = `${DIR}/devices.json`; const stFile = `${DIR}/app-state.json`;
   let me = readJson(keysFile, null);
@@ -124,6 +124,18 @@ export function createAppChannel({ log, hostname, onDecision, onCommand, onHello
       daLam.add(khoa);
       if (daLam.size > 200) daLam.delete(daLam.values().next().value);
       onTask?.(d, t);
+      return;
+    }
+    // Gõ lệnh từ app. Ký cả nội dung lệnh, mỗi mốc giờ chỉ nhận một lần. Bật/tắt là việc của máy (onShell).
+    if (msg.type === 'shell') {
+      const c = typeof msg.cmd === 'string' ? msg.cmd : '';
+      const khoa = `shell|${msg.ts}`;
+      const ok = Number.isFinite(msg.ts) && Math.abs(Date.now() - msg.ts) <= SKEW && c && c.length <= 4000
+        && !daLam.has(khoa) && p256Verify(d.ds, shellString(me.id, c, msg.ts), msg.dsig);
+      if (!ok) { log({ warn: `app: lệnh gõ từ ${d.name} sai chữ ký / lặp lại / quá giờ` }); return; }
+      daLam.add(khoa);
+      if (daLam.size > 200) daLam.delete(daLam.values().next().value);
+      onShell?.(d, c);
       return;
     }
     if (msg.type === 'stop' || msg.type === 'start') {
