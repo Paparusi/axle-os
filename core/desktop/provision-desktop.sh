@@ -30,7 +30,7 @@ aptg install -yq ubuntu-desktop-minimal gnome-tweaks dconf-cli >/dev/null
 echo "  $(dpkg-query -W -f='${Version}' gnome-shell 2>/dev/null)"
 
 step "Gõ tiếng Việt (IBus Unikey) + phông chữ"
-aptg install -yq ibus ibus-unikey fonts-noto-core language-pack-vi >/dev/null
+aptg install -yq ibus ibus-unikey fonts-noto-core language-pack-vi fonts-inter >/dev/null
 echo "  ibus-unikey $(dpkg-query -W -f='${Version}' ibus-unikey 2>/dev/null) · gõ Telex, chuyển bộ gõ bằng Super+Space"
 
 step "Bộ văn phòng"
@@ -85,6 +85,39 @@ color-scheme='prefer-dark'
 accent-color='blue'
 icon-theme='Yaru-blue-dark'
 clock-show-weekday=true
+font-name='Inter 11'
+document-font-name='Inter 11'
+enable-hot-corners=true
+
+# Nút cửa sổ nằm BÊN TRÁI như máy Mac (trước dấu ':' là bên trái)
+[org/gnome/desktop/wm/preferences]
+button-layout='close,minimize,maximize:'
+
+# Thanh ứng dụng: dưới đáy, co lại giữa màn hình, tự ẩn khi cửa sổ chạm tới — kiểu Dock của Mac
+[org/gnome/shell/extensions/dash-to-dock]
+dock-position='BOTTOM'
+extend-height=false
+dock-fixed=false
+intellihide=true
+intellihide-mode='FOCUS_APPLICATION_WINDOWS'
+autohide=true
+show-apps-at-top=false
+show-mounts=false
+show-trash=false
+custom-theme-shrink=true
+dash-max-icon-size=48
+transparency-mode='DYNAMIC'
+running-indicator-style='DOTS'
+click-action='minimize-or-previews'
+
+# Màn hình nền để trống như Mac (Home/Thùng rác nằm trong Files và trên dock)
+[org/gnome/shell/extensions/ding]
+show-home=false
+show-trash=false
+
+[org/gnome/mutter]
+dynamic-workspaces=true
+edge-tiling=true
 
 [org/gnome/desktop/input-sources]
 sources=[('xkb', 'us'), ('ibus', 'Unikey')]
@@ -126,6 +159,17 @@ EOF
 } > /etc/dconf/profile/gdm
 grep -q '^system-db:axle' /etc/dconf/profile/user 2>/dev/null || printf '%s\n' 'user-db:user' 'system-db:axle' > /etc/dconf/profile/user
 dconf update
+
+# Bi chốt: tắt cửa sổ "Software Updater" của Ubuntu (nó nhảy lên che màn hình và đứng trên dock).
+# CHỈ tắt phần nhắc — unattended-upgrades vẫn tự cài bản vá bảo mật như cũ.
+UN=/etc/xdg/autostart/update-notifier.desktop
+if [ -f "$UN" ] && [ "$(dpkg-divert --truename "$UN")" = "$UN" ]; then
+  dpkg-divert --quiet --local --rename --divert "$UN.ubuntu" --add "$UN"
+fi
+if [ -f "$UN.ubuntu" ]; then
+  { cat "$UN.ubuntu"; printf '%s\n' 'Hidden=true' 'X-GNOME-Autostart-enabled=false'; } > "$UN"
+  chmod 0644 "$UN"
+fi
 
 # Lần đăng nhập đầu, Ubuntu bật "gnome-initial-setup --upgrade-user" phủ kín màn hình làm việc bằng cửa sổ chào
 # mừng của Ubuntu (người dùng tưởng máy vẫn là Ubuntu). Tắt cho mọi tài khoản.

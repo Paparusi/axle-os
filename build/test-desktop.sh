@@ -97,6 +97,15 @@ vm 'test -f /etc/dconf/db/axle && grep -q axle /etc/dconf/profile/user'; ok $? "
 [ "$(vm 'DCONF_PROFILE=gdm dconf read /org/gnome/login-screen/logo')" = "'/usr/share/axle/logo.png'" ]
 ok $? "màn đăng nhập THỰC SỰ lấy logo Axle (không phải logo Ubuntu)"
 vm 'readlink -f /usr/share/plymouth/themes/default.plymouth | grep -q axle'; ok $? "màn khởi động dùng bộ Axle"
+# Phong cách kiểu Mac (Bi 20/9): dock dưới đáy tự ẩn, nút cửa sổ bên trái, font Inter, màn hình nền trống
+[ "$(vm 'gsettings get org.gnome.shell.extensions.dash-to-dock dock-position')" = "'BOTTOM'" ]
+ok $? "thanh ứng dụng nằm dưới đáy như Dock của Mac"
+[ "$(vm 'gsettings get org.gnome.desktop.wm.preferences button-layout')" = "'close,minimize,maximize:'" ]
+ok $? "nút cửa sổ nằm bên trái"
+[ "$(vm 'gsettings get org.gnome.desktop.interface font-name')" = "'Inter 11'" ]; ok $? "chữ hệ thống dùng Inter (font nhận diện Axle)"
+vm 'dpkg-query -W -f="\${Status}" fonts-inter 2>/dev/null | grep -q "ok installed"'; ok $? "đã cài font Inter"
+vm 'grep -q "^Hidden=true" /etc/xdg/autostart/update-notifier.desktop'; ok $? "tắt cửa sổ Software Updater của Ubuntu"
+vm 'systemctl is-enabled --quiet unattended-upgrades'; ok $? "vẫn tự cài bản vá bảo mật (unattended-upgrades)"
 vm 'systemctl is-active --quiet axle-approve axle-vault axle-mcp-http'; ok $? "phần Server vẫn chạy nguyên (duyệt, vault, MCP)"
 [ -s "$W/man-dang-nhap.png" ]; ok $? "chụp được màn hình máy ảo ($W/man-dang-nhap.png)"
 
