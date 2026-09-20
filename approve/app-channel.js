@@ -121,7 +121,8 @@ export function createAppChannel({ log, hostname, onDecision, onCommand, onHello
   async function loop() {
     let after = readJson(stFile, {}).after ?? 0;
     for (;;) {
-      if (!cfg().relay) { await new Promise((s) => setTimeout(s, 5000)); continue; }
+      // Chỉ gọi trạm khi đã ghép điện thoại hoặc đang ghép — máy chưa dùng app không làm phiền trạm (Axle Cloud)
+      if (!cfg().relay || (!devices.length && !(codeOpen && codeOpen.expires > Date.now()))) { await new Promise((s) => setTimeout(s, 5000)); continue; }
       try {
         const t0 = Date.now();
         const r = await call('GET', `/v1/inbox?after=${after}&wait=20`);

@@ -1,0 +1,33 @@
+# Axle Server — cài từ ISO CÔNG KHAI (Ubuntu autoinstall). Không nhúng mật khẩu / khoá / tên máy của ai:
+# trình cài HỎI tên người dùng, mật khẩu, tên máy. Ổ lớn nhất bị XOÁ và chia btrfs (Axle cần btrfs cho bản chụp).
+# Lần khởi động đầu, axle-firstboot cài Axle từ gói có chữ ký nằm sẵn trong ISO (/axle).
+# build/build-iso-public.sh điền phần danh tính (bản công khai: để trống cho trình cài hỏi; bản thử máy ảo: điền sẵn).
+autoinstall:
+  version: 1
+  __INTERACTIVE__
+  locale: en_US.UTF-8
+  timezone: Asia/Ho_Chi_Minh
+  keyboard:
+    layout: us
+  __IDENTITY__
+  ssh:
+    install-server: true
+    allow-pw: true
+    __SSH_KEYS__
+  storage:
+    config:
+      - {type: disk, id: disk0, match: {size: largest}, ptable: gpt, wipe: superblock-recursive, preserve: false}
+      - {type: partition, id: part-esp, device: disk0, number: 1, size: 1G, flag: boot, grub_device: true, preserve: false}
+      - {type: format, id: fmt-esp, volume: part-esp, fstype: fat32, preserve: false}
+      - {type: partition, id: part-root, device: disk0, number: 2, size: -1, preserve: false}
+      - {type: format, id: fmt-root, volume: part-root, fstype: btrfs, preserve: false}
+      - {type: mount, id: mnt-root, device: fmt-root, path: /}
+      - {type: mount, id: mnt-esp, device: fmt-esp, path: /boot/efi}
+  updates: security
+  late-commands:
+    - curtin in-target -- systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
+    - cp -a /cdrom/axle /target/opt/axle-installer
+    - curtin in-target -- install -m 0644 /opt/axle-installer/firstboot/axle-firstboot.service /etc/systemd/system/axle-firstboot.service
+    - curtin in-target -- systemctl enable axle-firstboot.service
+    - [curtin, in-target, --, sh, -c, "mkdir -p /etc/issue.d && printf '%s\\n' 'Axle Server đang thiết lập lần đầu (5–15 phút, cần mạng) — tiến độ: journalctl -fu axle-firstboot' '' > /etc/issue.d/50-axle.issue"]
+  shutdown: reboot

@@ -26,31 +26,8 @@ export DEBIAN_FRONTEND=noninteractive
 
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 
-# Máy mới bật hay tự chạy apt ngầm (apt-daily / unattended-upgrades) → provision đụng khoá apt và hỏng giữa chừng
-# (bắt được 19/9 trên máy ảo sạch). Tạm dừng lịch cập nhật tự động, chờ lượt đang chạy xong; xong việc bật lại.
-APT_TIMERS="apt-daily.timer apt-daily-upgrade.timer"
-systemctl stop $APT_TIMERS 2>/dev/null || true
-trap 'systemctl start $APT_TIMERS 2>/dev/null || true' EXIT
-# Bận = có tiến trình đang GIỮ khoá apt/dpkg, hoặc dịch vụ apt-daily đang chạy. Không dò theo tên tiến trình:
-# unattended-upgrade-shutdown chạy THƯỜNG TRỰC, tên bị cắt còn "unattended-upgr" → dò theo tên là chờ mãi.
-apt_busy() {
-  systemctl is-active --quiet apt-daily.service apt-daily-upgrade.service unattended-upgrades-run.service 2>/dev/null && return 0
-  if command -v fuser >/dev/null; then
-    fuser /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock >/dev/null 2>&1
-  else
-    pgrep -x 'apt-get|dpkg' >/dev/null
-  fi
-}
-wait_apt() {
-  local n=0
-  while apt_busy; do
-    [ "$n" = 0 ] && echo "  chờ apt đang chạy ngầm (cập nhật tự động lúc máy mới bật)…"
-    n=$((n + 1))
-    [ "$n" -le 360 ] || { echo "  apt bận quá 30 phút" >&2; return 1; }
-    sleep 5
-  done
-}
-aptg() { wait_apt; apt-get -o DPkg::Lock::Timeout=300 "$@"; }
+. "$HERE/lib/apt.sh"
+apt_hold_timers
 is_subvol() { [ -d "$1" ] && [ "$(stat -f -c %T "$1")" = btrfs ] && [ "$(stat -c %i "$1")" = 256 ]; }
 
 # Biến một thư mục thành subvolume riêng để snapshot của / không cuốn nó theo.
@@ -75,6 +52,8 @@ if [ -n "${AXLE_HOSTNAME:-}" ] && [ "$(hostname)" != "$AXLE_HOSTNAME" ]; then
   sed -i "s/\b$old\b/$AXLE_HOSTNAME/g" /etc/hosts /etc/issue
 fi
 echo "  $(hostname)"
+# Màn đăng nhập tại chỗ: tên Axle + máy + IP. Ghi rõ nền Ubuntu (không mạo danh, không giấu nguồn).
+printf '%s\n' 'Axle Server — dựa trên Ubuntu 26.04 LTS · \n · \l' 'IP: \4' '' > /etc/issue
 
 step "Công cụ cơ bản"
 aptg update -q

@@ -4,6 +4,8 @@ set -euo pipefail
 
 SNAP=(sudo snapper -c root)          # cần mật khẩu: chỉ dùng cho undo
 QSNAP=(sudo -n /usr/local/lib/axle/axle-snap)   # cửa hẹp, không cần mật khẩu
+# Chạy dưới dịch vụ systemd (vd lần khởi động đầu của ISO) thì KHÔNG có HOME → tự suy từ tài khoản đang chạy
+HOME="${HOME:-$(getent passwd "$(id -un)" | cut -d: -f6)}"
 AUDIT="${AXLE_AUDIT:-$HOME/.local/state/axle/audit.jsonl}"
 
 usage() {
@@ -60,6 +62,7 @@ sudo axle duyet [<id> a|h|l|r]
                          xem và duyệt yêu cầu ngay tại máy (dùng được cả khi mọi kênh khác hỏng)
 axle version             bản Axle đang chạy
 sudo axle update [--from <url>]   cập nhật lên bản phát hành mới (kiểm chữ ký, chụp hệ thống trước, không hạ cấp)
+sudo axle desktop on|off · axle desktop status   lớp giao diện GNOME + gõ tiếng Việt (docs/DESKTOP.md)
 EOF
 }
 
@@ -601,6 +604,25 @@ admin_call() {   # $1 METHOD, $2 đường, $3 thân (tuỳ chọn) — socket q
   curl -s --unix-socket "$ADMIN_SOCK" -X "$1" -H 'content-type: application/json' ${3:+--data-binary "$3"} "http://x$2"
 }
 
+desktop_cmd() {   # sudo axle desktop on|off|status — lớp giao diện (docs/DESKTOP.md)
+  case "${1:-status}" in
+    on)
+      [ "$(id -u)" = 0 ] || { echo "Cần sudo: sudo axle desktop on" >&2; exit 1; }
+      exec bash /opt/axle/core/desktop/provision-desktop.sh ;;
+    off)
+      [ "$(id -u)" = 0 ] || { echo "Cần sudo: sudo axle desktop off" >&2; exit 1; }
+      systemctl set-default multi-user.target >/dev/null
+      systemctl disable gdm3 >/dev/null 2>&1 || systemctl disable gdm >/dev/null 2>&1 || true
+      echo "Đã tắt giao diện (gói vẫn còn trên máy). Bật lại: sudo axle desktop on · Có hiệu lực sau khi khởi động lại" ;;
+    status)
+      if [ "$(systemctl get-default)" = graphical.target ] && systemctl is-enabled gdm3 >/dev/null 2>&1; then
+        echo "Giao diện: BẬT · GNOME $(dpkg-query -W -f='${Version}' gnome-shell 2>/dev/null | cut -d- -f1)"
+      elif dpkg-query -W gnome-shell >/dev/null 2>&1; then echo "Giao diện: đã cài nhưng đang TẮT (sudo axle desktop on)"
+      else echo "Giao diện: chưa cài (sudo axle desktop on)"; fi ;;
+    *) usage; exit 2 ;;
+  esac
+}
+
 app_cmd() {   # sudo axle app setup|pair|confirm|devices|remove
   [ "$(id -u)" = 0 ] || { echo "Cần sudo" >&2; exit 1; }
   case "${1:-devices}" in
@@ -680,6 +702,7 @@ case "${1:-help}" in
   duyet)     shift; duyet_cmd "$@" ;;
   cmdlog)    shift; exec sudo -n /usr/local/lib/axle/axle-cmdlog "$@" ;;
   version)   cat /etc/axle/version ;;
+  desktop)   shift; desktop_cmd "$@" ;;
   update)    [ "$(id -u)" = 0 ] || { echo "Cần sudo: sudo axle update" >&2; exit 1; }
              shift; exec bash /opt/axle/core/install.sh --update "$@" ;;
   help|-h|--help) usage ;;

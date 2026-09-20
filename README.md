@@ -19,7 +19,20 @@ destructive needs your approval, signed by the secure chip in your phone. Server
 - **Dừng khẩn cấp** một agent hay tất cả, **cấp quyền có hạn** (thư mục, mạng), **nhật ký lệnh agent không xoá được**
   (auditd), **bản chụp btrfs + `axle undo`**.
 
-## Cài
+## Cài bằng ISO (dễ nhất)
+
+Tải ISO: **https://pub-849ee4c26f7749fa9139b27185298865.r2.dev/iso/axle-server-0.1.52.iso** (2,8 GB) ·
+bản kê có chữ ký: [`latest-iso.json`](https://pub-849ee4c26f7749fa9139b27185298865.r2.dev/iso/latest-iso.json)
++ [`.sig`](https://pub-849ee4c26f7749fa9139b27185298865.r2.dev/iso/latest-iso.json.sig)
+
+Ghi ra USB (Rufus, balenaEtcher, `dd`) → khởi động máy từ USB → chọn **"Cài Axle Server — XOÁ SẠCH ổ lớn nhất trong
+máy"** → nhập tên, tên máy, mật khẩu. Máy **không tự chọn** mục nào: cắm nhầm máy thì không mất gì.
+
+> ⚠️ Mục cài sẽ **xoá sạch ổ đĩa lớn nhất** trong máy. Rút hết ổ ngoài trước khi cài.
+
+Cài xong, lần khởi động đầu máy tự cài Axle (5–15 phút, cần mạng) rồi báo ở màn đăng nhập.
+
+## Cài lên máy Ubuntu có sẵn
 
 Trên Ubuntu Server 26.04 với ổ hệ thống **btrfs** (máy thật hoặc máy ảo):
 
