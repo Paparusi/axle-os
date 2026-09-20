@@ -432,6 +432,12 @@ const TASKS = {
     ten: 'Xem màn hình máy',
     // Hộp qua trạm chuyển tiếp tối đa 64KB → ảnh phải ≤ ~30KB. Hạ dần cho tới khi vừa, thà mờ còn hơn không có.
     async chay() {
+      // Chưa đồng ý lần nào thì GNOME sẽ bật hộp thoại TẠI MÁY — người cầm điện thoại ở xa không bấm được.
+      // Thà báo ngay còn hơn để app ngồi chờ hết 60 giây rồi mới biết.
+      const tt = await ownerPortal({ cmd: 'status' }, 10_000);
+      if (tt.ok && tt.co_giay_phep === false) {
+        return { exitCode: 1, output: 'Máy chưa được đồng ý chia sẻ màn hình lần nào. Ra ngồi trước máy, mở Terminal gõ: axle screen chup — rồi bấm Share một lần. Từ đó về sau xem được từ xa.' };
+      }
       for (const [rong, chatLuong] of [[960, 55], [720, 45], [640, 32]]) {
         const r = await ownerPortal({ cmd: 'shot', rong, chat_luong: chatLuong, timeout: 60 });
         if (!r.ok) return { exitCode: 1, output: r.err };
