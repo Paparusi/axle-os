@@ -45,8 +45,28 @@ info = "axle-box-v1")`; nội dung = ChaCha20-Poly1305(k, nonce 12 byte ngẫu n
 | máy → app | `update` | `id`, `state` (đã quyết ở kênh khác / hết hạn / xong) |
 | app → máy | `decision` | `id`, `hash`, `decision` (`a` lần này · `h` 1 giờ · `l` luôn · `r` từ chối), `ts`, **`dsig`** |
 | app → máy | `stop` / `start` | `agent`, `ts`, **`dsig`** (dừng khẩn cấp / mở lại) |
+| app → máy | `query` | `what` (`status`) — hỏi, chỉ đọc, không cần chữ ký duyệt |
+| máy → app | `state` | `what`, `data` — trả lời câu hỏi trên |
+| app → máy | `task` | `task`, `ts`, **`dsig`** — việc nhanh trong danh sách đóng của máy |
+| máy → app | `task-result` | `task`, `ok`, `text` |
 
 `hash` = sha256 của JSON chuẩn hoá `{ id, action, params, client, nonce }` — **đúng việc đã chốt lúc xin**.
+`taskString` = `axle-task-v1|<id máy>|<tên việc>|<ts>`. Mỗi `(việc, ts)` máy chỉ làm **một lần** (chặn phát lại
+trong cửa sổ 10 phút). Danh sách việc nằm ở phía MÁY và không nhận tham số — app chỉ gọi được tên:
+
+| Tên việc | Máy làm gì |
+|---|---|
+| `khoa-man-hinh` | `loginctl lock-sessions` |
+| `chup-anh` | `axle snapshot "từ điện thoại"` |
+| `cap-nhat` | `axle update` (chạy tách qua `systemd-run`, vì bản mới khởi động lại chính bộ duyệt) |
+| `khoi-dong-lai` | trả lời cho app trước, 2 giây sau `systemctl reboot` |
+
+Không bao giờ nhận chuỗi lệnh từ điện thoại: mất điện thoại (mà mở khoá được) thì kẻ lấy được chừng ấy nút,
+không phải cả cái máy.
+
+`state` gói tình trạng máy (ổ, RAM, uptime, tải, agent, ảnh hệ thống, dịch vụ hỏng) — 408 byte, có bài thử
+`approve/test-machine-state.mjs` chặn lọt đường dẫn nhà / khoá / mật khẩu ra trạm chuyển tiếp.
+
 `dsig` = ECDSA P-256 (khoá trong chip, vân tay) trên chuỗi
 `axle-approve-v1|<id máy>|<id yêu cầu>|<hash>|<decision>|<ts>`. Máy chỉ làm theo khi: điện thoại đã ghép cặp,
 chữ ký đúng, `hash` khớp đúng yêu cầu đang chờ, `ts` trong 10 phút. Duyệt qua app đạt **mức tin cậy T3** →

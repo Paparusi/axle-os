@@ -79,6 +79,9 @@ export function openMsg(me, boxB64, edPubOf) {
 export const requestHash = (r) => b64u(sha256(canon({ id: r.id, action: r.action, params: r.params, client: r.client, nonce: r.nonce })));
 export const decisionString = (machineId, id, hash, decision, ts) => `axle-approve-v1|${machineId}|${id}|${hash}|${decision}|${ts}`;
 export const commandString = (machineId, cmd, agent, ts) => `axle-command-v1|${machineId}|${cmd}|${agent}|${ts}`;
+// Việc nhanh bấm thẳng từ app (khoá máy, chụp ảnh hệ thống, cập nhật, khởi động lại). Điện thoại đã ghép + ký
+// bằng khoá trong chip (Face ID) = mức tin cậy T3, nên máy làm luôn, không hỏi lại qua kênh duyệt.
+export const taskString = (machineId, task, ts) => `axle-task-v1|${machineId}|${task}|${ts}`;
 // Khoá P-256 của điện thoại: điểm thô 65 byte (04‖X‖Y, iOS) hoặc SPKI DER (Android), base64url
 export function p256Key(b64) {
   const raw = unb64u(b64);

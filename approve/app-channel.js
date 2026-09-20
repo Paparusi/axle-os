@@ -3,7 +3,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import crypto from 'node:crypto';
 import { b64u, commandString, decisionString, idOf, newKeys, openMsg, p256Verify, qrEncode, relayHeaders, requestHash,
-  sas, sealMsg, sha256 } from '../app/proto.js';
+  sas, sealMsg, sha256, taskString } from '../app/proto.js';
 import { writeDurable } from './rules.js';
 
 const DIR = process.env.AXLE_APPROVE_STATE_DIR || '/var/lib/axle-approve';
@@ -12,7 +12,7 @@ const SKEW = 600_000;   // quyết định phải ký trong 10 phút
 
 const readJson = (f, dflt) => { try { return JSON.parse(readFileSync(f, 'utf8')); } catch { return dflt; } };
 
-export function createAppChannel({ log, hostname, onDecision, onCommand, onHello, onQuery }) {
+export function createAppChannel({ log, hostname, onDecision, onCommand, onHello, onQuery, onTask }) {
   const cfg = () => readJson(CFG, {});
   const keysFile = `${DIR}/app-keys.json`; const devFile = `${DIR}/devices.json`; const stFile = `${DIR}/app-state.json`;
   let me = readJson(keysFile, null);
@@ -87,6 +87,7 @@ export function createAppChannel({ log, hostname, onDecision, onCommand, onHello
     return null;
   }
 
+  const daLam = new Set();   // (việc|mốc giờ) đã làm, chặn phát lại trong cửa sổ lệch giờ
   function handle(m) {
     const opened = openMsg(me, m.box, (from, msg) => {
       const d = devices.find((x) => x.id === from);
@@ -113,6 +114,18 @@ export function createAppChannel({ log, hostname, onDecision, onCommand, onHello
     // App hỏi máy một chuyện gì đó (chỉ ĐỌC, không làm gì đổi máy) → máy trả lời bằng tin 'state'.
     // Không đòi chữ ký duyệt: hộp đã niêm phong bằng khoá ghép cặp, đọc được tức là đúng điện thoại của chủ.
     if (msg.type === 'query') { onQuery?.(d, String(msg.what || '').slice(0, 32), msg); return; }
+    // Việc nhanh từ app: phải ký bằng khoá Face ID, và mỗi (việc, mốc giờ) chỉ làm MỘT lần — chống phát lại
+    if (msg.type === 'task') {
+      const t = String(msg.task || '');
+      const khoa = `${t}|${msg.ts}`;
+      const ok = Number.isFinite(msg.ts) && Math.abs(Date.now() - msg.ts) <= SKEW && /^[a-z][a-z-]{1,20}$/.test(t)
+        && !daLam.has(khoa) && p256Verify(d.ds, taskString(me.id, t, msg.ts), msg.dsig);
+      if (!ok) { log({ warn: `app: việc ${t} từ ${d.name} sai chữ ký / lặp lại / quá giờ` }); return; }
+      daLam.add(khoa);
+      if (daLam.size > 200) daLam.delete(daLam.values().next().value);
+      onTask?.(d, t);
+      return;
+    }
     if (msg.type === 'stop' || msg.type === 'start') {
       const ok = Number.isFinite(msg.ts) && Math.abs(Date.now() - msg.ts) <= SKEW && /^[a-z][a-z0-9-]{1,20}$/.test(msg.agent || '')
         && p256Verify(d.ds, commandString(me.id, msg.type, msg.agent, msg.ts), msg.dsig);

@@ -389,12 +389,51 @@ const app = createAppChannel({
     app.broadcast({ type: 'agents', list: agentList() }).catch(() => {});
   },
   onHello(d) { app.sendTo(d.id, { type: 'agents', list: agentList() }); },
+  async onTask(d, task) {
+    const v = TASKS[task];
+    if (!v) return log({ warn: `app: ${d.name} xin việc lạ ${task}` });
+    log({ app: 'việc nhanh', task, ten: v.ten, device: d.name });
+    const r = await v.chay();
+    const ok = r.exitCode === 0;
+    app.sendTo(d.id, { type: 'task-result', task, ok, text: ok ? (v.xong ?? `${v.ten}: xong`) : cap(r.output.trim() || 'máy báo lỗi', 200) });
+    log({ app: 'việc nhanh xong', task, ok, ...(ok ? {} : { output: cap(r.output.trim(), 300) }) });
+    v.sau?.();
+  },
   async onQuery(d, what) {
     if (what !== 'status') return log({ warn: `app: ${d.name} hỏi chuyện lạ ${what}` });
     app.sendTo(d.id, { type: 'state', what: 'status', data: await machineState() });
   },
 });
 app.start();
+
+// Việc nhanh bấm thẳng từ app (đã ký bằng khoá Face ID trong chip = mức tin cậy T3, khỏi hỏi lại).
+// Danh sách ĐÓNG và không nhận tham số: điện thoại KHÔNG gửi được chuỗi lệnh nào sang máy. Mất điện thoại
+// (mà mở khoá được) thì kẻ lấy được chừng này nút, không phải cả cái máy.
+const AXLE = '/usr/local/bin/axle';
+const TASKS = {
+  'khoa-man-hinh': {
+    ten: 'Khoá màn hình máy',
+    xong: 'Đã khoá màn hình máy',
+    chay: () => runProc('loginctl', ['lock-sessions'], {}),
+  },
+  'chup-anh': {
+    ten: 'Chụp ảnh hệ thống',
+    chay: () => runProc(AXLE, ['snapshot', 'từ điện thoại'], {}),
+  },
+  'cap-nhat': {
+    ten: 'Cập nhật Axle',
+    xong: 'Đang cập nhật ở nền — xem lại tình trạng sau vài phút',
+    // Chạy tách hẳn khỏi bộ duyệt: bản cập nhật sẽ khởi động lại chính dịch vụ này giữa chừng
+    chay: () => runProc('systemd-run', ['--unit=axle-update-tu-app', '--collect', AXLE, 'update'], {}),
+  },
+  'khoi-dong-lai': {
+    ten: 'Khởi động lại máy',
+    xong: 'Máy đang khởi động lại',
+    chay: async () => ({ exitCode: 0, output: '' }),
+    // Trả lời cho điện thoại TRƯỚC rồi mới tắt, kẻo app treo ở "đang gửi"
+    sau: () => setTimeout(() => runProc('systemctl', ['reboot'], {}), 2000),
+  },
+};
 
 // Danh sách agent cho app (màn Agent / dừng khẩn cấp): tên, vai, đang tạm dừng không. Không gửi token/băm token.
 function agentList() {

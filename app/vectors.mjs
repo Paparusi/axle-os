@@ -4,7 +4,7 @@
 //   node app/vectors.mjs check <vectors.json> <priv.json> <swift-out.json> — Node đóng vai máy Axle kiểm ngược
 import crypto from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { b64u, canon, commandString, decisionString, edSign, idOf, newKeys, openMsg, p256Verify, qrEncode, relayVerify,
+import { b64u, canon, commandString, decisionString, edSign, idOf, newKeys, openMsg, p256Verify, qrEncode, relayVerify, taskString,
   sas, seal, sealMsg } from './proto.js';
 
 const [cmd, ...args] = process.argv.slice(2);
@@ -35,7 +35,8 @@ if (cmd === 'gen') {
     sas: { mx: machine.xPub, dx: phone.xPub, code, value: sas(machine.xPub, phone.xPub, code) },
     qr: qrEncode({ r: 'https://relay.axle.test', m: machine.id, e: machine.edPub, x: machine.xPub, c: code, n: 'axle-office' }),
     strings: { decision: decisionString(machine.id, 'a1b2c3d4', 'HASH', 'a', 1789824150123),
-      command: commandString(machine.id, 'stop', 'bot2', 1789824150123) },
+      command: commandString(machine.id, 'stop', 'bot2', 1789824150123),
+      task: taskString(machine.id, 'khoa-man-hinh', 1789824150123) },
   };
   writeFileSync(pubOut, JSON.stringify(vectors, null, 1));
   writeFileSync(privOut, JSON.stringify({ machine }));
@@ -50,8 +51,8 @@ if (cmd === 'gen') {
 
   ok(out.phone.id === v.phone.id && idOf(out.phone.edPub) === out.phone.id, 'Swift dựng đúng id điện thoại từ khoá');
   const opened = out.boxes.map((b) => ({ b, o: openMsg(machine, b.box, (from) => (from === v.phone.id ? v.phone.edPub : null)) }));
-  ok(opened.length === 3 && opened.every(({ b, o }) => o && o.from === v.phone.id && canon(o.msg) === canon(b.msg)),
-    'máy mở được 3 hộp Swift gửi (ghép cặp / quyết định / dừng), chữ ký Ed25519 đúng');
+  ok(opened.length === 4 && opened.every(({ b, o }) => o && o.from === v.phone.id && canon(o.msg) === canon(b.msg)),
+    'máy mở được 4 hộp Swift gửi (ghép cặp / quyết định / dừng / việc nhanh), chữ ký Ed25519 đúng');
   const pair = opened[0]?.o?.msg;
   ok(pair?.type === 'pair' && idOf(pair.de) === v.phone.id && pair.code === v.sas.code && pair.ds === out.ds,
     'tin ghép cặp: khoá khớp id người gửi, đúng mã trong QR, kèm khoá P-256');
@@ -63,6 +64,11 @@ if (cmd === 'gen') {
   const s = opened[2]?.o?.msg;
   ok(!!s && s.type === 'stop' && p256Verify(out.ds, commandString(machine.id, s.type, s.agent, s.ts), s.dsig),
     'lệnh dừng khẩn cấp ký P-256 — máy kiểm đúng');
+  const t = opened[3]?.o?.msg;
+  ok(!!t && t.type === 'task' && p256Verify(out.ds, taskString(machine.id, t.task, t.ts), t.dsig),
+    'việc nhanh ký P-256 — máy kiểm đúng như onTask');
+  ok(!!t && !p256Verify(out.ds, taskString(machine.id, 'khoi-dong-lai', t.ts), t.dsig),
+    'đổi tên việc (khoá màn hình → khởi động lại) thì chữ ký hỏng');
   ok(!!relayVerify(out.relay.headers, out.relay.method, out.relay.path, out.relay.body), 'trạm chấp nhận chữ ký lời gọi của Swift');
   ok(!relayVerify(out.relay.headers, out.relay.method, out.relay.path, `${out.relay.body} `), 'sửa thân lời gọi → trạm từ chối');
   ok(out.canon.length === 3 && out.canon.every((c) => canon(JSON.parse(c)) === c),
