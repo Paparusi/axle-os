@@ -51,10 +51,18 @@ them() {
 
   # Bọc thành một tệp chạy được: danh sách trắng của agent chỉ trỏ tới tệp này, không nhận URL tuỳ ý.
   # Mỗi app một hồ sơ riêng → đăng nhập Cargo không đá đăng nhập PGX, và agent không dùng chung phiên với chủ.
+  # --remote-debugging-port=0: Chromium tự chọn cổng RỖI rồi ghi số vào <hồ sơ>/DevToolsActivePort.
+  # KHÔNG dùng cổng cố định: giao thức CDP không có xác thực, ai trên máy đoán trúng số cổng là chiếm được
+  # trình duyệt đó. Cổng ngẫu nhiên thì phải quét mới tìm ra. Che số cổng là nhờ THƯ MỤC hồ sơ 0700 (bản
+  # thân tệp DevToolsActivePort do Chromium tạo với quyền 0644) — nên thư mục đó phải đúng 0700, và cổng
+  # vẫn là loopback không xác thực: đây là rào cản, không phải khoá.
+  # Nhờ cổng này mà agent ĐỌC ĐƯỢC trang thành bảng phần tử đánh số thay vì bấm mò theo toạ độ.
   cat > "$BINDIR/axle-web-$ten" <<EOF
 #!/bin/sh
 # Sinh bởi: axle webapp them $ten $url
-exec "$td" --app=$url --user-data-dir="\$HOME/.local/share/axle-web/$ten" --class=axle-web-$ten "\$@"
+HS="\$HOME/.local/share/axle-web/$ten"
+mkdir -p "\$HS" && chmod 0700 "\$HS"
+exec "$td" --app=$url --user-data-dir="\$HS" --class=axle-web-$ten --remote-debugging-port=0 "\$@"
 EOF
   chmod 0755 "$BINDIR/axle-web-$ten"
 

@@ -20,13 +20,27 @@
 //
 // Không cần cài gì: dùng chrome-headless-shell có sẵn + WebSocket sẵn trong Node 22.
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 const CHROME = process.env.AXLE_CHROME || [
   '/home/admin_1/.cache/ms-playwright/chromium_headless_shell-1223/chrome-headless-shell-linux64/chrome-headless-shell',
   '/snap/bin/chromium', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome',
 ].find((p) => existsSync(p));
-const PORT = Number(process.env.AXLE_CDP_PORT || 9333);
+// Cổng CDP: đặt thẳng bằng AXLE_CDP_PORT, hoặc để AXLE_CDP_PROFILE trỏ vào thư mục hồ sơ Chromium rồi
+// đọc số cổng Chromium tự chọn trong DevToolsActivePort. Cách sau dùng cho web app của Axle — cổng ngẫu
+// nhiên, file chỉ chủ hồ sơ đọc được.
+function timCong() {
+  if (process.env.AXLE_CDP_PORT) return Number(process.env.AXLE_CDP_PORT);
+  const hs = process.env.AXLE_CDP_PROFILE;
+  if (hs) {
+    try {
+      const n = Number(readFileSync(`${hs}/DevToolsActivePort`, 'utf8').split('\n')[0].trim());
+      if (n > 0) return n;
+    } catch { throw new Error(`không đọc được cổng gỡ lỗi ở ${hs}/DevToolsActivePort — app đã mở chưa?`); }
+  }
+  return 9333;
+}
+const PORT = timCong();
 
 // ---------------------------------------------------------------- CDP tối giản
 async function noiCDP() {

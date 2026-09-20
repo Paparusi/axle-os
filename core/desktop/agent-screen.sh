@@ -16,7 +16,9 @@ CLIENTS=/etc/axle/mcp-clients.json
 DISPLAYS=/etc/axle/displays.json
 APPS=/etc/axle/screen-apps.json
 SHOTS=/var/lib/axle/screens
-SCREEN_TOOLS='["screen_shot","screen_windows","screen_open","screen_click","screen_type","screen_key","screen_scroll"]'
+# Bật màn hình riêng là cấp kèm cả bộ đọc web theo BẢNG PHẦN TỬ: agent mở web app trên màn hình của nó thì
+# phải đọc được trang, chứ không chỉ bấm mò theo toạ độ.
+SCREEN_TOOLS='["screen_shot","screen_windows","screen_open","screen_click","screen_type","screen_key","screen_scroll","web_snapshot","web_click","web_type","web_key","web_scroll","web_text"]'
 
 NAME="${1:-}"; ACTION="${2:-status}"; shift 2 2>/dev/null || true
 [[ "$NAME" =~ ^[a-z][a-z0-9-]{1,20}$ ]] || { echo "axle agent screen <tên> on|off|status|anh|xem|ngung-xem" >&2; exit 2; }

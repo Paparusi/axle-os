@@ -210,7 +210,7 @@ mcp_cmd() {
 }
 
 # Công cụ cấp được cho agent riêng. Snapshot, Docker, log: chỉ chủ máy (việc toàn hệ thống / quyền ngang root).
-AGENT_TOOLS='["system_status","service_status","file_list","file_read","file_search","file_write","vault_list","http_request","run_command","service_restart","file_delete","approval_status","screen_shot","screen_windows","screen_open","screen_click","screen_type","screen_key","screen_scroll","owner_screen_shot"]'
+AGENT_TOOLS='["system_status","service_status","file_list","file_read","file_search","file_write","vault_list","http_request","run_command","service_restart","file_delete","approval_status","screen_shot","screen_windows","screen_open","screen_click","screen_type","screen_key","screen_scroll","web_snapshot","web_click","web_type","web_key","web_scroll","web_text","owner_screen_shot"]'
 
 save_clients() { atomic_write "$MCP_CLIENTS" root:axle-gw 0640; }   # cửa trước đọc được, agent thì không
 
