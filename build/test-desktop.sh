@@ -50,6 +50,8 @@ echo "  ✓ Axle Server $(vm 'cat /etc/axle/version')"
 
 echo "→ axle desktop on (tải GNOME, 10–20 phút)"
 sudo_vm 'axle desktop on' > "$W/desktop.log" 2>&1; rc=$?
+# dconf update lỗi kiểu dữ liệu thì vẫn in ra rồi đi tiếp — bắt luôn, đừng để lọt xuống dưới
+grep -qE "^error:|invalid value" "$W/desktop.log" && { grep -E "^error:|invalid value" "$W/desktop.log" | head -3; rc=1; }
 sed 's/\x1b\[[0-9;]*m//g' "$W/desktop.log" | grep -E '^== |^  ' | tail -12 | sed 's/^/    /'
 [ $rc = 0 ] || { echo "✗ axle desktop on lỗi" >&2; exit 1; }
 

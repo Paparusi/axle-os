@@ -112,9 +112,9 @@ picture-uri-dark='file:///usr/share/axle/wallpaper.png'
 picture-options='zoom'
 primary-color='#0B0F14'
 
-# Màn đăng nhập không cần thanh ứng dụng
+# Màn đăng nhập không cần thanh ứng dụng ("@as []" = mảng chuỗi rỗng; viết "[]" trơn thì dconf không đoán được kiểu)
 [org/gnome/shell]
-favorite-apps=[]
+favorite-apps=@as []
 EOF
 # Debian/Ubuntu KHÔNG cho màn đăng nhập đọc /etc/dconf/db/gdm: profile của họ (/usr/share/dconf/profile/gdm)
 # chỉ có user-db + file-db greeter-dconf-defaults → mọi thứ mình ghi ở trên bị bỏ qua, màn đăng nhập vẫn
