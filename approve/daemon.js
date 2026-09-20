@@ -418,8 +418,9 @@ const app = createAppChannel({
       ? await runProc('timeout', [giay, 'bash', '-lc', cmd], { cwd: `/home/${ownerUser()}` })
       : await runProc('timeout', [giay, 'runuser', '-u', ownerUser(), '--', 'bash', '-lc', cmd], { cwd: `/home/${ownerUser()}` });
     const ra = r.output.replace(/\s+$/, '');
+    // 8000 ký tự vẫn lọt hộp 64KB của trạm, mà đủ chỗ cho câu trả lời của `claude -p` hay một khúc log
     app.sendTo(d.id, { type: 'shell-result', ok: r.exitCode === 0, code: r.exitCode, user,
-      text: cap(ra || '(không in ra gì)', 1500) });
+      text: cap(ra || '(không in ra gì)', 8000) });
     log({ app: 'lệnh xong', code: r.exitCode, byte: ra.length });
   },
 });

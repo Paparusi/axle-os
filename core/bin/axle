@@ -737,11 +737,19 @@ app_cmd() {   # sudo axle app setup|pair|confirm|devices|remove|terminal
     terminal)
       case "${2:-status}" in
         on)
-          local root=false
-          [ "${3:-}" = --root ] && root=true
-          jq -n --argjson r "$root" '{enabled: true, asRoot: $r, timeoutSec: 60}' \
+          local root=false giay=60
+          set -- "${@:3}"        # bỏ "terminal on", còn lại là tuỳ chọn
+          while [ $# -gt 0 ]; do
+            case "$1" in
+              --root)    root=true; shift ;;
+              --giay)    giay="${2:-60}"; shift 2 ;;   # lệnh lâu (vd `claude -p`) cần nhiều hơn 60 giây
+              *)         echo "sudo axle app terminal on [--root] [--giay 180]" >&2; exit 2 ;;
+            esac
+          done
+          [[ "$giay" =~ ^[0-9]+$ ]] && [ "$giay" -ge 5 ] && [ "$giay" -le 300 ] || { echo "--giay trong khoảng 5-300" >&2; exit 2; }
+          jq -n --argjson r "$root" --argjson g "$giay" '{enabled: true, asRoot: $r, timeoutSec: $g}' \
             | atomic_write /etc/axle/app-terminal.json root:root 0644
-          echo "Gõ lệnh từ app: BẬT · chạy bằng $([ "$root" = true ] && echo 'root ⚠️' || echo "$OWNER_USER")"
+          echo "Gõ lệnh từ app: BẬT · chạy bằng $([ "$root" = true ] && echo 'root ⚠️' || echo "$OWNER_USER") · hạn ${giay}s"
           echo "  Lệnh nào cũng phải ký bằng Face ID và bị ghi vào: axle approve log · axle cmdlog"
           echo "  Tắt: sudo axle app terminal off" ;;
         off)
