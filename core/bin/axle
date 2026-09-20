@@ -60,6 +60,7 @@ sudo axle app devices | remove <id>
                          điện thoại đã ghép / gỡ một điện thoại
 sudo axle duyet [<id> a|h|l|r]
                          xem và duyệt yêu cầu ngay tại máy (dùng được cả khi mọi kênh khác hỏng)
+axle bench [--nghiem]    đo cái giá Axle bắt máy trả: RAM lúc rảnh, khởi động, snapshot, đĩa
 axle version             bản Axle đang chạy
 sudo axle update [--from <url>]   cập nhật lên bản phát hành mới (kiểm chữ ký, chụp hệ thống trước, không hạ cấp)
 sudo axle desktop on|off · axle desktop status   lớp giao diện GNOME + gõ tiếng Việt (docs/DESKTOP.md)
@@ -843,6 +844,7 @@ case "${1:-help}" in
   desktop)   shift; desktop_cmd "$@" ;;
   screen)    shift; screen_cmd "$@" ;;
   dangnhap)  shift; dangnhap_cmd "$@" ;;
+  bench)     shift; exec bash /opt/axle/core/bench.sh "$@" ;;
   update)    [ "$(id -u)" = 0 ] || { echo "Cần sudo: sudo axle update" >&2; exit 1; }
              shift; exec bash /opt/axle/core/install.sh --update "$@" ;;
   help|-h|--help) usage ;;

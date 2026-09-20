@@ -174,6 +174,13 @@ export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] || curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/$1/install.sh" | bash >/dev/null
 . "$NVM_DIR/nvm.sh"
 nvm install "$2" >/dev/null 2>&1
+# nvm TỪ CHỐI chạy khi ~/.npmrc có `prefix` hoặc `globalconfig` — ai lỡ đặt (vd để `npm -g` khỏi cần root)
+# là `axle update` chết đứng ở đây, kèm một dòng lỗi chẳng liên quan gì tới Axle. Gỡ trước, đừng để nó chặn.
+if grep -qE '^\s*(prefix|globalconfig)\s*=' "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}" 2>/dev/null; then
+  npm config delete prefix >/dev/null 2>&1 || true
+  npm config delete globalconfig >/dev/null 2>&1 || true
+  echo "  (đã gỡ prefix/globalconfig trong ~/.npmrc — nvm không chạy chung được với nó)"
+fi
 nvm alias default "$2" >/dev/null
 command -v pm2 >/dev/null || npm install -g pm2 >/dev/null 2>&1
 echo "  node $(node -v), pm2 $(pm2 -v 2>/dev/null | tail -1)"
@@ -278,6 +285,28 @@ for _ in 1 2 3 4 5; do [ -S /run/axle-vault/vault.sock ] && break; sleep 1; done
 echo "  node hệ thống $(/usr/bin/node -v), $(jq length /var/lib/axle-vault/secrets.json) khoá"
 
 /usr/local/bin/axle agent resync
+
+step "Khởi động thẳng, không chờ menu"
+# Axle bắt ổ gốc btrfs (để có snapshot/undo). Đổi lại GRUB KHÔNG ghi được `grubenv` trên btrfs, nên Ubuntu
+# đặt recordfail_broken=1 và ép `timeout=30, timeout_style=menu` cho MỌI máy EFI — đo thật trên máy văn
+# phòng 20/9: khởi động 1 phút 7 giây, riêng GRUB ăn 32,8 giây. Trả 30 giây mỗi lần bật máy cho một tính
+# năng cứu hộ mà Axle đã có đường khác (snapshot, `axle undo`, SSH, USB).
+# Đặt lại ở mảnh 99_ (chạy sau 00_header nên đè được), giữ 1 giây để vẫn kịp bấm Esc vào menu khi cần.
+cat > /etc/grub.d/99_axle_boot <<'GRUBD'
+#!/bin/sh
+# Sinh bởi Axle (core/provision.sh) — đừng sửa tay, chạy lại provision là ghi đè.
+exec cat <<'EOF'
+if [ "${recordfail}" != 1 ]; then
+  set timeout_style=hidden
+  set timeout=1
+fi
+EOF
+GRUBD
+chmod 0755 /etc/grub.d/99_axle_boot
+if command -v update-grub >/dev/null; then
+  update-grub >/dev/null 2>&1 || true
+  echo "  bỏ 30 giây chờ menu của EFI (giữ 1 giây, bấm Esc vẫn vào được)"
+fi
 
 step "Duyệt qua Telegram"
 install -m 0644 /opt/axle/approve/axle-approve.service /etc/systemd/system/axle-approve.service

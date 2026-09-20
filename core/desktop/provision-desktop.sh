@@ -265,6 +265,22 @@ if [ -f "$G" ]; then
   fi
 fi
 
+step "Một bộ quản lý mạng thôi"
+# Bản Server cài từ ISO dùng systemd-networkd; cài thêm lớp giao diện thì GNOME kéo NetworkManager vào.
+# Để cả hai cùng chạy là tranh route/DNS, và mỗi lần khởi động phải chờ HAI dịch vụ "wait-online"
+# (đo trên máy văn phòng 20/9: 6,7s + 4,5s). Giao diện thì để NetworkManager cầm, tắt hẳn networkd.
+if systemctl is-enabled --quiet NetworkManager 2>/dev/null; then
+  for f in /etc/netplan/*.yaml; do
+    [ -f "$f" ] || continue
+    grep -q 'renderer:.*NetworkManager' "$f" || sed -i 's/^\(\s*\)version: 2/\1version: 2\n\1renderer: NetworkManager/' "$f"
+  done
+  chmod 0600 /etc/netplan/*.yaml 2>/dev/null || true
+  netplan generate >/dev/null 2>&1 || true
+  systemctl disable --now systemd-networkd-wait-online.service >/dev/null 2>&1 || true
+  systemctl disable --now systemd-networkd.service systemd-networkd.socket >/dev/null 2>&1 || true
+  echo "  NetworkManager cầm mạng, tắt systemd-networkd (đỡ ~11 giây mỗi lần khởi động)"
+fi
+
 step "Bật màn hình đăng nhập"
 systemctl set-default graphical.target >/dev/null
 systemctl enable gdm3 >/dev/null 2>&1 || systemctl enable gdm >/dev/null 2>&1 || true
