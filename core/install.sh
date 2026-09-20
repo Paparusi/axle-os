@@ -29,9 +29,14 @@ for c in curl openssl tar python3 sha256sum; do command -v "$c" >/dev/null || di
 
 T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
+# `latest.json` bị CDN của GitHub giữ bản cũ theo từng điểm phát: 20/9 máy văn phòng thấy 0.1.104 trong khi
+# máy đóng gói thấy 0.1.106 — `axle update` báo "đã mới nhất" mà thật ra không phải. Bảo CDN đừng dùng bản
+# nhớ sẵn, và thêm một tham số ngẫu nhiên cho chắc. Tệp tarball thì tên đã có số bản nên không cần.
 fetch() {
+  local nocache=""
+  case "$1" in latest.json|latest.json.sig) nocache="?t=$$-$(date +%s)" ;; esac
   case "$FROM" in
-    http://*|https://*) curl -fsSL --retry 3 "$FROM/$1" -o "$T/$1" ;;
+    http://*|https://*) curl -fsSL --retry 3 -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' "$FROM/$1$nocache" -o "$T/$1" ;;
     *) cp "$FROM/$1" "$T/$1" ;;
   esac
 }

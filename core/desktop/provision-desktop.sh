@@ -85,6 +85,26 @@ gtk-update-icon-cache -qf /usr/share/icons/hicolor 2>/dev/null || true
 
 brand_os_release   # tên hệ điều hành: "Axle OS ... (dựa trên Ubuntu ...)", giữ ID=ubuntu
 
+step "Cửa sổ Axle (bật/tắt mọi thứ không cần dòng lệnh)"
+# Tới trước hôm nay mọi sức mạnh của Axle đều nằm sau `sudo axle …`; người cài xong mà không ai chỉ thì
+# chỉ thấy một bản Ubuntu đổi màu. Cửa sổ này đưa tính năng đã có ra khỏi terminal: xem tình trạng máy,
+# ghép điện thoại bằng mã QR hiện ngay trên màn hình, bật/tắt đăng nhập bằng điện thoại và gõ lệnh từ app.
+install -m 0755 "$HERE/axle-gui.py" /usr/local/bin/axle-gui
+cat > /usr/share/applications/vn.axleos.Axle.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Axle
+Comment=Tình trạng máy, ghép điện thoại, bật tắt tính năng
+Exec=/usr/local/bin/axle-gui
+Icon=axle
+Terminal=false
+Categories=System;Settings;
+StartupWMClass=vn.axleos.Axle
+EOF
+chmod 0644 /usr/share/applications/vn.axleos.Axle.desktop
+update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
+echo "  mở từ trình đơn ứng dụng, tên \"Axle\""
+
 step "Bộ ứng dụng văn phòng"
 # Máy làm việc thật thì ngày nào cũng cần: mở PDF (vận đơn, hoá đơn), xem ảnh, quét giấy tờ, giải nén,
 # thêm máy in. Ubuntu bản tối giản không kèm mấy thứ này. Tên gói trên 26.04: papers thay evince,
@@ -99,6 +119,21 @@ echo "  PDF, ảnh, máy quét, nén, máy in, soạn thảo nhanh"
 if ! command -v chromium >/dev/null 2>&1; then
   snap install chromium >/dev/null 2>&1 && echo "  chromium (cho web app dạng cửa sổ riêng)" \
     || echo "  ! chưa cài được chromium — chạy lại sau: sudo snap install chromium"
+fi
+
+# Hai thứ văn phòng Việt Nam ngày nào cũng mở mà Linux không có bản cài: Zalo và hộp thư.
+# Zalo có bản gói lại do người ngoài làm — KHÔNG dùng, không rõ nguồn. Đường sạch là chạy bản web trong
+# cửa sổ riêng. Chỉ tạo nếu chưa có, để người dùng xoá rồi thì lần cài sau không tự mọc lại.
+if command -v chromium >/dev/null 2>&1 || [ -x /snap/bin/chromium ]; then
+  for w in "zalo|https://chat.zalo.me|Zalo|internet-chat" "gmail|https://mail.google.com|Gmail|internet-mail"; do
+    IFS='|' read -r wten wurl whien wicon <<<"$w"
+    # `[ … ] && continue` mà điều kiện sai là trả về 1 → set -e giết cả script. Luôn dùng if cho tường minh.
+    if [ ! -f "/usr/share/applications/axle-web-$wten.desktop" ]; then
+      if bash "$HERE/webapp.sh" them "$wten" "$wurl" "$whien" --icon "$wicon" >/dev/null 2>&1; then
+        echo "  $whien (bản web, cửa sổ riêng)"
+      fi
+    fi
+  done
 fi
 
 # Nút "Hiện ứng dụng" ở thanh dock lấy icon theo chế độ phiên (`view-app-grid-ubuntu-symbolic` = logo Ubuntu).
@@ -118,8 +153,8 @@ for c in org.gnome.Ptyxis.desktop org.gnome.Console.desktop org.gnome.Terminal.d
 done
 # Chỉ ghim app CÓ THẬT trên máy (thiếu trình duyệt hay bộ văn phòng thì bỏ, đừng ghim icon rỗng)
 FAVS=""
-for a in "$BROWSER_APP" org.gnome.Nautilus.desktop "$TERM_APP" libreoffice-calc.desktop libreoffice-writer.desktop \
-         org.gnome.Papers.desktop org.gnome.Evince.desktop; do
+for a in vn.axleos.Axle.desktop "$BROWSER_APP" axle-web-zalo.desktop axle-web-gmail.desktop org.gnome.Nautilus.desktop "$TERM_APP" \
+         libreoffice-calc.desktop libreoffice-writer.desktop org.gnome.Papers.desktop org.gnome.Evince.desktop; do
   [ -n "$a" ] || continue
   [ -f "/usr/share/applications/$a" ] || [ -f "/var/lib/snapd/desktop/applications/$a" ] || continue
   FAVS="$FAVS${FAVS:+, }'$a'"

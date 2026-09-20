@@ -734,6 +734,16 @@ desktop_cmd() {   # sudo axle desktop on|off|status — lớp giao diện (docs/
 }
 
 app_cmd() {   # sudo axle app setup|pair|confirm|devices|remove|terminal
+  # `terminal status` chỉ đọc một tệp 0644 — cho xem không cần sudo, để cửa sổ Axle mở ra là thấy ngay
+  # trạng thái công tắc mà không phải hỏi mật khẩu.
+  if [ "${1:-}" = terminal ] && [ "${2:-}" = status ]; then
+    if [ -f /etc/axle/app-terminal.json ]; then
+      echo "Gõ lệnh từ app: BẬT"; sed 's/^/  /' /etc/axle/app-terminal.json
+    else
+      echo "Gõ lệnh từ app: tắt (bật: sudo axle app terminal on [--root])"
+    fi
+    return
+  fi
   [ "$(id -u)" = 0 ] || { echo "Cần sudo" >&2; exit 1; }
   case "${1:-devices}" in
     # Cho phép gõ lệnh từ app. MẶC ĐỊNH TẮT: đây là thứ duy nhất trong kênh app cho điện thoại gửi nội dung
@@ -820,7 +830,8 @@ case "${1:-help}" in
   status)    status ;;
   snapshot)  n="$("${QSNAP[@]}" create "${2:-thủ công}")"
              echo "Đã chụp snapshot #$n" ;;
-  snapshots) "${QSNAP[@]}" list | { head -2; tail -n 20; } ;;
+  snapshots) if [ "${2:-}" = --csv ]; then "${QSNAP[@]}" csv      # cho cửa sổ Axle đọc: số,ngày,mô tả
+             else "${QSNAP[@]}" list | { head -2; tail -n 20; }; fi ;;
   diff)      need_num "${2:-}"; "${QSNAP[@]}" status "$2" ;;
   undo)      need_num "${2:-}"
              if [ "${3:-}" != "--yes" ]; then
