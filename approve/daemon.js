@@ -340,15 +340,25 @@ async function createRequest({ action, params, client }, who) {
   }
   r.text = `🔐 ${hostname()} · cần duyệt #${id}\nAgent: ${r.client}\nViệc: ${A.describe(clean, who)}${extra}\n${tierLine(r)}\nHết hạn sau ${c.expireSec < 120 ? `${c.expireSec} giây` : `${Math.round(c.expireSec / 60)} phút`}`;
   r.hash = requestHash(r);
-  if (c.owner) {
-    const msg = await tg('sendMessage', { chat_id: c.owner, text: cap(r.text, 4000), reply_markup: { inline_keyboard: keyboard(r) } });
-    r.messageId = msg.message_id;
-  }
+  // Gửi SONG SONG tới mọi kênh. Trước đây chờ Telegram xong mới tới app, mà đo thật trên máy văn phòng
+  // 20/9: Telegram 623ms, trạm chuyển tiếp 291ms — nghĩa là điện thoại (kênh chính, có Face ID) luôn rung
+  // SAU kênh dự phòng khoảng sáu phần mười giây, mỗi lần duyệt.
+  // Và chỉ hỏng khi KHÔNG kênh nào gửi được: Telegram chết mà app sống thì vẫn duyệt được như thường.
+  const gui = [];
   if (app.enabled()) {
     r.toApp = true;
-    app.broadcast({ type: 'request', id: r.id, hash: r.hash, tier: tierOf(r), agent: r.client, action: r.action, params: r.params, text: r.text,
-      buttons: keyboard(r).flat().map((b) => b.callback_data.slice(-1)).join(''), expires: r.created + c.expireSec * 1000 }).catch(() => {});
+    gui.push(app.broadcast({ type: 'request', id: r.id, hash: r.hash, tier: tierOf(r), agent: r.client, action: r.action, params: r.params, text: r.text,
+      buttons: keyboard(r).flat().map((b) => b.callback_data.slice(-1)).join(''), expires: r.created + c.expireSec * 1000 }));
   }
+  if (c.owner) {
+    gui.push(tg('sendMessage', { chat_id: c.owner, text: cap(r.text, 4000), reply_markup: { inline_keyboard: keyboard(r) } })
+      .then((msg) => { r.messageId = msg.message_id; }));
+  }
+  const ketQua = await Promise.allSettled(gui);
+  if (ketQua.length && !ketQua.some((x) => x.status === 'fulfilled')) {
+    throw new Error(`không gửi được yêu cầu tới kênh nào: ${ketQua.map((x) => x.reason?.message).filter(Boolean).join(' · ')}`);
+  }
+  for (const x of ketQua) if (x.status === 'rejected') log({ id, warn: `một kênh duyệt hỏng: ${x.reason?.message}` });
   requests.set(id, r);
   log({ id, state: 'pending', action, client: r.client, params: clean });
   return r;
