@@ -147,6 +147,17 @@ def chup(out, timeout_s, im_lang=False, rong=None, chat_luong=None):
     if not streams:
         loi("chủ đồng ý nhưng không chọn màn hình nào")
     node_id = streams[0][0]
+    # Cỡ màn hình thật, để tính chiều cao theo tỉ lệ. Ép mỗi bề ngang thì videoscale giữ nguyên bề cao
+    # → ảnh bẹp dí (thấy ngay trong bài thử 20/9: 320x240 ép ngang 960 ra 960x240).
+    co_that = None
+    try:
+        sz = (streams[0][1] or {}).get("size")
+        if sz is not None:
+            sz = sz.unpack() if hasattr(sz, "unpack") else sz
+            if sz and len(sz) == 2 and sz[0] > 0 and sz[1] > 0:
+                co_that = (int(sz[0]), int(sz[1]))
+    except (AttributeError, TypeError, ValueError):
+        co_that = None
 
     fd_list = None
     try:
@@ -162,8 +173,11 @@ def chup(out, timeout_s, im_lang=False, rong=None, chat_luong=None):
     Gst.init(None)
     # Dựng ống bằng tay chứ KHÔNG ghép chuỗi: tên tệp có dấu cách hay dấu nháy là gst hiểu sai đường dẫn
     pipe = Gst.Pipeline.new("axle-shot")
-    nho = rong is not None
+    # Không biết cỡ thật thì thà để nguyên cỡ (chỉ nén JPEG) còn hơn gửi ảnh bẹp
+    nho = rong is not None and co_that is not None
+    jpeg = rong is not None
     chuoi = (("pipewiresrc", "videoconvert", "videoscale", "jpegenc", "filesink") if nho
+             else ("pipewiresrc", "videoconvert", "jpegenc", "filesink") if jpeg
              else ("pipewiresrc", "videoconvert", "pngenc", "filesink"))
     els = {}
     for ten in chuoi:
@@ -176,13 +190,19 @@ def chup(out, timeout_s, im_lang=False, rong=None, chat_luong=None):
     els["pipewiresrc"].set_property("path", str(node_id))
     els["pipewiresrc"].set_property("num-buffers", 1)
     els["filesink"].set_property("location", out)
-    if nho:
+    if jpeg:
         els["jpegenc"].set_property("quality", int(chat_luong or 50))
-        # Ép bề ngang, để cao tự theo tỉ lệ (-1) — không thì ảnh bị bóp méo
-        caps = Gst.Caps.from_string(f"video/x-raw,width={int(rong)},pixel-aspect-ratio=1/1")
+    if nho:
+        rong = min(int(rong), co_that[0])
+        cao = max(2, round(co_that[1] * rong / co_that[0]) // 2 * 2)   # chẵn: jpegenc không thích số lẻ
+        caps = Gst.Caps.from_string(f"video/x-raw,width={rong},height={cao},pixel-aspect-ratio=1/1")
         noi = (els["pipewiresrc"].link(els["videoconvert"])
                and els["videoconvert"].link(els["videoscale"])
                and els["videoscale"].link_filtered(els["jpegenc"], caps)
+               and els["jpegenc"].link(els["filesink"]))
+    elif jpeg:
+        noi = (els["pipewiresrc"].link(els["videoconvert"])
+               and els["videoconvert"].link(els["jpegenc"])
                and els["jpegenc"].link(els["filesink"]))
     else:
         els["pngenc"].set_property("snapshot", True)
