@@ -203,8 +203,10 @@ chown -R root:root /opt/axle
 install -m 0755 "$HERE/bin/axle" /usr/local/bin/axle
 install -m 0755 -o root -g root "$HERE/lib/axle-snap" /usr/local/lib/axle/axle-snap
 install -m 0755 -o root -g root "$HERE/lib/axle-cmdlog" /usr/local/lib/axle/axle-cmdlog
-# User thường chụp/xem snapshot và đọc nhật ký lệnh không cần mật khẩu, CHỈ qua 2 cửa hẹp này
-echo "$AXLE_USER ALL=(root) NOPASSWD: /usr/local/lib/axle/axle-snap, /usr/local/lib/axle/axle-cmdlog" > /etc/sudoers.d/axle.new
+install -m 0755 -o root -g root "$HERE/lib/axle-agents" /usr/local/lib/axle/axle-agents
+# User thường chụp/xem snapshot, đọc nhật ký lệnh và XEM danh sách agent không cần mật khẩu, CHỈ qua 3 cửa
+# hẹp này. Cửa agent lọc sạch: không bao giờ in token hay băm token.
+echo "$AXLE_USER ALL=(root) NOPASSWD: /usr/local/lib/axle/axle-snap, /usr/local/lib/axle/axle-cmdlog, /usr/local/lib/axle/axle-agents" > /etc/sudoers.d/axle.new
 chmod 0440 /etc/sudoers.d/axle.new
 visudo -cqf /etc/sudoers.d/axle.new && mv /etc/sudoers.d/axle.new /etc/sudoers.d/axle
 usermod -aG systemd-journal "$AXLE_USER"   # đọc log hệ thống không cần sudo

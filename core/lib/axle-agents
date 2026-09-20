@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Đọc danh sách agent cho user thường qua sudo NOPASSWD (xem /etc/sudoers.d/axle) — CHỈ ĐỌC, và chỉ mấy
+# trường vô hại. Tệp gốc /etc/axle/mcp-clients.json là root:axle-gw 0640 vì nó chứa băm token; cửa này
+# lọc sạch, không bao giờ in token hay băm token ra.
+#
+# Có cửa này thì cửa sổ Axle mở lên là thấy ngay máy đang có agent nào — khỏi hỏi mật khẩu chỉ để XEM.
+set -euo pipefail
+CLIENTS=/etc/axle/mcp-clients.json
+STATE=/etc/axle/agents-state.json
+
+[ -r "$CLIENTS" ] || { echo '[]'; exit 0; }
+st="$(cat "$STATE" 2>/dev/null || echo '{}')"
+
+# Chạy không phải cứ in ra: hỏi systemd từng agent phụ một
+chay_khong() {
+  systemctl is-active --quiet "axle-mcp@$1.socket" 2>/dev/null && echo true || echo false
+}
+
+# KHÔNG nuốt lỗi bằng `|| true`: jq hỏng hay tệp gãy mà vẫn trả [] thì cửa sổ Axle hiện "chưa có agent nào"
+# trong khi máy đang có — giao diện nói dối còn tệ hơn báo lỗi.
+ten_list="$(jq -r 'keys[]' "$CLIENTS")" || { echo "✗ không đọc được $CLIENTS" >&2; exit 1; }
+out='[]'
+for n in $ten_list; do
+  vai="$(jq -r --arg n "$n" '.[$n].role // "phu"' "$CLIENTS")"
+  song=false
+  [ "$vai" = phu ] && song="$(chay_khong "$n")"
+  out="$(jq --arg n "$n" --argjson song "$song" --argjson st "$st" --slurpfile c <(jq --arg n "$n" '.[$n]' "$CLIENTS") '
+    . + [{
+      ten: $n,
+      vai: ($c[0].role // "phu"),
+      user: ($c[0].user // null),
+      cong_cu: ($c[0].tools // []),
+      tao: ($c[0].created // null),
+      tam_dung: ((($st.suspended // []) | index($n)) != null),
+      dang_chay: $song
+    }]' <<<"$out")"
+done
+printf '%s\n' "$out"

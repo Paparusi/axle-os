@@ -848,7 +848,8 @@ case "${1:-help}" in
                journalctl -u 'axle-mcp@*' -u axle-mcp-http -o cat --no-pager -n 500 2>/dev/null | grep '^{' || true
              } | jq -sc "sort_by(.ts) | .[-${2:-20}:][]" | jq -r '"\(.ts | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601 | localtime | strftime("%d/%m %H:%M:%S")) \(if .ok then "✓" else "✗" end) \(.tool) \(.args // {why: .why} | tostring) \(.ms // 0)ms \(.client // .from // "")"' ;;
   vault)     shift; vault_cmd "$@" ;;
-  agents)    agent_cmd list ;;
+  agents)    if [ "${2:-}" = --json ]; then exec sudo -n /usr/local/lib/axle/axle-agents   # cho cửa sổ Axle
+             else agent_cmd list; fi ;;
   agent)     shift; agent_cmd "$@" ;;
   approve)   shift; approve_cmd "$@" ;;
   app)       shift; app_cmd "$@" ;;

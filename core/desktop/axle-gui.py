@@ -10,6 +10,7 @@ Nguyên tắc:
   * Chỉ lúc ĐỔI thứ gì mới gọi `pkexec axle …` → hộp thoại mật khẩu chuẩn của hệ thống.
   * Mỗi công tắc kèm một câu nói rõ đánh đổi. Không có nút nào mà người dùng phải đoán nó làm gì.
 """
+import json
 import os
 import re
 import subprocess
@@ -57,22 +58,48 @@ class Trang(Adw.PreferencesPage):
 
 class CuaSo(Adw.ApplicationWindow):
     def __init__(self, app):
-        super().__init__(application=app, title="Axle", default_width=640, default_height=720)
+        super().__init__(application=app, title="Axle", default_width=900, default_height=720)
         self.toast = Adw.ToastOverlay()
-        view = Adw.ToolbarView()
         self.tabs = Adw.ViewStack()
-        chuyen = Adw.ViewSwitcher(stack=self.tabs, policy=Adw.ViewSwitcherPolicy.WIDE)
-        dau = Adw.HeaderBar(title_widget=chuyen)   # giữ tham chiếu; ToolbarView không cho lấy lại thanh đã thêm
-        view.add_top_bar(dau)
-        view.set_content(self.tabs)
-        self.toast.set_child(view)
-        self.set_content(self.toast)
 
-        # add_titled() KHÔNG nhận icon — dùng nó thì thanh chuyển tab hiện ô vuông rỗng thay cho biểu tượng
-        self.tabs.add_titled_with_icon(self.trang_tong_quan(), "may", "Máy", "computer-symbolic")
-        self.tabs.add_titled_with_icon(self.trang_dien_thoai(), "dt", "Điện thoại", "phone-symbolic")
-        self.tabs.add_titled_with_icon(self.trang_tinh_nang(), "tn", "Tính năng", "preferences-system-symbolic")
-        self.tabs.add_titled_with_icon(self.trang_quay_lai(), "ql", "Quay lại", "edit-undo-symbolic")
+        # Thanh bên chứ không phải thẻ ngang: tới mục thứ năm là thẻ ngang cắt cụt chữ ("Điện t…", "Quay …").
+        # Đây cũng là cách Cài đặt của GNOME làm, và thêm mục sau này không vỡ bố cục.
+        muc = [("may", "Máy", "computer-symbolic", self.trang_tong_quan),
+               ("dt", "Điện thoại", "phone-symbolic", self.trang_dien_thoai),
+               ("tn", "Tính năng", "preferences-system-symbolic", self.trang_tinh_nang),
+               ("ag", "Agent", "network-workgroup-symbolic", self.trang_agent),
+               ("ql", "Quay lại", "edit-undo-symbolic", self.trang_quay_lai)]
+        self.ten_muc = Adw.WindowTitle(title="Axle")   # tiêu đề bên phải đổi theo mục đang mở
+        ds = Gtk.ListBox(css_classes=["navigation-sidebar"])
+
+        def chon(_b, r):
+            if not r:
+                return
+            ma, ten = muc[r.get_index()][0], muc[r.get_index()][1]
+            self.tabs.set_visible_child_name(ma)
+            self.ten_muc.set_title(ten)
+        ds.connect("row-selected", chon)
+        for ma, ten, icon, dung in muc:
+            self.tabs.add_titled(dung(), ma, ten)
+            hop = Gtk.Box(spacing=12, margin_top=8, margin_bottom=8, margin_start=6, margin_end=6)
+            hop.append(Gtk.Image(icon_name=icon))
+            hop.append(Gtk.Label(label=ten, xalign=0))
+            ds.append(Gtk.ListBoxRow(child=hop))
+        ds.select_row(ds.get_row_at_index(0))
+
+        ben = Adw.ToolbarView()
+        ben.add_top_bar(Adw.HeaderBar(title_widget=Adw.WindowTitle(title="Axle")))
+        ben.set_content(Gtk.ScrolledWindow(child=ds, hscrollbar_policy=Gtk.PolicyType.NEVER))
+        noi_dung = Adw.ToolbarView()
+        noi_dung.add_top_bar(Adw.HeaderBar(title_widget=self.ten_muc))
+        noi_dung.set_content(self.tabs)
+
+        chia = Adw.NavigationSplitView(
+            sidebar=Adw.NavigationPage(child=ben, title="Axle"),
+            content=Adw.NavigationPage(child=noi_dung, title="Axle"),
+            min_sidebar_width=200, max_sidebar_width=240)
+        self.toast.set_child(chia)
+        self.set_content(self.toast)
         self.lam_moi()
 
     def bao(self, chu):
@@ -296,6 +323,71 @@ class CuaSo(Adw.ApplicationWindow):
             return False
         self.chay_nen(args, True, "Đã đổi", sau=sau)
 
+
+    # ---------- Agent ----------
+    def trang_agent(self):
+        """Agent là lý do Axle tồn tại, mà cửa sổ này lại chưa cho thấy máy đang có agent nào, nó được
+        phép làm gì, và dừng nó ở đâu. Xem danh sách KHÔNG cần mật khẩu (cửa hẹp axle-agents lọc sạch,
+        không bao giờ đưa token ra)."""
+        t = Trang("Agent", "network-workgroup-symbolic")
+        self.nhom_agent = Adw.PreferencesGroup(
+            title="Agent trên máy này",
+            description="Mỗi agent chạy bằng một tài khoản riêng trong hộp cát, chỉ dùng được những công cụ "
+                        "bạn cấp, và mọi việc hệ trọng đều phải xin bạn duyệt.")
+        t.add(self.nhom_agent)
+        GLib.idle_add(self.nap_agent)
+        return t
+
+    def nap_agent(self):
+        for cu in list(getattr(self, "_hang_agent", [])):
+            self.nhom_agent.remove(cu)
+        self._hang_agent = []
+
+        def them(r):
+            self.nhom_agent.add(r)
+            self._hang_agent.append(r)
+
+        ma, ra = chay("agents", "--json")
+        try:
+            ds = json.loads(ra) if ma == 0 else []
+        except ValueError:
+            ds = []
+        if ma != 0:
+            them(Adw.ActionRow(title="Chưa đọc được danh sách agent",
+                               subtitle=(ra.splitlines()[-1] if ra else "")))
+            return False
+        if not ds:
+            them(Adw.ActionRow(
+                title="Chưa có agent nào",
+                # KHÔNG dùng dấu ngoặc nhọn trong chữ của libadwaita: phụ đề chạy qua Pango markup nên
+                # "<tên>" bị hiểu là thẻ và làm vỡ cả hàng
+                subtitle="Thêm ở cửa sổ dòng lệnh:  sudo axle agent add TÊN --vai chinh\n"
+                         "Trợ lý chính dùng quyền của bạn (trừ vùng bí mật); agent phụ sống trong hộp cát riêng."))
+            return False
+
+        for a in ds:
+            ten = a.get("ten", "?")
+            chinh = a.get("vai") == "chinh"
+            dung = a.get("tam_dung")
+            if chinh:
+                phu_de = "trợ lý chính · dùng quyền của bạn, trừ vault"
+            else:
+                cc = a.get("cong_cu") or []
+                phu_de = f"{a.get('user') or '?'} · {len(cc)} công cụ: {', '.join(cc[:4])}{'…' if len(cc) > 4 else ''}"
+            r = Adw.ActionRow(title=ten, subtitle=phu_de)
+            nhan = Gtk.Label(label="TẠM DỪNG" if dung else ("đang chạy" if a.get("dang_chay") else "sẵn sàng"),
+                             css_classes=["dim-label"] if not dung else ["error"])
+            r.add_suffix(nhan)
+            nut = Gtk.Button(label="Mở lại" if dung else "Dừng khẩn cấp", valign=Gtk.Align.CENTER,
+                             css_classes=[] if dung else ["destructive-action"])
+            nut.connect("clicked", self.doi_agent, ten, bool(dung))
+            r.add_suffix(nut)
+            them(r)
+        return False
+
+    def doi_agent(self, _nut, ten, dang_dung):
+        lenh = ("agent", "start" if dang_dung else "stop", ten)
+        self.chay_nen(lenh, True, f"Đã {'mở lại' if dang_dung else 'dừng'} {ten}", sau=self.nap_agent)
 
     # ---------- Quay lại ----------
     def trang_quay_lai(self):
