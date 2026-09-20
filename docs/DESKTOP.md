@@ -121,3 +121,43 @@ hệ thống** (dconf), người dùng đổi lại trong Cài đặt là xong:
 
 Hai thứ **không** làm được sạch sẽ trên GNOME Wayland: thanh menu chung của app ở đỉnh màn hình, và đồng hồ
 dồn sang góc phải — cả hai đều cần tiện ích ngoài kho.
+
+## Đăng nhập bằng điện thoại (nhịp D5)
+
+Bi hỏi 20/9: *"sao không cho xác nhận đăng nhập qua app"*. Máy đã có sẵn đường duyệt bậc 3 qua điện thoại
+(Face ID) cho mấy việc như xem màn hình hay undo hệ thống — đăng nhập chỉ là thêm một loại yêu cầu nữa.
+
+```
+sudo axle dangnhap on      # gắn vào màn đăng nhập
+axle dangnhap status
+sudo axle dangnhap off     # gỡ, quay lại gõ mật khẩu
+```
+
+Ngồi xuống máy, bấm vào tên mình → điện thoại đổ chuông *"ĐĂNG NHẬP vào máy bằng tài khoản admin_1
+(/dev/tty1)"* → chạm duyệt là vào, **không gõ mật khẩu**.
+
+**Vì sao không khoá chết máy được.** Dòng gắn vào PAM là `sufficient`, không phải `required`:
+
+| Chuyện xảy ra | Kết quả |
+|---|---|
+| Chủ chạm duyệt | vào thẳng |
+| Chủ bấm từ chối | hiện ô mật khẩu như cũ |
+| Không ai chạm (25 giây) | hiện ô mật khẩu như cũ |
+| Điện thoại hết pin, mất mạng, bộ duyệt chết | hiện ô mật khẩu **ngay** (không chờ) |
+| Script hỏng, thiếu node, sai cú pháp | hiện ô mật khẩu như cũ |
+
+Chèn **ngay trước `@include common-auth`**, nên `pam_nologin` và lớp chặn root vẫn nguyên. File PAM nào
+không có `common-auth` thì `pam-edit.py` **từ chối sửa** thay vì đoán — thà không bật còn hơn hỏng file PAM.
+
+**Bốn cổng chặn** (`core/login/pam-approve.mjs`): chỉ `PAM_TYPE=auth`; chỉ dịch vụ `gdm-password` (không
+sshd, không sudo); không có `PAM_RHOST` (không phải máy khác gọi vào); chỉ tài khoản chủ máy (không root,
+không tài khoản agent). Thêm van chống dội chuông: tối đa 3 lần hỏi trong 1 phút — người lạ ngồi trước máy
+không bấm gọi điện thoại liên tục được.
+
+Bậc 3 và **không bao giờ nhớ**: không có nút "1 giờ" hay "luôn việc này", vì người xin chưa chứng minh được
+mình là ai.
+
+**Đổi lại:** vào bằng điện thoại thì GNOME keyring không tự mở (nó mở bằng chính mật khẩu đăng nhập), nên
+lần đầu dùng Wi-Fi đã lưu hay mật khẩu trong trình duyệt, GNOME sẽ hỏi mật khẩu một lần.
+
+Thử: `node build/login-approve-smoke.mjs` (18 mục, không cần máy ảo — dựng bộ duyệt giả trên unix socket).

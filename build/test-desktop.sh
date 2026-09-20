@@ -97,6 +97,9 @@ vm 'test -f /etc/dconf/db/axle && grep -q axle /etc/dconf/profile/user'; ok $? "
 [ "$(vm 'DCONF_PROFILE=gdm dconf read /org/gnome/login-screen/logo')" = "'/usr/share/axle/logo.png'" ]
 ok $? "màn đăng nhập THỰC SỰ lấy logo Axle (không phải logo Ubuntu)"
 vm 'readlink -f /usr/share/plymouth/themes/default.plymouth | grep -q axle'; ok $? "màn khởi động dùng bộ Axle"
+# Có bộ Axle mà thiếu "splash" trong dòng lệnh nhân thì logo không bao giờ hiện — máy chạy ra chữ trắng
+vm 'grep -q "^GRUB_CMDLINE_LINUX_DEFAULT=.*splash" /etc/default/grub && grep -q "^GRUB_CMDLINE_LINUX_DEFAULT=.*quiet" /etc/default/grub'
+ok $? "nhân được bảo quiet splash (logo mới hiện được, không ra chữ trắng)"
 # Phong cách kiểu Mac (Bi 20/9): dock dưới đáy tự ẩn, nút cửa sổ bên trái, font Inter, màn hình nền trống
 [ "$(vm 'gsettings get org.gnome.shell.extensions.dash-to-dock dock-position')" = "'BOTTOM'" ]
 ok $? "thanh ứng dụng nằm dưới đáy như Dock của Mac"

@@ -184,6 +184,21 @@ const ACTIONS = {
       return { exitCode: 0, output: `Đã cho ${who.agent} xem màn hình tới ${g.screen.until}` };
     },
   },
+  // Có người ngồi TRƯỚC MÁY xin đăng nhập (PAM của màn đăng nhập gọi vào). Không có tác dụng phụ nào:
+  // chính việc "được duyệt" là kết quả — PAM chỉ hỏi duyệt hay không. Trong PAM đặt `sufficient` nên từ chối
+  // hay hết giờ thì rơi về ô mật khẩu như cũ, không bao giờ khoá chết máy.
+  // Người xin CHƯA đăng nhập được (chưa ai chứng minh là ai) → luôn bậc 3, không nhớ, không cho "luôn".
+  login: {
+    validate(p, who) {
+      if (who.agent) throw new Error('Agent không xin đăng nhập được');
+      const u = String(p.user ?? '');
+      if (!/^[a-z_][a-z0-9_-]{0,31}$/.test(u)) throw new Error('Tên tài khoản không hợp lệ');
+      return { user: u, tty: String(p.tty ?? '').replace(/[^\w/:-]/g, '').slice(0, 32) };
+    },
+    describe: (p) => `ĐĂNG NHẬP vào máy bằng tài khoản ${p.user}${p.tty ? ` (${p.tty})` : ''}\n`
+      + 'Có người đang ngồi trước máy. Duyệt là họ vào thẳng, KHÔNG cần mật khẩu.',
+    exec: (p) => ({ exitCode: 0, output: `Đã cho đăng nhập ${p.user}` }),
+  },
   file_delete: {
     validate(p, who) {
       if (typeof p.path !== 'string' || !p.path.startsWith('/')) throw new Error('Cần đường dẫn tuyệt đối');

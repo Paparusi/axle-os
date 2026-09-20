@@ -65,6 +65,9 @@ sudo axle update [--from <url>]   cập nhật lên bản phát hành mới (ki�
 sudo axle desktop on|off · axle desktop status   lớp giao diện GNOME + gõ tiếng Việt (docs/DESKTOP.md)
 axle screen chup [tệp] · axle screen trangthai · sudo axle screen quen
                          chụp màn hình của chính mày; xem/quên giấy phép chia sẻ màn hình
+sudo axle dangnhap on|off · axle dangnhap status
+                         đăng nhập máy bằng cách chạm duyệt trên điện thoại thay vì gõ mật khẩu
+                         (không duyệt / mất mạng thì vẫn hiện ô mật khẩu như cũ)
 sudo axle agent grant <tên> man-hinh --han 30m
                          cho agent XEM màn hình thật của mày trong ngần ấy thời gian (bậc 3)
 sudo axle agent screen <tên> on|off · axle agent screen <tên> status|anh
@@ -653,6 +656,46 @@ screen_cmd() {
   esac
 }
 
+# sudo axle dangnhap on|off · axle dangnhap status — duyệt đăng nhập bằng điện thoại (docs/DESKTOP.md D5).
+# Gắn một dòng `sufficient` vào PAM của màn đăng nhập: điện thoại duyệt thì vào thẳng, không duyệt / hết pin /
+# mất mạng thì rơi về ô mật khẩu như cũ. Không bao giờ đặt `required` — đặt sai một chữ là khoá chết máy.
+PAMF="${AXLE_PAM_FILE:-/etc/pam.d/gdm-password}"
+dangnhap_cmd() {
+  case "${1:-status}" in
+    on)
+      [ "$(id -u)" = 0 ] || { echo "Cần sudo: sudo axle dangnhap on" >&2; exit 1; }
+      [ -f "$PAMF" ] || { echo "Máy chưa có màn đăng nhập đồ hoạ (thiếu $PAMF)" >&2; exit 1; }
+      ls /lib/*/security/pam_exec.so /usr/lib/*/security/pam_exec.so >/dev/null 2>&1 \
+        || { echo "Thiếu pam_exec.so — không gắn được" >&2; exit 1; }
+      curl -s --unix-socket /run/axle-approve/approve.sock http://x/health >/dev/null 2>&1 || true
+      [ -S /run/axle-approve/approve.sock ] || { echo "Bộ duyệt chưa chạy: systemctl start axle-approve" >&2; exit 1; }
+      axle snapshot "trước khi bật duyệt đăng nhập bằng điện thoại" >/dev/null 2>&1 || true
+      [ -f "$PAMF.axle-bak" ] || cp -a "$PAMF" "$PAMF.axle-bak"
+      python3 /opt/axle/core/login/pam-edit.py on "$PAMF" || exit 1
+      printf '{\n "enabled": true,\n "timeoutSec": 25,\n "services": ["gdm-password"],\n "maxPerMinute": 3\n}\n' > /etc/axle/login-approve.json
+      chmod 0644 /etc/axle/login-approve.json
+      echo "Bật rồi. Lần đăng nhập sau điện thoại sẽ hỏi; không chạm thì sau 25 giây hiện ô mật khẩu như cũ."
+      echo "Tắt: sudo axle dangnhap off · hỏng nặng thì: sudo axle undo" ;;
+    off)
+      [ "$(id -u)" = 0 ] || { echo "Cần sudo: sudo axle dangnhap off" >&2; exit 1; }
+      if [ -f "$PAMF" ]; then
+        python3 /opt/axle/core/login/pam-edit.py off "$PAMF"
+        echo "Đã gỡ khỏi màn đăng nhập — quay lại gõ mật khẩu như cũ"
+      fi
+      [ -f /etc/axle/login-approve.json ] && rm -f /etc/axle/login-approve.json
+      exit 0 ;;
+    status)
+      if grep -q 'pam-approve\.mjs' "$PAMF" 2>/dev/null; then
+        echo "Duyệt đăng nhập bằng điện thoại: ĐANG BẬT"
+        grep -n 'pam-approve\.mjs' "$PAMF" | sed 's/^/  /'
+        [ -f /etc/axle/login-approve.json ] && sed 's/^/  /' /etc/axle/login-approve.json
+      else
+        echo "Duyệt đăng nhập bằng điện thoại: tắt (bật: sudo axle dangnhap on)"
+      fi ;;
+    *) echo "sudo axle dangnhap on|off · axle dangnhap status" >&2; exit 2 ;;
+  esac
+}
+
 desktop_cmd() {   # sudo axle desktop on|off|status — lớp giao diện (docs/DESKTOP.md)
   case "${1:-status}" in
     on)
@@ -767,6 +810,7 @@ case "${1:-help}" in
   version)   cat /etc/axle/version ;;
   desktop)   shift; desktop_cmd "$@" ;;
   screen)    shift; screen_cmd "$@" ;;
+  dangnhap)  shift; dangnhap_cmd "$@" ;;
   update)    [ "$(id -u)" = 0 ] || { echo "Cần sudo: sudo axle update" >&2; exit 1; }
              shift; exec bash /opt/axle/core/install.sh --update "$@" ;;
   help|-h|--help) usage ;;

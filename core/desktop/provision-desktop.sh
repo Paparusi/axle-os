@@ -190,6 +190,11 @@ primary-color='#0B0F14'
 # Màn đăng nhập không cần thanh ứng dụng ("@as []" = mảng chuỗi rỗng; viết "[]" trơn thì dconf không đoán được kiểu)
 [org/gnome/shell]
 favorite-apps=@as []
+
+# Màn đăng nhập KHÔNG bao giờ được chạy bộ gõ tiếng Việt: mật khẩu không có dấu, mà Telex biến
+# "a"+"r" thành "ả", "w" thành "ư"… → gõ đúng vẫn bị từ chối, không ai hiểu vì sao (gặp thật 20/9).
+[org/gnome/desktop/input-sources]
+sources=[('xkb', 'us')]
 EOF
 # Debian/Ubuntu KHÔNG cho màn đăng nhập đọc /etc/dconf/db/gdm: profile của họ (/usr/share/dconf/profile/gdm)
 # chỉ có user-db + file-db greeter-dconf-defaults → mọi thứ mình ghi ở trên bị bỏ qua, màn đăng nhập vẫn
@@ -239,10 +244,53 @@ if [ -f /usr/share/plymouth/themes/spinner/spinner.plymouth ]; then
   echo "  màn khởi động: logo Axle"
 fi
 
+# Plymouth chỉ vẽ logo khi nhân được bảo "quiet splash". Bản cài tự động của Ubuntu để
+# GRUB_CMDLINE_LINUX_DEFAULT rỗng → máy khởi động ra một màn chữ trắng lổn nhổn, chủ máy tưởng hỏng.
+# Chỉ thêm ở bản có giao diện; bản máy chủ giữ nguyên chữ cho dễ soi lỗi.
+G=/etc/default/grub
+if [ -f "$G" ]; then
+  cu="$(sed -n 's/^GRUB_CMDLINE_LINUX_DEFAULT="\(.*\)"$/\1/p' "$G" | head -1)"
+  moi="$cu"
+  for o in quiet splash; do
+    case " $moi " in *" $o "*) ;; *) moi="${moi:+$moi }$o" ;; esac
+  done
+  if [ "$moi" != "$cu" ]; then
+    if grep -q '^GRUB_CMDLINE_LINUX_DEFAULT=' "$G"; then
+      sed -i "s|^GRUB_CMDLINE_LINUX_DEFAULT=.*|GRUB_CMDLINE_LINUX_DEFAULT=\"$moi\"|" "$G"
+    else
+      printf 'GRUB_CMDLINE_LINUX_DEFAULT="%s"\n' "$moi" >> "$G"
+    fi
+    update-grub >/dev/null 2>&1 || true
+    echo "  khởi động im lặng + hiện logo thay vì chữ trắng"
+  fi
+fi
+
 step "Bật màn hình đăng nhập"
 systemctl set-default graphical.target >/dev/null
 systemctl enable gdm3 >/dev/null 2>&1 || systemctl enable gdm >/dev/null 2>&1 || true
-echo "  bật từ lần khởi động sau (giữ nguyên phiên đang chạy)"
+
+# Màn đăng nhập chỉ đọc dconf MỘT LẦN lúc nó bật. Chạy `axle desktop on` trên máy đã có giao diện thì
+# màn đăng nhập vẫn là đồ cũ cho tới khi khởi động lại — người dùng tưởng cài hỏng. Không ai đang đăng nhập
+# thì nạp lại luôn cho thấy ngay; có người đang dùng thì TUYỆT ĐỐI không đụng, chỉ nhắc.
+co_nguoi_dang_dung_man_hinh() {
+  local s cls typ
+  for s in $(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1}'); do
+    cls="$(loginctl show-session "$s" -p Class --value 2>/dev/null || true)"
+    typ="$(loginctl show-session "$s" -p Type --value 2>/dev/null || true)"
+    [ "$cls" = user ] && { [ "$typ" = wayland ] || [ "$typ" = x11 ]; } && return 0
+  done
+  return 1
+}
+if systemctl is-active --quiet gdm3 2>/dev/null || systemctl is-active --quiet gdm 2>/dev/null; then
+  if co_nguoi_dang_dung_man_hinh; then
+    echo "  có người đang đăng nhập → màn hình đăng nhập đổi sau khi khởi động lại"
+  else
+    systemctl restart gdm3 >/dev/null 2>&1 || systemctl restart gdm >/dev/null 2>&1 || true
+    echo "  màn hình đăng nhập: nạp lại ngay (không ai đang đăng nhập)"
+  fi
+else
+  echo "  bật từ lần khởi động sau (giữ nguyên phiên đang chạy)"
+fi
 
 step "Xong — khởi động lại để vào giao diện: sudo reboot"
 echo "  đăng nhập bằng tài khoản $AXLE_USER · gõ tiếng Việt: Super+Space"
