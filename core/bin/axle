@@ -66,6 +66,9 @@ sudo axle update [--from <url>]   cập nhật lên bản phát hành mới (ki�
 sudo axle desktop on|off · axle desktop status   lớp giao diện GNOME + gõ tiếng Việt (docs/DESKTOP.md)
 axle screen chup [tệp] · axle screen trangthai · sudo axle screen quen
                          chụp màn hình của chính mày; xem/quên giấy phép chia sẻ màn hình
+sudo axle webapp them <tên> <địa chỉ> ["Tên hiện"] · bo <tên> · ghim <tên> · axle webapp
+                         biến một trang web thành app thật (cửa sổ riêng, ghim dock); cùng lúc cho
+                         agent mở được nó trên màn hình riêng bằng screen_open '<tên>'
 sudo axle dangnhap on|off · axle dangnhap status
                          đăng nhập máy bằng cách chạm duyệt trên điện thoại thay vì gõ mật khẩu
                          (không duyệt / mất mạng thì vẫn hiện ô mật khẩu như cũ)
@@ -845,6 +848,7 @@ case "${1:-help}" in
   screen)    shift; screen_cmd "$@" ;;
   dangnhap)  shift; dangnhap_cmd "$@" ;;
   bench)     shift; exec bash /opt/axle/core/bench.sh "$@" ;;
+  webapp)    shift; exec bash /opt/axle/core/desktop/webapp.sh "$@" ;;
   update)    [ "$(id -u)" = 0 ] || { echo "Cần sudo: sudo axle update" >&2; exit 1; }
              shift; exec bash /opt/axle/core/install.sh --update "$@" ;;
   help|-h|--help) usage ;;

@@ -112,5 +112,11 @@ vm 'systemctl is-enabled --quiet unattended-upgrades'; ok $? "vẫn tự cài b�
 vm 'systemctl is-active --quiet axle-approve axle-vault axle-mcp-http'; ok $? "phần Server vẫn chạy nguyên (duyệt, vault, MCP)"
 [ -s "$W/man-dang-nhap.png" ]; ok $? "chụp được màn hình máy ảo ($W/man-dang-nhap.png)"
 
+# Hàng rào hiệu năng: bản nào làm máy nặng thêm hay chờ lâu hơn thì đỏ ngay ở đây, thay vì đợi ai đó
+# ngồi đo lại. 20/9 đo tay mới thấy GRUB ngồi chờ 30 giây suốt bao lâu nay mà không ai biết.
+sudo_vm 'axle bench --nghiem' > "$W/bench.txt" 2>&1; ok $? "hiệu năng trong ngưỡng (RAM, khởi động, snapshot)"
+sed 's/^/    /' "$W/bench.txt" | grep -E "tổng lớp Axle|GRUB|userspace|chụp một snapshot" || true
+vm 'grep -q "timeout=1" /boot/grub/grub.cfg'; ok $? "GRUB không ngồi chờ menu 30 giây (máy EFI)"
+
 if [ "$fail" != 0 ]; then echo "✗ $fail mục hỏng"; exit 1; fi
 echo "✓ lớp giao diện đạt — ảnh màn đăng nhập: $W/man-dang-nhap.png"

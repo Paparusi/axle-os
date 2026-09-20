@@ -85,6 +85,22 @@ gtk-update-icon-cache -qf /usr/share/icons/hicolor 2>/dev/null || true
 
 brand_os_release   # tên hệ điều hành: "Axle OS ... (dựa trên Ubuntu ...)", giữ ID=ubuntu
 
+step "Bộ ứng dụng văn phòng"
+# Máy làm việc thật thì ngày nào cũng cần: mở PDF (vận đơn, hoá đơn), xem ảnh, quét giấy tờ, giải nén,
+# thêm máy in. Ubuntu bản tối giản không kèm mấy thứ này. Tên gói trên 26.04: papers thay evince,
+# loupe thay eog, 7zip thay p7zip-full.
+apt_try papers loupe simple-scan file-roller 7zip gnome-text-editor system-config-printer fonts-noto-core \
+  || apt_try evince eog simple-scan file-roller gnome-text-editor system-config-printer fonts-noto-core \
+  || echo "  (một số gói không cài được — máy vẫn chạy)"
+echo "  PDF, ảnh, máy quét, nén, máy in, soạn thảo nhanh"
+
+# Chromium: mở web app thành CỬA SỔ RIÊNG (--app=) chứ không phải tab lẫn trong trình duyệt, và cũng là
+# thứ agent điều khiển được. Để NGOÀI đường găng: kho snap lỗi 408 một cái là hỏng cả lần cài (bài học D4).
+if ! command -v chromium >/dev/null 2>&1; then
+  snap install chromium >/dev/null 2>&1 && echo "  chromium (cho web app dạng cửa sổ riêng)" \
+    || echo "  ! chưa cài được chromium — chạy lại sau: sudo snap install chromium"
+fi
+
 # Nút "Hiện ứng dụng" ở thanh dock lấy icon theo chế độ phiên (`view-app-grid-ubuntu-symbolic` = logo Ubuntu).
 # Đổi sang lưới chấm trung tính của Yaru — không mượn nhãn hiệu Ubuntu làm nhận diện Axle.
 UBGRID=/usr/share/icons/Yaru/scalable/actions/view-app-grid-ubuntu-symbolic.svg
@@ -102,7 +118,8 @@ for c in org.gnome.Ptyxis.desktop org.gnome.Console.desktop org.gnome.Terminal.d
 done
 # Chỉ ghim app CÓ THẬT trên máy (thiếu trình duyệt hay bộ văn phòng thì bỏ, đừng ghim icon rỗng)
 FAVS=""
-for a in "$BROWSER_APP" org.gnome.Nautilus.desktop "$TERM_APP" libreoffice-writer.desktop; do
+for a in "$BROWSER_APP" org.gnome.Nautilus.desktop "$TERM_APP" libreoffice-calc.desktop libreoffice-writer.desktop \
+         org.gnome.Papers.desktop org.gnome.Evince.desktop; do
   [ -n "$a" ] || continue
   [ -f "/usr/share/applications/$a" ] || [ -f "/var/lib/snapd/desktop/applications/$a" ] || continue
   FAVS="$FAVS${FAVS:+, }'$a'"
