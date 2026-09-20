@@ -49,6 +49,15 @@ step "Gõ tiếng Việt (IBus Unikey) + phông chữ"
 aptg install -yq ibus ibus-unikey fonts-noto-core language-pack-vi fonts-inter >/dev/null
 echo "  ibus-unikey $(dpkg-query -W -f='${Version}' ibus-unikey 2>/dev/null) · gõ Telex, chuyển bộ gõ bằng Super+Space"
 
+step "Cổng chia sẻ màn hình (để agent xin xem màn hình của chủ — docs/DESKTOP.md D3)"
+apt_try xdg-desktop-portal-gnome python3-gi gir1.2-gst-plugins-base-1.0 gstreamer1.0-pipewire gstreamer1.0-plugins-good \
+  || echo "  (chưa cài được, thử lại sau: sudo apt install python3-gi gstreamer1.0-pipewire)"
+install -m 0644 "$ROOT/core/desktop/portal/axle-portal.service" /etc/systemd/user/axle-portal.service
+systemctl --global enable axle-portal.service >/dev/null 2>&1 || true
+systemctl daemon-reload
+echo "  chụp thử: axle screen chup (GNOME sẽ hỏi chọn màn hình)"
+echo "  cho agent xem màn hình: sudo axle agent grant <tên> man-hinh --han 30m"
+
 step "Trình duyệt"
 BROWSER_APP=""
 if [ -f /var/lib/snapd/desktop/applications/firefox_firefox.desktop ]; then
@@ -195,6 +204,11 @@ dconf update
 
 # Bi chốt: tắt cửa sổ "Software Updater" của Ubuntu (nó nhảy lên che màn hình và đứng trên dock).
 # CHỈ tắt phần nhắc — unattended-upgrades vẫn tự cài bản vá bảo mật như cũ.
+# apport: cửa sổ "Authentication Required — collect system information for this problem report" nhảy lên
+# ĐÒI MẬT KHẨU để gửi báo cáo sự cố về Canonical. Máy của Axle thì không, tắt hẳn.
+sed -i 's/^enabled=.*/enabled=0/' /etc/default/apport 2>/dev/null || true
+systemctl disable --now apport.service >/dev/null 2>&1 || true
+
 UN=/etc/xdg/autostart/update-notifier.desktop
 if [ -f "$UN" ] && [ "$(dpkg-divert --truename "$UN")" = "$UN" ]; then
   dpkg-divert --quiet --local --rename --divert "$UN.ubuntu" --add "$UN"

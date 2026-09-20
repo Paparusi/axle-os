@@ -63,6 +63,10 @@ sudo axle duyet [<id> a|h|l|r]
 axle version             bản Axle đang chạy
 sudo axle update [--from <url>]   cập nhật lên bản phát hành mới (kiểm chữ ký, chụp hệ thống trước, không hạ cấp)
 sudo axle desktop on|off · axle desktop status   lớp giao diện GNOME + gõ tiếng Việt (docs/DESKTOP.md)
+axle screen chup [tệp] · axle screen trangthai · sudo axle screen quen
+                         chụp màn hình của chính mày; xem/quên giấy phép chia sẻ màn hình
+sudo axle agent grant <tên> man-hinh --han 30m
+                         cho agent XEM màn hình thật của mày trong ngần ấy thời gian (bậc 3)
 sudo axle agent screen <tên> on|off · axle agent screen <tên> status|anh
                          màn hình riêng cho agent phụ (nó tự nhìn + bấm, không đụng màn hình của chủ)
 EOF
@@ -199,7 +203,7 @@ mcp_cmd() {
 }
 
 # Công cụ cấp được cho agent riêng. Snapshot, Docker, log: chỉ chủ máy (việc toàn hệ thống / quyền ngang root).
-AGENT_TOOLS='["system_status","service_status","file_list","file_read","file_search","file_write","vault_list","http_request","run_command","service_restart","file_delete","approval_status","screen_shot","screen_windows","screen_open","screen_click","screen_type","screen_key","screen_scroll"]'
+AGENT_TOOLS='["system_status","service_status","file_list","file_read","file_search","file_write","vault_list","http_request","run_command","service_restart","file_delete","approval_status","screen_shot","screen_windows","screen_open","screen_click","screen_type","screen_key","screen_scroll","owner_screen_shot"]'
 
 save_clients() { atomic_write "$MCP_CLIENTS" root:axle-gw 0640; }   # cửa trước đọc được, agent thì không
 
@@ -318,8 +322,10 @@ agent_unacl_dir() {
 
 grant_cmd() {   # axle agent grant|revoke <tên> thu-muc <đường dẫn> [--doc|--ghi] | mang <tên miền> [--han …]
   [ "$(id -u)" = 0 ] || { echo "Cần sudo" >&2; exit 1; }
-  local act="$1" name="$2" kind="${3:-}" what="${4:-}" role
-  shift 4 || true
+  local act="$1" name="$2" kind="${3:-}" what="" role
+  shift 3 || true
+  # man-hinh không có tham số "cái gì" (không phải thư mục hay tên miền) → đừng nuốt mất tuỳ chọn
+  case "$kind" in man-hinh) ;; *) what="${1:-}"; shift || true ;; esac
   role="$(agent_role "$name")"
   [ -n "$role" ] || { echo "Không có agent $name" >&2; exit 1; }
   local mode="" han="luon"
@@ -369,7 +375,21 @@ grant_cmd() {   # axle agent grant|revoke <tên> thu-muc <đường dẫn> [--do
         jq --arg h "$h" '.net = [.net[] | select(.host != $h)]' <<<"$g" | grants_write "$name"
         echo "Đã chặn $name gọi tới $h"
       fi ;;
-    *) echo "Cấp gì: thu-muc <đường dẫn> --doc|--ghi | mang <tên miền>" >&2; exit 2 ;;
+    man-hinh)
+      # Xem màn hình THẬT của chủ = bậc 3: luôn có hạn giờ, và GNOME vẫn hỏi chủ lần đầu + hiện biểu
+      # tượng "đang chia sẻ màn hình" suốt lúc xem. Không có kiểu cấp "luôn luôn".
+      if [ "$act" = grant ]; then
+        [ "$han" = luon ] && { echo "Quyền xem màn hình phải có hạn: --han 15m|30m|1h" >&2; exit 2; }
+        local until; until="$(han_to_json "$han")"
+        [ "$until" = null ] && { echo "Hạn không hợp lệ: $han" >&2; exit 2; }
+        jq --argjson u "$until" '.screen = {until: $u}' <<<"$g" | grants_write "$name"
+        echo "Đã cho $name xem màn hình của $OWNER_USER tới $(jq -r . <<<"$until")"
+        echo "  lần đầu GNOME vẫn hỏi mày chọn màn hình; rút ngay: sudo axle agent revoke $name man-hinh"
+      else
+        jq 'del(.screen)' <<<"$g" | grants_write "$name"
+        echo "Đã rút quyền xem màn hình của $name"
+      fi ;;
+    *) echo "Cấp gì: thu-muc <đường dẫn> --doc|--ghi | mang <tên miền> | man-hinh --han 30m" >&2; exit 2 ;;
   esac
 }
 
@@ -381,14 +401,18 @@ grants_expire() {   # dịch vụ duyệt gọi mỗi phút: rút mọi quyền 
     name="$(basename "$f" .json)"; g="$(cat "$f")"
     local gone; gone="$(jq -r '.dirs[] | select(.until != null and (.until | fromdateiso8601) <= now) | .path' <<<"$g")"
     local netgone; netgone="$(jq -r '[.net[] | select(.until != null and (.until | fromdateiso8601) <= now)] | length' <<<"$g")"
-    [ -n "$gone" ] || [ "$netgone" != 0 ] || continue
+    local scrgone; scrgone="$(jq -r 'if (.screen.until // null) != null and (.screen.until | fromdateiso8601) <= now then 1 else 0 end' <<<"$g")"
+    [ -n "$gone" ] || [ "$netgone" != 0 ] || [ "$scrgone" != 0 ] || continue
     jq '.dirs = [.dirs[] | select(.until == null or (.until | fromdateiso8601) > now)]
-        | .net = [.net[] | select(.until == null or (.until | fromdateiso8601) > now)]' <<<"$g" | grants_write "$name"
+        | .net = [.net[] | select(.until == null or (.until | fromdateiso8601) > now)]
+        | if (.screen.until // null) != null and (.screen.until | fromdateiso8601) <= now then del(.screen) else . end' <<<"$g" | grants_write "$name"
     if [ "$(agent_role "$name")" = phu ]; then
       for d in $gone; do agent_unacl_dir "$name" "$d"; done
       agent_apply_dirs "$name"
     fi
-    echo "Hết hạn: $name ${gone//$'\n'/ } $( [ "$netgone" != 0 ] && echo "+ $netgone tên miền")"
+    # Hết hạn xem màn hình thì QUÊN luôn giấy phép GNOME đã nhớ, để lần sau chủ được hỏi lại
+    [ "$scrgone" = 0 ] || curl -s -X POST --unix-socket /run/axle-approve/admin.sock http://x/screen/forget >/dev/null 2>&1 || true
+    echo "Hết hạn: $name ${gone//$'\n'/ } $( [ "$netgone" != 0 ] && echo "+ $netgone tên miền")$( [ "$scrgone" != 0 ] && echo ' + xem màn hình')"
   done
 }
 
@@ -607,10 +631,46 @@ admin_call() {   # $1 METHOD, $2 đường, $3 thân (tuỳ chọn) — socket q
   curl -s --unix-socket "$ADMIN_SOCK" -X "$1" -H 'content-type: application/json' ${3:+--data-binary "$3"} "http://x$2"
 }
 
+# axle screen chup [tệp] — chụp màn hình CỦA CHÍNH CHỦ. Chạy trong phiên đồ hoạ, KHÔNG cần sudo;
+# GNOME hiện hộp thoại chọn màn hình, chủ đồng ý mới có hình (docs/DESKTOP.md, nhịp D3).
+screen_cmd() {
+  local out
+  case "${1:-chup}" in
+    chup)
+      shift
+      out="${1:-$HOME/Pictures/axle-man-hinh-$(date +%Y%m%d-%H%M%S).png}"
+      mkdir -p "$(dirname "$out")"
+      exec python3 /opt/axle/core/desktop/portal/axle-screen.py shot "$out" ;;
+    trangthai)
+      curl -s --unix-socket /run/axle-approve/approve.sock http://x/screen/status \
+        | jq -r '"phiên đồ hoạ của chủ: " + (if .phien_chu then "có" else "KHÔNG (" + (.loi // "chưa đăng nhập") + ")" end)' ;;
+    quen)
+      [ "$(id -u)" = 0 ] || { echo "Cần sudo: sudo axle screen quen" >&2; exit 1; }
+      curl -s -X POST --unix-socket /run/axle-approve/admin.sock http://x/screen/forget >/dev/null 2>&1 \
+        || curl -s -X POST --unix-socket /run/axle-approve/approve.sock http://x/screen/forget >/dev/null
+      echo "Đã quên giấy phép màn hình — lần sau GNOME hỏi lại" ;;
+    *) echo "axle screen chup [tệp] | trangthai | quen" >&2; exit 2 ;;
+  esac
+}
+
 desktop_cmd() {   # sudo axle desktop on|off|status — lớp giao diện (docs/DESKTOP.md)
   case "${1:-status}" in
     on)
       [ "$(id -u)" = 0 ] || { echo "Cần sudo: sudo axle desktop on" >&2; exit 1; }
+      shift
+      # Cài giao diện mất 10–25 phút và kéo theo NetworkManager — máy ở xa thì SSH rất dễ đứt giữa chừng,
+      # đứt là lệnh chết dở dang. Cho nó chạy trong systemd để sống độc lập với phiên đăng nhập.
+      if [ "${1:-}" != --tai-cho ] && [ -z "${AXLE_DESKTOP_INLINE:-}" ] && command -v systemd-run >/dev/null; then
+        systemctl reset-failed axle-desktop-setup 2>/dev/null || true
+        systemd-run --unit=axle-desktop-setup --collect -p TimeoutStartSec=infinity \
+          -p StandardOutput=journal -p StandardError=journal \
+          env AXLE_DESKTOP_INLINE=1 axle desktop on >/dev/null || {
+            echo "Không chạy nền được, cài thẳng tại đây:" >&2; exec bash /opt/axle/core/desktop/provision-desktop.sh; }
+        echo "Đang cài lớp giao diện ở nền (mất 10–25 phút, cần mạng). Xem tiến độ:"
+        echo "  journalctl -fu axle-desktop-setup"
+        echo "Xong thì khởi động lại: sudo reboot · Hỏng thì quay lại: sudo axle undo"
+        exit 0
+      fi
       exec bash /opt/axle/core/desktop/provision-desktop.sh ;;
     off)
       [ "$(id -u)" = 0 ] || { echo "Cần sudo: sudo axle desktop off" >&2; exit 1; }
@@ -706,6 +766,7 @@ case "${1:-help}" in
   cmdlog)    shift; exec sudo -n /usr/local/lib/axle/axle-cmdlog "$@" ;;
   version)   cat /etc/axle/version ;;
   desktop)   shift; desktop_cmd "$@" ;;
+  screen)    shift; screen_cmd "$@" ;;
   update)    [ "$(id -u)" = 0 ] || { echo "Cần sudo: sudo axle update" >&2; exit 1; }
              shift; exec bash /opt/axle/core/install.sh --update "$@" ;;
   help|-h|--help) usage ;;

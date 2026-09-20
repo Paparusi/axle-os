@@ -85,7 +85,14 @@ Ghi rõ "dựa trên Ubuntu" ở màn giới thiệu; không dùng logo Ubuntu l
 - **D2 ✔** Màn hình riêng của agent: Xvfb + openbox cho từng agent phụ (`axle agent screen`), 7 công cụ MCP
   `screen_*`, ống mở app có danh sách trắng. Còn nợ (D2.1): xem trực tiếp màn hình agent (VNC tại chỗ) thay vì
   chỉ chụp ảnh.
-- **D3** Chia sẻ màn hình thật qua portal: quyền bậc 3 có hạn giờ, thanh báo đang chia sẻ, thu hồi và dừng khẩn cấp.
+- **D3 ✔** Chia sẻ màn hình thật qua portal. Bốn lớp chặn, mất bất kỳ lớp nào là agent không thấy gì:
+  1. **Quyền có hạn giờ** (`grants/<tên>.json` → `screen.until`) — không có kiểu cấp vĩnh viễn.
+  2. **Duyệt bậc 3** trên điện thoại (Face ID) hoặc `sudo axle duyet` tại máy; luôn hỏi từng lần, không nhớ.
+  3. **Hộp thoại của GNOME** — chủ chọn màn hình; không đi D-Bus riêng của Mutter để lách.
+  4. **Màn hình khoá thì không chụp** (hỏi `org.gnome.ScreenSaver`), và GNOME giữ biểu tượng "đang chia sẻ".
+  Bộ phận: `core/desktop/portal/` (thư viện + dịch vụ chạy trong phiên của chủ), đường `/screen/shot` trong
+  dịch vụ duyệt (root, nơi kiểm quyền), công cụ MCP `owner_screen_shot`, `build/owner-screen-smoke.mjs` 8/8.
+  Còn nợ: agent BẤM vào màn hình chủ (RemoteDesktop) — chưa làm, và sẽ là quyền riêng chứ không đi kèm quyền xem.
   Đường đi đã chốt: dịch vụ `axle-portal` chạy TRONG phiên của chủ (`systemd --user`, không phải root) gọi
   `org.freedesktop.portal.RemoteDesktop`: CreateSession → SelectDevices → SelectSources → Start (GNOME hiện hộp
   thoại xin phép, chủ chọn màn hình/cửa sổ) → OpenPipeWireRemote lấy fd hình; ảnh lấy qua `pipewiresrc` của

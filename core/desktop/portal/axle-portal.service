@@ -1,0 +1,18 @@
+[Unit]
+Description=Axle — cổng chụp màn hình của chủ (chạy trong phiên đồ hoạ, docs/DESKTOP.md D3)
+# KHÔNG gắn PartOf=graphical-session.target: trên Ubuntu 26.04 target đó không bật, gắn vào là bị tắt theo.
+Wants=dbus.socket
+After=dbus.socket
+
+[Service]
+Type=simple
+# Lấy thẳng bus của phiên (%t = thư mục chạy của user) thay vì trông chờ phiên nạp biến môi trường
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus
+ExecStart=/usr/bin/python3 /opt/axle/core/desktop/portal/axle-portal-daemon.py
+Restart=on-failure
+RestartSec=5
+# Không có phiên đồ hoạ (tài khoản agent, đăng nhập SSH) → thoát 78 và nằm im
+RestartPreventExitStatus=78
+
+[Install]
+WantedBy=default.target

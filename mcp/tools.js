@@ -347,6 +347,8 @@ export function buildServer({ allow, clientName } = {}) {
   // Màn hình riêng của agent (chỉ có khi chủ bật: sudo axle agent screen <tên> on)
   if (screen.hasDisplay()) screen.register(tool);
   else for (const [n, ro] of screen.TOOL_NAMES) TOOL_INFO.set(n, { readOnly: ro });
+  // Màn hình THẬT của chủ: luôn khai báo, nhưng dịch vụ duyệt chỉ cho qua khi chủ đã cấp quyền còn hạn
+  screen.registerOwnerScreen(tool, approve);
 
   tool('approval_status', {
     title: 'Approval status',

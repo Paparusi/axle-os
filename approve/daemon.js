@@ -8,9 +8,10 @@
 // - mỗi yêu cầu một mã ngẫu nhiên riêng (nonce) trong nút bấm, hết hạn sau expireSec
 // - duyệt việc nào chạy ĐÚNG việc đó: nội dung chốt lúc xin, không nhận sửa sau
 import { createServer, request as httpRequest } from 'node:http';
+import { connect as netConnect } from 'node:net';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { appendFileSync, chownSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, chmodSync } from 'node:fs';
+import { appendFileSync, chownSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, chmodSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { hostname } from 'node:os';
 import { addRule, addSession, autoLabel, canRemember, canSession, describeRule, findAuto, keyboard, loadRules, prune,
@@ -69,6 +70,47 @@ function dirsOf(who) {
 }
 const within = (p, root) => p === root || p.startsWith(`${root}/`);
 
+// Quyền XEM MÀN HÌNH THẬT CỦA CHỦ (bậc 3, luôn có hạn giờ) — /etc/axle/grants/<tên>.json: {"screen":{"until":…}}
+function screenGrant(who) {
+  if (!who?.agent) return { ok: true };            // chủ tự chụp thì khỏi xin ai
+  let g = {};
+  try { g = JSON.parse(readFileSync(path.join(GRANTS_DIR, `${who.agent}.json`), 'utf8')); } catch { /* chưa cấp */ }
+  const s = g.screen;
+  if (!s || !s.until) return { ok: false, err: `Chưa được xem màn hình của chủ. Chủ cấp bằng: sudo axle agent grant ${who.agent} man-hinh --han 30m` };
+  if (Date.parse(s.until) <= Date.now()) return { ok: false, err: 'Quyền xem màn hình của chủ đã hết hạn — xin chủ cấp lại' };
+  return { ok: true, until: s.until };
+}
+
+// Hỏi dịch vụ chạy trong phiên đồ hoạ của chủ (core/desktop/portal/axle-portal-daemon.py) lấy một khung hình.
+// Root mới nối được ổ cắm đó; agent không bao giờ chạm tới phiên của chủ.
+function ownerPortal(cmd, timeoutMs = 90_000) {
+  return new Promise((resolve) => {
+    let uid;
+    try {
+      const line = readFileSync('/etc/passwd', 'utf8').split('\n').find((l) => l.startsWith(`${cfg().user}:`));
+      uid = line ? Number(line.split(':')[2]) : null;
+    } catch { uid = null; }
+    if (uid == null) return resolve({ ok: false, err: 'không tìm ra tài khoản chủ' });
+    const sock = `/run/user/${uid}/axle-portal.sock`;
+    if (!existsSync(sock)) {
+      return resolve({ ok: false, err: 'Chủ chưa đăng nhập vào giao diện (không có phiên đồ hoạ để chụp)' });
+    }
+    const c = netConnect(sock);
+    let buf = '';
+    const xong = (o) => { try { c.destroy(); } catch { /* đã đóng */ } resolve(o); };
+    const t = setTimeout(() => xong({ ok: false, err: 'chủ không trả lời trong thời gian chờ' }), timeoutMs);
+    c.on('connect', () => c.write(`${JSON.stringify(cmd)}\n`));
+    c.on('data', (d) => {
+      buf += d;
+      const i = buf.indexOf('\n');
+      if (i < 0) return;
+      clearTimeout(t);
+      try { xong(JSON.parse(buf.slice(0, i))); } catch { xong({ ok: false, err: 'phiên của chủ trả lời lạ' }); }
+    });
+    c.on('error', (e) => { clearTimeout(t); xong({ ok: false, err: `không nối được phiên của chủ (${e.code || e.message})` }); });
+  });
+}
+
 const ACTIONS = {
   run_command: {
     validate(p, who) {
@@ -119,6 +161,27 @@ const ACTIONS = {
       if (pre.exitCode) return pre;
       const r = await runProc(SNAPPER[0], [...SNAPPER.slice(1), 'undochange', `${p.number}..${p.mark}`], {});
       return { exitCode: r.exitCode, output: `${r.output.trim()}\nMuốn quay lại như trước khi undo: snapshot_undo ${pre.output.trim()}` };
+    },
+  },
+  // Agent xin XEM MÀN HÌNH THẬT của chủ. Duyệt (bậc 3, Face ID trên điện thoại) thì ghi một quyền có hạn giờ;
+  // hết hạn tự rút. Chủ vẫn còn hai lớp nữa: hộp thoại của GNOME và biểu tượng "đang chia sẻ màn hình".
+  screen_grant: {
+    validate(p, who) {
+      if (!who.agent) throw new Error('Chủ máy tự chụp bằng: axle screen chup');
+      const m = Number(p.minutes ?? 30);
+      if (!Number.isInteger(m) || m < 1 || m > 240) throw new Error('Số phút 1-240');
+      return { minutes: m };
+    },
+    describe: (p, who) => `XEM MÀN HÌNH THẬT của chủ trong ${p.minutes} phút (${whoLabel(who)})\n`
+      + 'Agent sẽ thấy mọi thứ đang mở trên màn hình. GNOME vẫn hỏi lần đầu và hiện biểu tượng đang chia sẻ.',
+    exec(p, who) {
+      const f = path.join(GRANTS_DIR, `${who.agent}.json`);
+      let g = { dirs: [], net: [] };
+      try { g = JSON.parse(readFileSync(f, 'utf8')); } catch { /* chưa có */ }
+      g.screen = { until: new Date(Date.now() + p.minutes * 60_000).toISOString().replace(/\.\d+Z$/, 'Z') };
+      mkdirSync(GRANTS_DIR, { recursive: true, mode: 0o755 });
+      writeFileSync(f, `${JSON.stringify(g, null, 1)}\n`, { mode: 0o644 });
+      return { exitCode: 0, output: `Đã cho ${who.agent} xem màn hình tới ${g.screen.until}` };
     },
   },
   file_delete: {
@@ -410,6 +473,24 @@ function makeServer(who) {
         for await (const c of req) { body += c; if (body.length > 65536) return send(413, { error: 'quá lớn' }); }
         return send(200, view(await createRequest(JSON.parse(body || '{}'), who ?? ownerWho())));
       }
+      if (req.method === 'POST' && url.pathname === '/screen/shot') {
+        const w = who ?? ownerWho();
+        const q = screenGrant(w);
+        if (!q.ok) { log({ screen: 'từ chối', agent: w.agent, why: q.err }); return send(403, { error: q.err }); }
+        const r = await ownerPortal({ cmd: 'shot', timeout: 60 });
+        log({ screen: r.ok ? 'chụp màn hình chủ' : 'chụp hỏng', agent: w.agent, until: q.until, ...(r.ok ? {} : { err: r.err }) });
+        return r.ok ? send(200, { png: r.png, until: q.until }) : send(502, { error: r.err });
+      }
+      if (req.method === 'POST' && url.pathname === '/screen/forget') {
+        if (who?.agent) return send(403, { error: 'Chỉ chủ máy quên được giấy phép' });
+        return send(200, await ownerPortal({ cmd: 'forget' }, 10_000));
+      }
+      if (req.method === 'GET' && url.pathname === '/screen/status') {
+        const w = who ?? ownerWho();
+        const q = screenGrant(w);
+        const st = await ownerPortal({ cmd: 'status' }, 10_000);
+        return send(200, { quyen: q.ok ? (q.until || 'chủ') : null, het_han: q.until || null, phien_chu: st.ok === true, loi: st.ok ? null : st.err });
+      }
       const m = /^\/status\/([0-9a-f]{8})$/.exec(url.pathname);
       if (req.method === 'GET' && m) {
         const r = requests.get(m[1]);
@@ -465,6 +546,8 @@ const adminServer = createServer(async (req, res) => {
         return send(200, [...requests.values()].filter((r) => r.state === 'pending').map((r) => ({
           id: r.id, tier: tierOf(r), client: r.client, text: r.text, buttons: keyboard(r).flat().map((b) => b.callback_data.slice(-1)).join(''),
           ageSec: Math.round((Date.now() - r.created) / 1000) })));
+      case 'POST /screen/forget':   // quên giấy phép màn hình GNOME đã nhớ (hết hạn quyền, hoặc chủ gõ tay)
+        return send(200, await ownerPortal({ cmd: 'forget' }, 10_000));
       case 'POST /decide': {
         const r = requests.get(body.id);
         if (!r || r.state !== 'pending') return send(404, { error: 'Không có yêu cầu đang chờ này' });

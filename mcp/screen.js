@@ -143,9 +143,52 @@ export function register(tool) {
   });
 }
 
+// Màn hình THẬT của chủ: agent chỉ xin qua dịch vụ duyệt (root) — nơi kiểm quyền có hạn giờ rồi mới
+// hỏi sang phiên đồ hoạ của chủ. Agent không bao giờ chạm được vào phiên đó.
+export function registerOwnerScreen(tool, approve) {
+  const anh = (r) => {
+    const png = Buffer.from(r.png || '', 'base64');
+    if (!png.length) throw new Error('phiên của chủ không trả về ảnh');
+    const kt = png.length < 1024 ? `${png.length} byte` : `${Math.round(png.length / 1024)} KB`;
+    return { image: r.png, mimeType: 'image/png',
+      text: `Màn hình của chủ (${kt})${r.until ? ` · quyền còn tới ${r.until}` : ''}` };
+  };
+  const chuaCoQuyen = (e) => /Chưa được xem màn hình|hết hạn/.test(e.message);
+
+  tool('owner_screen_shot', {
+    title: "Screenshot of the OWNER's screen (needs the owner's approval)",
+    description: "Take a PNG screenshot of the owner's REAL screen — what the owner is looking at right now. "
+      + 'Use it only when the owner asks about something on their own screen; for your own work use screen_shot. '
+      + 'If you have no permission yet, this asks the owner (phone + Face ID, or at the machine) for a '
+      + 'time-limited permission and waits. The owner also confirms once in a GNOME dialog and sees a '
+      + '"screen is being shared" indicator the whole time; a locked screen is never captured.',
+    inputSchema: {
+      minutes: z.number().int().min(1).max(240).default(30)
+        .describe('If permission is missing: how many minutes to ask for'),
+      waitSec: z.number().int().min(0).max(110).default(90)
+        .describe('Seconds to wait for the owner to approve (then use approval_status)'),
+    },
+    annotations: { readOnlyHint: true },
+  }, async ({ minutes, waitSec }, { client }) => {
+    try {
+      return anh(await approve('POST', '/screen/shot', {}));
+    } catch (e) {
+      if (!chuaCoQuyen(e)) throw e;
+      // Chưa có quyền → xin chủ duyệt (bậc 3: luôn hỏi, không nhớ), rồi chụp lại
+      const r = await approve('POST', '/request', { action: 'screen_grant', params: { minutes }, client });
+      const st = waitSec ? await approve('GET', `/status/${r.id}?wait=${waitSec}`) : r;
+      if (st.state === 'rejected') return `❌ Chủ từ chối cho xem màn hình (#${st.id}).`;
+      if (st.state === 'expired') return `⌛ Không ai duyệt (#${st.id}). Xin lại khi cần.`;
+      if (st.state !== 'done') return `⏳ Đang chờ chủ duyệt xem màn hình (#${st.id}) — gọi approval_status với id này.`;
+      return anh(await approve('POST', '/screen/shot', {}));
+    }
+  });
+}
+
 // Tên mọi công cụ màn hình + có phải chỉ-đọc không (để CLI kiểm tên khi cấp quyền, kể cả trên máy chưa bật màn hình).
 export const TOOL_NAMES = [['screen_shot', true], ['screen_windows', true], ['screen_open', false],
-  ['screen_click', false], ['screen_type', false], ['screen_key', false], ['screen_scroll', false]];
+  ['screen_click', false], ['screen_type', false], ['screen_key', false], ['screen_scroll', false],
+  ['owner_screen_shot', true]];
 
 // Danh sách app được phép, để CLI in ra cho chủ xem.
 export async function allowedApps() {
