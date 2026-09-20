@@ -25,7 +25,7 @@ destructive needs your approval, signed by the secure chip in your phone. Server
 
 ## Cài bằng ISO (dễ nhất)
 
-Tải ISO: **https://pub-849ee4c26f7749fa9139b27185298865.r2.dev/iso/axle-server-0.1.67.iso** (2,8 GB) ·
+Tải ISO: **https://pub-849ee4c26f7749fa9139b27185298865.r2.dev/iso/axle-server-0.1.74.iso** (2,8 GB) ·
 bản kê có chữ ký: [`latest-iso.json`](https://pub-849ee4c26f7749fa9139b27185298865.r2.dev/iso/latest-iso.json)
 + [`.sig`](https://pub-849ee4c26f7749fa9139b27185298865.r2.dev/iso/latest-iso.json.sig)
 
