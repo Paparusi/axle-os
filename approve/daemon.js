@@ -18,6 +18,7 @@ import { addRule, addSession, autoLabel, canRemember, canSession, describeRule, 
   saveRules, tierLine, tierOf, writeDurable } from './rules.js';
 import { buildDigest } from './digest.js';
 import { createAppChannel } from './app-channel.js';
+import { machineState } from './machine-state.js';
 import { requestHash } from '../app/proto.js';
 
 const CFG_FILE = process.env.AXLE_APPROVE_CONFIG || '/etc/axle/approve.json';
@@ -388,6 +389,10 @@ const app = createAppChannel({
     app.broadcast({ type: 'agents', list: agentList() }).catch(() => {});
   },
   onHello(d) { app.sendTo(d.id, { type: 'agents', list: agentList() }); },
+  async onQuery(d, what) {
+    if (what !== 'status') return log({ warn: `app: ${d.name} hỏi chuyện lạ ${what}` });
+    app.sendTo(d.id, { type: 'state', what: 'status', data: await machineState() });
+  },
 });
 app.start();
 

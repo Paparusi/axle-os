@@ -12,7 +12,7 @@ const SKEW = 600_000;   // quyết định phải ký trong 10 phút
 
 const readJson = (f, dflt) => { try { return JSON.parse(readFileSync(f, 'utf8')); } catch { return dflt; } };
 
-export function createAppChannel({ log, hostname, onDecision, onCommand, onHello }) {
+export function createAppChannel({ log, hostname, onDecision, onCommand, onHello, onQuery }) {
   const cfg = () => readJson(CFG, {});
   const keysFile = `${DIR}/app-keys.json`; const devFile = `${DIR}/devices.json`; const stFile = `${DIR}/app-state.json`;
   let me = readJson(keysFile, null);
@@ -110,6 +110,9 @@ export function createAppChannel({ log, hostname, onDecision, onCommand, onHello
     if (!d) return;
     if (msg.type === 'decision') { onDecision(d, msg); return; }
     if (msg.type === 'hello') { onHello?.(d); return; }   // app mở lên: xin danh sách agent
+    // App hỏi máy một chuyện gì đó (chỉ ĐỌC, không làm gì đổi máy) → máy trả lời bằng tin 'state'.
+    // Không đòi chữ ký duyệt: hộp đã niêm phong bằng khoá ghép cặp, đọc được tức là đúng điện thoại của chủ.
+    if (msg.type === 'query') { onQuery?.(d, String(msg.what || '').slice(0, 32), msg); return; }
     if (msg.type === 'stop' || msg.type === 'start') {
       const ok = Number.isFinite(msg.ts) && Math.abs(Date.now() - msg.ts) <= SKEW && /^[a-z][a-z0-9-]{1,20}$/.test(msg.agent || '')
         && p256Verify(d.ds, commandString(me.id, msg.type, msg.agent, msg.ts), msg.dsig);
