@@ -60,6 +60,9 @@ sudo axle app devices | remove <id>
                          điện thoại đã ghép / gỡ một điện thoại
 sudo axle duyet [<id> a|h|l|r]
                          xem và duyệt yêu cầu ngay tại máy (dùng được cả khi mọi kênh khác hỏng)
+axle claude "câu hỏi" [--tiep]
+                         Claude Code chạy TRÊN máy này: đọc/tìm thì làm ngay, còn ghi tệp/chạy lệnh
+                         thì hiện lên điện thoại của mày để duyệt (Face ID). --tiep: nối phiên trước
 axle bench [--nghiem]    đo cái giá Axle bắt máy trả: RAM lúc rảnh, khởi động, snapshot, đĩa
 axle version             bản Axle đang chạy
 sudo axle update [--from <url>]   cập nhật lên bản phát hành mới (kiểm chữ ký, chụp hệ thống trước, không hạ cấp)
@@ -700,6 +703,25 @@ dangnhap_cmd() {
   esac
 }
 
+# axle claude "câu hỏi" [--tiep] — Claude Code chạy TRÊN máy này, tay chân thật, cổng là điện thoại của chủ.
+#   Đọc/tìm/xem: chạy thẳng, không hỏi (không thì chủ bị dội chuông).
+#   Ghi tệp, chạy lệnh, xoá: Claude gọi mcp__axle__duyet_quyen → điện thoại rung → chủ duyệt mới làm.
+#   --tiep: nối tiếp phiên trước (giữ mạch hội thoại).
+CLAUDE_MCP_CFG='{"mcpServers":{"axle":{"command":"/usr/local/bin/axle","args":["mcp","--as","claude"]}}}'
+claude_cmd() {
+  local bin tiep="" hoi=()
+  for bin in "$HOME/.local/bin/claude" /usr/local/bin/claude /usr/bin/claude; do [ -x "$bin" ] && break; bin=""; done
+  [ -n "$bin" ] || { echo "Chưa cài Claude Code trên máy này (npm i -g @anthropic-ai/claude-code, rồi đăng nhập một lần)" >&2; exit 1; }
+  while [ $# -gt 0 ]; do case "$1" in --tiep) tiep=--continue ;; *) hoi+=("$1") ;; esac; shift; done
+  [ "${#hoi[@]}" -gt 0 ] || { echo 'axle claude "câu hỏi" [--tiep]' >&2; exit 2; }
+  # Không --bare: cần OAuth của gói thuê bao. Không --dangerously-skip-permissions: chính cái cổng là điểm.
+  exec "$bin" -p "${hoi[*]}" $tiep \
+    --mcp-config "$CLAUDE_MCP_CFG" \
+    --permission-prompt-tool mcp__axle__duyet_quyen \
+    --allowedTools "Read,Grep,Glob,LS,WebFetch,WebSearch,mcp__axle__system_status,mcp__axle__service_status,mcp__axle__file_list,mcp__axle__file_read,mcp__axle__file_search" \
+    --append-system-prompt "Bạn đang chạy trên máy Axle của chủ. Việc ĐỌC thì cứ làm. Việc ghi tệp, chạy lệnh, xoá sẽ hiện lên điện thoại chủ để duyệt — nói ngắn gọn trước khi xin, đừng xin dồn dập, và bị từ chối thì đừng thử lại bằng cách khác."
+}
+
 desktop_cmd() {   # sudo axle desktop on|off|status — lớp giao diện (docs/DESKTOP.md)
   case "${1:-status}" in
     on)
@@ -860,6 +882,7 @@ case "${1:-help}" in
   screen)    shift; screen_cmd "$@" ;;
   dangnhap)  shift; dangnhap_cmd "$@" ;;
   bench)     shift; exec bash /opt/axle/core/bench.sh "$@" ;;
+  claude)    shift; claude_cmd "$@" ;;
   webapp)    shift; exec bash /opt/axle/core/desktop/webapp.sh "$@" ;;
   update)    [ "$(id -u)" = 0 ] || { echo "Cần sudo: sudo axle update" >&2; exit 1; }
              shift; exec bash /opt/axle/core/install.sh --update "$@" ;;

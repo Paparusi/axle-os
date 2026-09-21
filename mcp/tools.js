@@ -305,6 +305,42 @@ export function buildServer({ allow, clientName } = {}) {
     return showApproval(waitSec ? await approve('GET', `/status/${r.id}?wait=${waitSec}`) : r);
   }
 
+  // CẦU XIN PHÉP cho Claude Code chạy trên máy:
+  //   claude -p … --mcp-config <axle> --permission-prompt-tool mcp__axle__duyet_quyen
+  // Claude Code gọi công cụ này mỗi khi muốn dùng Bash/Edit/Write… (những gì không được cho sẵn). Ta biến
+  // nó thành một yêu cầu duyệt bình thường → điện thoại chủ rung → chờ tới khi có quyết định → trả lời
+  // đúng dạng Claude Code hiểu: {"behavior":"allow","updatedInput":…} hoặc {"behavior":"deny","message":…}.
+  // Chờ theo từng khúc 110 giây (giới hạn của /status?wait) cho tới khi hết hạn yêu cầu (mặc định 10 phút).
+  tool('duyet_quyen', {
+    title: 'Permission prompt for Claude Code (owner approves on the phone)',
+    description: 'Internal bridge for `claude --permission-prompt-tool mcp__axle__duyet_quyen`. Turns a tool '
+      + 'permission request into an Axle approval the owner answers on the phone (Face ID) or Telegram, and '
+      + 'returns the allow/deny decision in the shape Claude Code expects.',
+    inputSchema: {
+      tool_name: z.string().max(64),
+      input: z.record(z.any()).default({}),
+      tool_use_id: z.string().max(200).optional(),
+      permission_suggestions: z.any().optional(),
+    },
+    annotations: { readOnlyHint: false },
+  }, async ({ tool_name, input }, { client }) => {
+    const tra = (o) => JSON.stringify(o);
+    let r;
+    try {
+      r = await approve('POST', '/request', { action: 'claude_tool', params: { tool: tool_name, input }, client });
+    } catch (e) {
+      return tra({ behavior: 'deny', message: `Axle không nhận được yêu cầu duyệt: ${e.message}` });
+    }
+    const CUOI = new Set(['done', 'failed', 'rejected', 'expired']);
+    for (let i = 0; i < 12 && !CUOI.has(r.state); i++) {   // 12 × 110s ≈ 22 phút, dư so với hạn 10 phút
+      r = await approve('GET', `/status/${r.id}?wait=110`).catch(() => r);
+    }
+    if (r.state === 'done') return tra({ behavior: 'allow', updatedInput: input });
+    const vi = { rejected: 'Chủ máy đã từ chối', expired: 'Không ai duyệt trong thời hạn', failed: 'Bộ duyệt báo lỗi' }[r.state]
+      ?? `Yêu cầu còn ở trạng thái ${r.state}`;
+    return tra({ behavior: 'deny', message: `${vi} (#${r.id}). Đừng thử lại việc này.` });
+  });
+
   tool('run_command', {
     title: 'Run a shell command (needs owner approval)',
     description: 'Run a bash command. The owner sees the exact command (Axle phone app / Telegram) and must approve before it runs. '

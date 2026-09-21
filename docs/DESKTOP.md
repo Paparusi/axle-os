@@ -161,3 +161,31 @@ mình là ai.
 lần đầu dùng Wi-Fi đã lưu hay mật khẩu trong trình duyệt, GNOME sẽ hỏi mật khẩu một lần.
 
 Thử: `node build/login-approve-smoke.mjs` (18 mục, không cần máy ảo — dựng bộ duyệt giả trên unix socket).
+
+## Claude trên máy, cổng là điện thoại (nhịp D6)
+
+Bi chọn hướng **C** (20/9): Claude chạy trên máy có tay chân thật. Cách làm cho đúng là **cầu xin phép**:
+
+```
+axle claude "log worker tối qua có lỗi gì, sửa giúp"
+axle claude "tiếp đi" --tiep
+```
+
+Bên dưới là `claude -p … --mcp-config <axle> --permission-prompt-tool mcp__axle__duyet_quyen`:
+
+| Việc | Chuyện gì xảy ra |
+|---|---|
+| Đọc, tìm, xem log, tra web | chạy thẳng — không hỏi, không thì chủ bị dội chuông |
+| Ghi tệp, chạy lệnh, xoá | Claude gọi `duyet_quyen` → **điện thoại rung** → chủ duyệt mới làm |
+| Lệnh nguy hiểm (`sudo`, `rm -r`, `mkfs`, ghi vào `/etc`, đụng vault) | **bậc 3**: luôn hỏi, không có nút "nhớ" |
+| Bị từ chối / hết 10 phút | Claude nhận `deny` kèm lý do, và được dặn **không thử lại bằng cách khác** |
+
+Bậc 2 nhớ được: **"1 giờ"** = cùng công cụ trong cùng thư mục; **"Luôn việc này"** = đúng lệnh (Bash) hoặc đúng
+tệp (Edit/Write). Luật nằm chung `/luat`, `/quen` với mọi loại việc khác.
+
+Hợp đồng với Claude Code (đọc từ chính bản cài, không đoán): vào `{tool_name, input, permission_suggestions?}`,
+ra `{"behavior":"allow","updatedInput":…}` hoặc `{"behavior":"deny","message":…}`. Nhật ký duyệt ghi
+`Agent: ssh:claude`. Bài thử: `node approve/test-rules.mjs` (9 ca cho `claude_tool`).
+
+Chưa làm: Claude Code trên máy còn phải **đăng nhập OAuth một lần** (`~/.local/bin/claude`, chọn Claude
+account) — việc của chủ máy, không tự làm hộ được.

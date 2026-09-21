@@ -1,10 +1,14 @@
 // Công cụ cho agent ĐỌC và THAO TÁC một web app mà nó tự mở trên màn hình riêng — theo BẢNG PHẦN TỬ
 // ĐÁNH SỐ thay vì bấm mò theo toạ độ.
 //
-// Vì sao (xem memory reference-jev-element-table): trước đây agent chỉ có screen_click(x, y) — nhìn ảnh
-// rồi đoán chỗ bấm. Sai thì không ai biết, mà mỗi bước phải gửi một tấm ảnh. Giờ agent hỏi "trang này có
-// gì", nhận về "1: nút Tìm · 2: ô Mã vận đơn", rồi bấm theo SỐ. Không bịa được selector, không cần mô
-// hình thị giác, và không tấm ảnh nào rời máy.
+// Vì sao: trước đây agent chỉ có screen_click(x, y) — nhìn ảnh rồi đoán chỗ bấm; sai thì không ai biết,
+// mà mỗi bước phải gửi một tấm ảnh. Giờ agent hỏi "trang này có gì", nhận về cây trợ năng
+// (button "Đăng nhập", combobox "Mã vận đơn"), rồi thao tác theo VAI TRÒ + TÊN. Không bịa được selector,
+// không cần mô hình thị giác, không tấm ảnh nào rời máy.
+//
+// Lõi chạy trên Playwright (playwright-core, bám vào Chromium đang chạy qua CDP — không tải trình duyệt).
+// Bản đầu tự viết tay CDP + tự đánh số phần tử; bỏ vì Playwright kiểm "bấm có trúng không" trước khi bấm
+// và NÉM LỖI khi trượt, còn bản tự chế thì trượt trong im lặng.
 //
 // Đường đi: web app do `axle webapp` dựng chạy Chromium với --remote-debugging-port=0 → Chromium tự chọn
 // một cổng RỖI và ghi số vào <hồ sơ>/DevToolsActivePort. Không dùng cổng cố định vì CDP KHÔNG có xác
@@ -18,6 +22,9 @@ import { z } from 'zod';
 const LOI = '/opt/axle/core/web/domtable.mjs';
 const HO_SO = (ten) => `${process.env.HOME || ''}/.local/share/axle-web/${ten}`;
 const TEN = z.string().regex(/^[a-z][a-z0-9-]{1,20}$/).describe('Tên web app (như trong axle webapp)');
+const VAI_TRO = z.enum(['button', 'link', 'textbox', 'combobox', 'checkbox', 'radio', 'tab', 'menuitem',
+  'option', 'searchbox', 'switch', 'heading', 'listitem', 'cell'])
+  .describe('Vai trò như trong cây trợ năng của web_snapshot');
 
 export function coWeb() {
   return existsSync(LOI);
@@ -43,28 +50,30 @@ function chay(ten, args, timeout = 45_000) {
 export function registerWeb(tool) {
   tool('web_snapshot', {
     title: 'Read a web app as a numbered element table',
-    description: 'List every clickable/typable control of an open Axle web app as a numbered table '
-      + '(includes shadow DOM and same-origin iframes). Use the numbers with web_click / web_type. '
-      + 'Re-read after every action: the numbers are only valid for the page you just read.',
+    description: 'Accessibility tree of an open Axle web app: roles, names and current values '
+      + '(button "Log in", combobox "Waybill": ABC123). Act on it with web_click / web_type using the '
+      + 'role and the name you see here. Re-read after every action.',
     inputSchema: { app: TEN },
     annotations: { readOnlyHint: true },
   }, async ({ app }) => chay(app, ['chup']));
 
   tool('web_click', {
     title: 'Click an element by its number',
-    description: 'Click the element with this number from the LAST web_snapshot of this app. '
-      + 'Dispatches a real mouse event. Take a new snapshot afterwards — the page may have changed.',
-    inputSchema: { app: TEN, so: z.number().int().min(0).describe('Số phần tử trong bảng vừa đọc') },
+    description: 'Click the visible element with this role and name. Waits for it to be actionable and '
+      + 'FAILS LOUDLY if it is not — it never silently misses. If several elements match, the error lists '
+      + 'them so you can pick one with "thu".',
+    inputSchema: { app: TEN, vai: VAI_TRO, ten: z.string().max(200).describe('Tên hiện trên phần tử'),
+      thu: z.number().int().min(0).optional().describe('Chỉ dùng khi máy báo có nhiều thứ trùng tên') },
     annotations: { readOnlyHint: false },
-  }, async ({ app, so }) => chay(app, ['bam', String(so)]));
+  }, async ({ app, vai, ten, thu }) => chay(app, ['bam', vai, ten, ...(thu === undefined ? [] : ['--thu', String(thu)])]));
 
   tool('web_type', {
     title: 'Type text into a field by its number',
-    description: 'Clear the field with this number and type text into it. Follow with web_key("Enter") '
-      + 'if the form submits on Enter rather than through a button.',
-    inputSchema: { app: TEN, so: z.number().int().min(0), chu: z.string().max(2000) },
+    description: 'Fill the field with this role and name. Follow with web_key("Enter") if the form '
+      + 'submits on Enter rather than through a button.',
+    inputSchema: { app: TEN, vai: VAI_TRO, ten: z.string().max(200), chu: z.string().max(2000) },
     annotations: { readOnlyHint: false },
-  }, async ({ app, so, chu }) => chay(app, ['go', String(so), chu]));
+  }, async ({ app, vai, ten, chu }) => chay(app, ['go', vai, ten, chu]));
 
   tool('web_key', {
     title: 'Press a key',

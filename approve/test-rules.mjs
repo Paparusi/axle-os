@@ -36,6 +36,19 @@ addSession(R, cog({ path: '/p/z/a.txt' }, 'file_delete'), T0);
 ok(findAuto(cog({ path: '/p/z/b.txt' }, 'file_delete'), R, T0)?.kind === 'session', 'phiên xoá: file khác cùng thư mục → tự duyệt');
 ok(!findAuto(cog({ path: '/p/z/sub', isDir: true }, 'file_delete'), R, T0), 'phiên xoá KHÔNG áp cho xoá cả thư mục (bậc 3)');
 
+// Claude Code trên máy xin công cụ (cầu xin phép): phá máy thì bậc 3, còn lại bậc 2 và nhớ được
+const ct = (tool, extra = {}) => cog({ tool, input: {}, command: null, file: null, nguy: false, ...extra }, 'claude_tool');
+ok(tierOf(ct('Edit', { file: '/home/admin_1/work/a.js' })) === 2, 'Claude sửa tệp trong work → bậc 2');
+ok(tierOf(ct('Bash', { command: 'sudo rm -rf /', nguy: true })) === 3, 'Claude chạy lệnh nguy hiểm → bậc 3, không nhớ');
+ok(!canRemember(ct('Bash', { command: 'sudo ls', nguy: true })), 'bậc 3 thì không có nút "luôn việc này"');
+addRule(R, ct('Bash', { command: 'npm test', cwd: '/p' }), T0);
+ok(findAuto(ct('Bash', { command: 'npm  test' }), R, T0)?.kind === 'rule', 'luật "luôn": cùng lệnh (bỏ qua khoảng trắng thừa) → tự duyệt');
+ok(!findAuto(ct('Bash', { command: 'npm publish' }), R, T0), 'luật "luôn": lệnh khác → hỏi');
+addSession(R, ct('Edit', { file: '/p/z/a.js' }), T0);
+ok(findAuto(ct('Edit', { file: '/p/z/b.js' }), R, T0)?.kind === 'session', 'phiên 1 giờ: Edit tệp khác cùng thư mục → tự duyệt');
+ok(!findAuto(ct('Write', { file: '/p/z/c.js' }), R, T0), 'phiên 1 giờ: công cụ khác (Write) → hỏi lại');
+ok(!findAuto(ct('Edit', { file: '/etc/hosts', nguy: true }), R, T0), 'phiên không bao giờ áp cho việc nguy hiểm');
+
 const changed = prune(R, (k) => k !== 'chu:ssh:cog', T0);
 ok(changed && R.rules.length === 0 && R.sessions.length === 0, 'gỡ agent → luật + phiên của nó bị xoá');
 

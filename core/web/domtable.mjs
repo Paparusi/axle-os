@@ -1,34 +1,58 @@
 #!/usr/bin/env node
-// Đọc một trang web thành BẢNG PHẦN TỬ ĐÁNH SỐ, và thao tác theo số đó.
+// Đọc và thao tác một trang web qua CÂY TRỢ NĂNG (vai trò + tên), bám vào Chromium đang chạy.
 //
-//   node domtable.mjs <url|attach> chup            — in bảng phần tử
-//   node domtable.mjs … bam <số>                   — bấm phần tử số mấy
-//   node domtable.mjs … go <số> "chữ"              — gõ chữ vào ô số mấy
-//   node domtable.mjs … chon <số> "giá trị"        — chọn trong danh sách
-//   node domtable.mjs … phim Enter                 — gõ phím (Enter/Tab/Escape/mũi tên)
-//   node domtable.mjs … cuon len|xuong             — cuộn
-//   node domtable.mjs … chu                        — chữ đang hiện trên trang
+//   node domtable.mjs <url|attach> chup                    — cây trợ năng của trang
+//   node domtable.mjs … bam <vai trò> "<tên>" [--thu N]     — bấm, vd: bam button "Đăng nhập"
+//   node domtable.mjs … go  <vai trò> "<tên>" "<chữ>"      — gõ vào ô
+//   node domtable.mjs … chon <vai trò> "<tên>" "<giá trị>" — chọn trong danh sách
+//   node domtable.mjs … phim Enter                         — gõ phím
+//   node domtable.mjs … cuon len|xuong · chu · dcho <url> · cho <giây> · cho-chu "<chữ>"
+//   node domtable.mjs … lam 'go combobox "Tìm" "abc"' 'phim Enter' 'chup'   — cả kịch bản, MỘT tiến trình
+//   … hoặc bỏ trống đối số thì đọc từng dòng từ stdin
 //
-// Vì sao làm thế này (học từ browser-use/jev-ultrafast, MIT, 9/2026 — xem memory
-// reference-jev-element-table): agent "nhìn ảnh rồi đoán chỗ bấm" vừa chậm vừa sai. Đưa cho nó một bảng
-// "1: nút Tìm · 2: ô Mã vận đơn" thì nó chỉ chọn SỐ — không bịa được selector, không cần mô hình thị giác,
-// và rẻ hơn hẳn vì không gửi ảnh.
+// LỊCH SỬ, để người sau khỏi đi lại đường cũ: bản đầu tự viết tay CDP rồi tự dựng "bảng phần tử đánh số"
+// (học từ browser-use/jev-ultrafast). Chạy được, nhưng vấp đúng hai chỗ mà một thư viện chín đã giải từ lâu:
+//   * bấm trượt mà IM LẶNG — trang có hai nút cùng tên "Search", bấm nhầm cái bị che, không ai biết;
+//   * phải `sleep` đoán xem trang tải xong chưa.
+// Playwright giải cả hai: `getByRole` định vị theo NGỮ NGHĨA, và trước khi thao tác nó kiểm phần tử có hiện,
+// có đứng yên, có nhận được sự kiện không — không trúng thì NÉM LỖI chứ không im lặng.
+// Nên bỏ hẳn bản tự chế. Giữ lại đúng một thứ của thiết kế cũ: cách tìm cổng gỡ lỗi ngẫu nhiên.
 //
-// Khác jev ở hai chỗ có chủ ý:
-//   * ĐỌC CẢ shadow DOM và iframe cùng nguồn — jev bỏ qua, mà cổng VN cũ hay nằm đúng trong đó.
-//   * Không phụ thuộc dịch vụ suy luận đóng nào. Dữ liệu trang KHÔNG rời máy.
-//
-// Không cần cài gì: dùng chrome-headless-shell có sẵn + WebSocket sẵn trong Node 22.
+// Không tải trình duyệt nào: `connectOverCDP` bám vào Chromium ĐANG CHẠY (web app do `axle webapp` mở,
+// hoặc một bản tự mở). Vì vậy chỉ cần `playwright-core`, không cần gói `playwright` đầy đủ.
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 
-const CHROME = process.env.AXLE_CHROME || [
-  '/home/admin_1/.cache/ms-playwright/chromium_headless_shell-1223/chrome-headless-shell-linux64/chrome-headless-shell',
-  '/snap/bin/chromium', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome',
-].find((p) => existsSync(p));
-// Cổng CDP: đặt thẳng bằng AXLE_CDP_PORT, hoặc để AXLE_CDP_PROFILE trỏ vào thư mục hồ sơ Chromium rồi
-// đọc số cổng Chromium tự chọn trong DevToolsActivePort. Cách sau dùng cho web app của Axle — cổng ngẫu
-// nhiên, file chỉ chủ hồ sơ đọc được.
+const require_ = createRequire(import.meta.url);
+function napPlaywright() {
+  for (const p of ['playwright-core', '/opt/axle/mcp/node_modules/playwright-core',
+    `${process.env.HOME}/openclaw/node_modules/playwright-core`]) {
+    try { return require_(p); } catch { /* thử chỗ kế */ }
+  }
+  throw new Error('Thiếu playwright-core. Cài: npm i playwright-core (không cần tải trình duyệt)');
+}
+
+// Cổng CDP: đặt thẳng bằng AXLE_CDP_PORT, hoặc AXLE_CDP_PROFILE trỏ vào hồ sơ Chromium (đọc số cổng trong
+// DevToolsActivePort — web app của Axle mở bằng --remote-debugging-port=0), hoặc tự dò.
+//
+// TỰ DÒ THÌ ƯU TIÊN TRÌNH DUYỆT THẬT, không lấy bản headless. Đây là chỗ quan trọng nhất và cũng là chỗ
+// bản đầu làm sai: mở một Chromium trắng, không hồ sơ, không đăng nhập → trang nào chặn bot là chặn ngay
+// (DuckDuckGo không trả một kết quả nào), và mọi trang cần đăng nhập đều vô dụng. Trình duyệt THẬT của chủ
+// có sẵn phiên đăng nhập, cookie, và trông như người dùng thật.
+async function timCongTuDo() {
+  for (const cong of [9444, 9222, 9333]) {
+    const v = await fetch(`http://127.0.0.1:${cong}/json/version`).then((r) => r.json()).catch(() => null);
+    if (!v) continue;
+    if (!/Headless/i.test(`${v.Browser || ''}${v['User-Agent'] || ''}`)) return { cong, ten: v.Browser, that: true };
+  }
+  for (const cong of [9333, 9444, 9222]) {
+    const v = await fetch(`http://127.0.0.1:${cong}/json/version`).then((r) => r.json()).catch(() => null);
+    if (v) return { cong, ten: v.Browser, that: false };
+  }
+  return null;
+}
+
 function timCong() {
   if (process.env.AXLE_CDP_PORT) return Number(process.env.AXLE_CDP_PORT);
   const hs = process.env.AXLE_CDP_PROFILE;
@@ -38,224 +62,209 @@ function timCong() {
       if (n > 0) return n;
     } catch { throw new Error(`không đọc được cổng gỡ lỗi ở ${hs}/DevToolsActivePort — app đã mở chưa?`); }
   }
-  return 9333;
+  return null;   // để main() tự dò
 }
-const PORT = timCong();
 
-// ---------------------------------------------------------------- CDP tối giản
-async function noiCDP() {
-  const r = await fetch(`http://127.0.0.1:${PORT}/json/list`).then((x) => x.json()).catch(() => null);
-  const trang = r?.find((t) => t.type === 'page' && t.webSocketDebuggerUrl);
-  if (!trang) throw new Error(`Không thấy trang nào ở cổng ${PORT} — mở trình duyệt với --remote-debugging-port=${PORT}`);
-  const ws = new WebSocket(trang.webSocketDebuggerUrl);
-  await new Promise((ok, hong) => { ws.onopen = ok; ws.onerror = () => hong(new Error('không nối được CDP')); });
-  let id = 0;
-  const chocho = new Map();
-  ws.onmessage = (e) => {
-    const m = JSON.parse(e.data);
-    if (m.id && chocho.has(m.id)) {
-      const { ok, hong } = chocho.get(m.id); chocho.delete(m.id);
-      m.error ? hong(new Error(m.error.message)) : ok(m.result);
+// ƯU TIÊN Chromium ĐẦY ĐỦ: bản chrome-headless-shell thiếu cờ của trình duyệt thật (vd `--app=`), thử bằng
+// nó là thử sai thứ — web app của Axle chạy Chromium đầy đủ.
+function timChromium() {
+  if (process.env.AXLE_CHROME) return process.env.AXLE_CHROME;
+  const san = ['/snap/bin/chromium', '/usr/bin/chromium', '/usr/bin/chromium-browser',
+    '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable'].find((p) => existsSync(p));
+  if (san) return san;
+  try {
+    const goc = `${process.env.HOME}/.cache/ms-playwright`;
+    const ban = readdirSync(goc).filter((d) => /^chromium-\d+$/.test(d))
+      .sort((a, b) => Number(b.split('-')[1]) - Number(a.split('-')[1]));
+    for (const b of ban) {
+      for (const t of ['chrome-linux64/chrome', 'chrome-linux/chrome']) {
+        if (existsSync(`${goc}/${b}/${t}`)) return `${goc}/${b}/${t}`;
+      }
     }
-  };
-  const goi = (method, params = {}) => new Promise((ok, hong) => {
-    const n = ++id; chocho.set(n, { ok, hong });
-    ws.send(JSON.stringify({ id: n, method, params }));
-    setTimeout(() => { if (chocho.delete(n)) hong(new Error(`${method} quá giờ`)); }, 30_000);
-  });
-  return { goi, dong: () => ws.close() };
+  } catch { /* không có cache thì thôi */ }
+  return null;
 }
 
-async function moTrinhDuyet(url) {
-  if (!CHROME) throw new Error('Không thấy Chromium/chrome-headless-shell trên máy');
-  const p = spawn(CHROME, ['--headless=new', '--disable-gpu', '--no-sandbox', '--hide-scrollbars',
-    '--window-size=1280,1000', `--remote-debugging-port=${PORT}`, '--lang=vi-VN', url || 'about:blank'],
+async function moTrinhDuyet(url, cong) {
+  const bin = timChromium();
+  if (!bin) throw new Error('Không thấy Chromium trên máy');
+  const p = spawn(bin, ['--headless=new', '--disable-gpu', '--no-sandbox', '--hide-scrollbars',
+    '--window-size=1280,1000', `--remote-debugging-port=${cong}`, '--lang=vi-VN', url || 'about:blank'],
   { stdio: 'ignore', detached: true });
   p.unref();
   for (let i = 0; i < 60; i++) {
-    const ok = await fetch(`http://127.0.0.1:${PORT}/json/version`).then(() => true).catch(() => false);
-    if (ok) return p;
+    if (await fetch(`http://127.0.0.1:${cong}/json/version`).then(() => true).catch(() => false)) return;
     await new Promise((r) => setTimeout(r, 250));
   }
   throw new Error('trình duyệt không mở được');
 }
 
-// ------------------------------------------------------- Mã chạy TRONG trang
-// Trả về bảng phần tử + lưu chính các phần tử đó vào window để thao tác theo số.
-const JS_CHUP = `(() => {
-  const ra = [];
-  const els = [];
-  const TEN_THE = { a: 'liên kết', button: 'nút', input: 'ô', textarea: 'ô nhiều dòng', select: 'danh sách' };
-  const VAI = new Set(['button','link','checkbox','radio','tab','menuitem','switch','textbox','combobox','option','searchbox']);
+const TAB_LUU = `${process.env.HOME}/.cache/axle-web-tab.json`;
 
-  const hien = (e) => {
-    const r = e.getBoundingClientRect();
-    if (r.width < 2 || r.height < 2) return null;
-    const s = getComputedStyle(e);
-    if (s.visibility === 'hidden' || s.display === 'none' || Number(s.opacity) < 0.05) return null;
-    return r;
-  };
-  const cat = (s, n = 90) => { s = (s || '').replace(/\\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n) + '…' : s; };
-  const ten = (e) => cat(
-    e.getAttribute('aria-label')
-    || (e.getAttribute('aria-labelledby') && (e.getRootNode().getElementById?.(e.getAttribute('aria-labelledby'))?.innerText))
-    || (e.labels && e.labels[0] && e.labels[0].innerText)
-    || e.placeholder || e.title || e.alt || e.value || e.innerText || e.name || '');
-
-  const dangQuanTam = (e) => {
-    const t = e.tagName.toLowerCase();
-    if (['a','button','select','textarea'].includes(t)) return true;
-    if (t === 'input') return !['hidden'].includes((e.type || '').toLowerCase());
-    if (VAI.has((e.getAttribute('role') || '').toLowerCase())) return true;
-    if (e.hasAttribute('onclick') || e.hasAttribute('contenteditable')) return true;
-    if (e.tabIndex >= 0 && t !== 'body') return true;
-    return false;
-  };
-
-  // Đi cả shadow DOM và iframe CÙNG NGUỒN — jev bỏ qua hai chỗ này, mà cổng cũ hay nằm đúng đó
-  const di = (goc, trong = '') => {
-    let ds;
-    try { ds = goc.querySelectorAll('*'); } catch { return; }
-    for (const e of ds) {
-      if (e.shadowRoot) di(e.shadowRoot, trong + '↳shadow ');
-      if (e.tagName === 'IFRAME') {
-        try { if (e.contentDocument) di(e.contentDocument, trong + '↳khung '); } catch { /* khác nguồn, bỏ */ }
-      }
-      if (!dangQuanTam(e)) continue;
-      const r = hien(e);
-      if (!r) continue;
-      const i = els.length;
-      els.push(e);
-      const t = e.tagName.toLowerCase();
-      const loai = TEN_THE[t] || (e.getAttribute('role') || t);
-      const trangThai = [];
-      if (e.disabled) trangThai.push('mờ');
-      if (e.checked) trangThai.push('đã chọn');
-      if (t === 'input' && e.type) trangThai.push(e.type);
-      if (e.value && t !== 'button') trangThai.push('đang là: ' + cat(e.value, 40));
-      ra.push({ so: i, loai: trong + loai, ten: ten(e), ...(trangThai.length ? { trang_thai: trangThai.join(', ') } : {}),
-        x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2),
-        ngoai_man: r.top < 0 || r.bottom > innerHeight ? true : undefined });
-    }
-  };
-  di(document);
-  window.__axleEls = els;
-  return JSON.stringify({ tieu_de: document.title, dia_chi: location.href, so_phan_tu: ra.length, phan_tu: ra });
-})()`;
-
-// ----------------------------------------------------------------- thao tác
-async function danhGia(cdp, bieu_thuc) {
-  const r = await cdp.goi('Runtime.evaluate', { expression: bieu_thuc, returnByValue: true, awaitPromise: true });
-  if (r.exceptionDetails) throw new Error(r.exceptionDetails.text || 'lỗi trong trang');
-  return r.result.value;
+async function idCuaTab(ctx, page) {
+  try {
+    const s = await ctx.newCDPSession(page);
+    const { targetInfo } = await s.send('Target.getTargetInfo');
+    await s.detach().catch(() => {});
+    return targetInfo.targetId;
+  } catch { return null; }
 }
 
-const JS_THEO_SO = (so, than) => `(() => {
-  const e = (window.__axleEls || [])[${so}];
-  if (!e) return JSON.stringify({ loi: 'chưa có bảng phần tử, hoặc không có số ${so} — chụp lại' });
-  ${than}
-})()`;
+// Tìm lại đúng tab của mình; chưa có thì mở tab mới và nhớ id lại.
+async function timTab(ctx, dich) {
+  let luu = null;
+  try { luu = JSON.parse(readFileSync(TAB_LUU, 'utf8')).targetId; } catch { /* lần đầu */ }
+  if (luu) {
+    for (const p of ctx.pages()) {
+      if (await idCuaTab(ctx, p) === luu) return p;
+    }
+  }
+  const p = await ctx.newPage();
+  const id = await idCuaTab(ctx, p);
+  try { writeFileSync(TAB_LUU, JSON.stringify({ targetId: id }), { mode: 0o600 }); } catch { /* không nhớ được thì thôi */ }
+  if (dich !== 'attach') await p.goto(dich, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => {});
+  return p;
+}
+
+const VAI = ['button', 'link', 'textbox', 'combobox', 'checkbox', 'radio', 'tab', 'menuitem', 'option',
+  'searchbox', 'switch', 'heading', 'listitem', 'img', 'cell'];
 
 async function main() {
   const [dich, lenh = 'chup', ...doi] = process.argv.slice(2);
   if (!dich) {
-    console.error('node domtable.mjs <url|attach> chup|bam|go|chon|cuon|chu [đối số…]');
+    console.error('node domtable.mjs <url|attach> chup|bam|go|chon|phim|cuon|chu|dcho [đối số…]');
     process.exit(2);
   }
-  if (dich !== 'attach') await moTrinhDuyet(dich);
-  const cdp = await noiCDP();
-  try {
-    if (dich !== 'attach') {
-      // LUÔN điều hướng, đừng trông chờ lúc mở trình duyệt: nếu máy đã có sẵn một phiên chạy từ trước thì
-      // lệnh spawn không chiếm được cổng, và ta bám nhầm vào trang about:blank của phiên cũ.
-      const dangO = await danhGia(cdp, 'location.href').catch(() => '');
-      if (dangO !== dich) {
-        await cdp.goi('Page.enable').catch(() => {});
-        await cdp.goi('Page.navigate', { url: dich });
-      }
-      // Chờ trang lặng đi thay vì đoán số giây — đoán thì lúc được lúc không
-      for (let i = 0; i < 60; i++) {
-        const xong = await danhGia(cdp, 'document.readyState === "complete" && location.href !== "about:blank"')
-          .catch(() => false);
-        if (xong) break;
-        await new Promise((r) => setTimeout(r, 250));
-      }
+  let cong = timCong();
+  let nhan = '';
+  if (!cong) {
+    const tim_ = await timCongTuDo();
+    if (!tim_) {
+      if (dich === 'attach') throw new Error('Không thấy trình duyệt nào đang mở cổng gỡ lỗi (9444/9222/9333)');
+      cong = 9333;
+      await moTrinhDuyet(dich, cong);
+    } else {
+      cong = tim_.cong;
+      nhan = `${tim_.ten}${tim_.that ? '' : ' (headless)'} · cổng ${cong}`;
     }
-    const chup = async () => JSON.parse(await danhGia(cdp, JS_CHUP));
+  } else if (dich !== 'attach' && !(await fetch(`http://127.0.0.1:${cong}/json/version`).then(() => true).catch(() => false))) {
+    await moTrinhDuyet(dich, cong);
+  }
 
+  const { chromium } = napPlaywright();
+  const br = await chromium.connectOverCDP(`http://127.0.0.1:${cong}`);
+  try {
+    const ctx = br.contexts()[0];
+    if (!ctx) throw new Error('trình duyệt chưa mở cửa sổ nào');
+    // TAB RIÊNG, nhớ lại giữa các lần gọi. KHÔNG chiếm tab người dùng đang xem — bản đầu lấy bừa pages()[0]
+    // nên có thể điều khiển ngay tab chủ máy đang làm việc. Nhớ bằng targetId của DevTools.
+    const page = await timTab(ctx, dich);
+    if (nhan) process.stderr.write(`(bám vào ${nhan})\n`);
+
+    // Định vị theo NGỮ NGHĨA. Playwright tự chờ phần tử hiện + đứng yên + nhận được sự kiện rồi mới thao
+    // tác; không trúng thì ném lỗi — khác hẳn bấm theo toạ độ, trượt mà vẫn báo thành công.
+    // Chỉ lấy thứ ĐANG HIỆN, và KHÔNG đoán khi mơ hồ: nhiều phần tử cùng khớp thì kể hết ra cho người gọi
+    // chọn, chứ `.first()` bừa là bấm nhầm cái bị che — đúng lỗi của bản tự chế trước đây.
+    const tim = async (vai, ten, thu) => {
+      if (!VAI.includes(vai)) throw new Error(`vai trò lạ '${vai}' — dùng: ${VAI.join(', ')}`);
+      const loc = page.getByRole(vai, { name: ten, exact: false }).filter({ visible: true });
+      const n = await loc.count();
+      if (n === 0) throw new Error(`không thấy ${vai} nào đang hiện có tên giống "${ten}"`);
+      if (n === 1) return loc.first();
+      if (Number.isInteger(thu) && thu >= 0 && thu < n) return loc.nth(thu);
+      const ke = [];
+      for (let i = 0; i < Math.min(n, 8); i++) {
+        const t = (await loc.nth(i).innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
+        const h = await loc.nth(i).boundingBox().catch(() => null);
+        ke.push(`    ${i}: ${t.slice(0, 40) || '(không chữ)'}${h ? `  ở (${Math.round(h.x)},${Math.round(h.y)})` : ''}`);
+      }
+      throw new Error(`có ${n} ${vai} khớp "${ten}" — nói tên rõ hơn, hoặc thêm số thứ tự ở cuối:\n${ke.join('\n')}`);
+    };
+
+    const lamMot = async (lenh, doi) => {
+    const soThu2 = () => { const i = doi.indexOf('--thu'); return i < 0 ? undefined : Number(doi[i + 1]); };
     switch (lenh) {
       case 'chup': {
-        const b = await chup();
-        console.log(`${b.tieu_de}\n${b.dia_chi}\n${b.so_phan_tu} thứ thao tác được:\n`);
-        for (const p of b.phan_tu) {
-          console.log(`  ${String(p.so).padStart(3)}  ${p.loai.padEnd(14)} ${p.ten}` +
-            (p.trang_thai ? `   [${p.trang_thai}]` : '') + (p.ngoai_man ? '  (ngoài màn)' : ''));
-        }
+        const cay = await page.locator('body').ariaSnapshot();
+        console.log(`${await page.title()}\n${page.url()}\n`);
+        console.log(cay.length > 12_000 ? `${cay.slice(0, 12_000)}\n… (cắt bớt)` : cay);
         break;
       }
-      case 'bam': {
-        // KHÔNG chụp lại ở đây. Chụp lại là đánh số lại, số người gọi vừa nhìn thấy có thể trỏ sang phần tử
-        // khác → bấm nhầm mà không ai biết. Hợp đồng: số nhìn thấy = số bấm. Bảng cũ mất thì báo lỗi.
-        const r = await danhGia(cdp, JS_THEO_SO(doi[0], `
-          e.scrollIntoView({ block: 'center' });
-          const b = e.getBoundingClientRect();
-          return JSON.stringify({ x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2), ten: (e.innerText || e.value || '').trim().slice(0, 60) });`));
-        const o = JSON.parse(r);
-        if (o.loi) throw new Error(o.loi);
-        // Bấm bằng chuột thật qua CDP, không gọi e.click(): trang nào nghe sự kiện chuột mới ăn
-        for (const type of ['mousePressed', 'mouseReleased']) {
-          await cdp.goi('Input.dispatchMouseEvent', { type, x: o.x, y: o.y, button: 'left', clickCount: 1 });
-        }
-        console.log(`đã bấm ${doi[0]}: ${o.ten}`);
+      case 'bam':
+        await (await tim(doi[0], doi[1], soThu2())).click({ timeout: 15_000 });
+        console.log(`đã bấm ${doi[0]} "${doi[1]}"`);
         break;
-      }
       case 'go': {
-        const r = await danhGia(cdp, JS_THEO_SO(doi[0], `
-          e.scrollIntoView({ block: 'center' }); e.focus();
-          if ('value' in e) { e.value = ''; e.dispatchEvent(new Event('input', { bubbles: true })); }
-          return JSON.stringify({ ok: true });`));
-        if (JSON.parse(r).loi) throw new Error(JSON.parse(r).loi);
-        await cdp.goi('Input.insertText', { text: doi.slice(1).join(' ') });
-        console.log(`đã gõ vào ${doi[0]}`);
+        const o = await tim(doi[0], doi[1], soThu2());
+        await o.fill(doi.slice(2).filter((x, i, a) => x !== '--thu' && a[i - 1] !== '--thu').join(' '), { timeout: 15_000 });
+        console.log(`đã gõ vào ${doi[0]} "${doi[1]}"`);
         break;
       }
-      case 'chon': {
-        const r = await danhGia(cdp, JS_THEO_SO(doi[0], `
-          e.value = ${JSON.stringify(doi.slice(1).join(' '))};
-          e.dispatchEvent(new Event('change', { bubbles: true }));
-          return JSON.stringify({ ok: true, dang_la: e.value });`));
-        console.log(r);
+      case 'chon':
+        await (await tim(doi[0], doi[1], soThu2())).selectOption(doi.slice(2).join(' '), { timeout: 15_000 });
+        console.log(`đã chọn "${doi.slice(2).join(' ')}"`);
         break;
-      }
-      case 'cuon': {
-        const d = doi[0] === 'len' ? -600 : 600;
-        await danhGia(cdp, `scrollBy(0, ${d}); 1`);
+      case 'phim':
+        await page.keyboard.press(doi[0] || 'Enter');
+        console.log(`đã bấm phím ${doi[0] || 'Enter'}`);
+        break;
+      case 'cuon':
+        await page.mouse.wheel(0, doi[0] === 'len' ? -600 : 600);
         console.log(`đã cuộn ${doi[0] === 'len' ? 'lên' : 'xuống'}`);
         break;
-      }
-      case 'phim': {
-        // Nhiều ô tìm kiếm chỉ gửi khi bấm Enter, không có nút nào bấm được
-        const ten = (doi[0] || 'Enter');
-        const ma = { Enter: 13, Tab: 9, Escape: 27, ArrowDown: 40, ArrowUp: 38 }[ten];
-        if (!ma) throw new Error('phím: Enter | Tab | Escape | ArrowDown | ArrowUp');
-        for (const type of ['keyDown', 'keyUp']) {
-          await cdp.goi('Input.dispatchKeyEvent', { type, key: ten, code: ten, windowsVirtualKeyCode: ma,
-            nativeVirtualKeyCode: ma, ...(ten === 'Enter' && type === 'keyDown' ? { text: '\r' } : {}) });
-        }
-        console.log(`đã bấm phím ${ten}`);
+      case 'dcho':
+        await page.goto(doi[0], { waitUntil: 'domcontentloaded', timeout: 30_000 });
+        console.log(`đã tới ${page.url()}`);
         break;
-      }
       case 'chu': {
-        const t = await danhGia(cdp, 'document.body.innerText.replace(/\\n{3,}/g, "\\n\\n").slice(0, 6000)');
-        console.log(t);
+        const t = await page.locator('body').innerText();
+        console.log(t.replace(/\n{3,}/g, '\n\n').slice(0, 6000));
         break;
       }
+      case 'cho':
+        await page.waitForTimeout(Math.min(Number(doi[0] || 1) * 1000, 30_000));
+        console.log(`đã chờ ${doi[0] || 1} giây`);
+        break;
+      case 'cho-chu':
+        // Chờ CHỮ hiện ra, đừng đoán số giây — đoán thì lúc được lúc không
+        await page.getByText(doi.join(' '), { exact: false }).first().waitFor({ timeout: 30_000 });
+        console.log(`đã thấy "${doi.join(' ')}"`);
+        break;
       default:
         throw new Error(`không hiểu lệnh ${lenh}`);
     }
+    };
+
+    if (lenh === 'lam') {
+      // Cả kịch bản trong MỘT tiến trình: chạy 10 bước bằng 10 lần gọi là trả 10 lần khởi động Node +
+      // nạp Playwright (đo thật: 136ms mỗi lần). Các bước lấy từ đối số, hoặc từ stdin nếu không có.
+      let buoc = doi.filter((d) => d.trim());
+      if (!buoc.length) {
+        const vao = await new Promise((ok) => {
+          let t = ''; process.stdin.setEncoding('utf8');
+          process.stdin.on('data', (c) => { t += c; }); process.stdin.on('end', () => ok(t));
+        });
+        buoc = vao.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+      }
+      for (const b of buoc) {
+        // tách theo khoảng trắng nhưng giữ nguyên phần trong nháy kép
+        const ph = (b.match(/"[^"]*"|\S+/g) || []).map((x) => x.replace(/^"|"$/g, ''));
+        process.stdout.write(`→ ${b}\n  `);
+        await lamMot(ph[0], ph.slice(1));
+      }
+    } else {
+      await lamMot(lenh, doi);
+    }
   } finally {
-    cdp.dong();
+    await br.close().catch(() => {});   // chỉ ngắt kết nối CDP, KHÔNG tắt trình duyệt của người dùng
   }
 }
 
-main().catch((e) => { console.error(`✗ ${e.message}`); process.exit(1); });
+// In ĐỦ thông điệp lỗi: chỗ mơ hồ liệt kê các lựa chọn ở những dòng sau, cắt đi là vứt mất phần hữu ích
+// nhất. Riêng lỗi dài của Playwright (có kèm cả "call log") thì cắt bớt đuôi cho đỡ ngộp.
+main().catch((e) => {
+  const m = String(e.message || e);
+  const i = m.indexOf('Call log:');
+  console.error(`✗ ${(i > 0 ? m.slice(0, i) : m).trim()}`);
+  process.exit(1);
+});

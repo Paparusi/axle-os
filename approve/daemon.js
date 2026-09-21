@@ -71,6 +71,15 @@ function dirsOf(who) {
 }
 const within = (p, root) => p === root || p.startsWith(`${root}/`);
 
+// Công cụ Claude Code xin dùng có "nguy hiểm" không → bậc 3 (luôn hỏi, không nhớ). Đây là cái LƯỚI THÔ:
+// bắt mấy thứ phá máy rõ ràng; còn lại bậc 2 để chủ nhớ được "luôn cho phép việc này".
+function nguyHiem(tool, command, file) {
+  if (command && /\b(sudo|su|rm\s+-[a-z]*r|mkfs|dd\s+if=|shutdown|reboot|poweroff|chmod\s+-R|chown\s+-R|>\s*\/etc\/|curl[^|]*\|\s*(ba)?sh|wget[^|]*\|\s*(ba)?sh)\b/.test(command)) return true;
+  if (file && /^\/(etc|boot|usr|var\/lib|root)\b/.test(file)) return true;
+  if (file && /\/brain\/vault\//.test(file)) return true;
+  return false;
+}
+
 // Quyền XEM MÀN HÌNH THẬT CỦA CHỦ (bậc 3, luôn có hạn giờ) — /etc/axle/grants/<tên>.json: {"screen":{"until":…}}
 function screenGrant(who) {
   if (!who?.agent) return { ok: true };            // chủ tự chụp thì khỏi xin ai
@@ -199,6 +208,34 @@ const ACTIONS = {
     describe: (p) => `ĐĂNG NHẬP vào máy bằng tài khoản ${p.user}${p.tty ? ` (${p.tty})` : ''}\n`
       + 'Có người đang ngồi trước máy. Duyệt là họ vào thẳng, KHÔNG cần mật khẩu.',
     exec: (p) => ({ exitCode: 0, output: `Đã cho đăng nhập ${p.user}` }),
+  },
+  // CẦU XIN PHÉP: Claude Code chạy TRÊN máy (claude -p … --permission-prompt-tool mcp__axle__duyet_quyen)
+  // muốn dùng một công cụ (Bash, Edit, Write…) thì gọi sang đây → điện thoại chủ rung → chủ duyệt mới làm.
+  // Không có tác dụng phụ: "được duyệt" chính là kết quả — cổng MCP trả lời Claude Code allow/deny.
+  // Đây là thứ biến "agent có tay chân + chủ nắm cổng bằng khuôn mặt mình" thành chuyện kiểm chứng được.
+  claude_tool: {
+    validate(p) {
+      const tool = String(p.tool ?? '').slice(0, 64);
+      if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(tool)) throw new Error('Tên công cụ lạ');
+      let input = p.input && typeof p.input === 'object' ? p.input : {};
+      const raw = JSON.stringify(input);
+      if (raw.length > 16_000) input = { _cat: `${raw.slice(0, 16_000)}…` };
+      // Lọc ra mấy mẩu chủ cần thấy: Bash → lệnh; Edit/Write → tệp + nội dung ngắn
+      const command = typeof input.command === 'string' ? input.command : null;
+      const file = typeof input.file_path === 'string' ? input.file_path : null;
+      return { tool, input, command, file, nguy: nguyHiem(tool, command, file) };
+    },
+    describe(p) {
+      const dong = [`Claude trên máy xin dùng công cụ ${p.tool}${p.nguy ? ' ⚠️ NGUY HIỂM' : ''}`];
+      if (p.command) dong.push(`Lệnh:\n${cap(p.command, 1500)}`);
+      else if (p.file) {
+        dong.push(`Tệp: ${p.file}`);
+        const t = p.input.content ?? p.input.new_string;
+        if (typeof t === 'string') dong.push(`Nội dung:\n${cap(t, 600)}`);
+      } else dong.push(cap(JSON.stringify(p.input, null, 1), 800));
+      return dong.join('\n');
+    },
+    exec: (p) => ({ exitCode: 0, output: `Đã cho Claude dùng ${p.tool}` }),
   },
   file_delete: {
     validate(p, who) {

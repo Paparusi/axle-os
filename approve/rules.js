@@ -43,6 +43,7 @@ export const keyOf = (r) => (r.who?.agent ? `phu:${r.who.agent}` : `chu:${r.clie
 
 export function tierOf(r) {
   if (r.action === 'login') return 3;          // người xin CHƯA chứng minh là ai: không bao giờ nhớ, hỏi từng lần
+  if (r.action === 'claude_tool') return r.params.nguy ? 3 : 2;   // Claude trên máy xin công cụ: phá máy thì bậc 3
   if (r.action === 'screen_grant') return 3;   // xem màn hình thật của chủ: luôn hỏi từng lần
   if (r.action === 'snapshot_undo') return 3;
   if (r.action === 'run_command' && r.params.asRoot) return 3;
@@ -58,6 +59,8 @@ export function sessionScope(r) {
     case 'run_command': return { cwd: r.params.cwd };
     case 'service_restart': return { unit: r.params.unit };
     case 'file_delete': return { dir: path.dirname(r.params.path) };
+    // "1 giờ": cùng công cụ, cùng thư mục (Edit/Write theo thư mục tệp; Bash theo tên công cụ)
+    case 'claude_tool': return { tool: r.params.tool, dir: r.params.file ? path.dirname(r.params.file) : null };
     default: return null;
   }
 }
@@ -65,6 +68,8 @@ export function ruleMatch(r) {
   switch (r.action) {
     case 'run_command': return { command: norm(r.params.command), cwd: r.params.cwd };
     case 'service_restart': return { unit: r.params.unit };
+    // "Luôn việc này": đúng công cụ + đúng lệnh (Bash) hoặc đúng tệp (Edit/Write)
+    case 'claude_tool': return { tool: r.params.tool, command: r.params.command ? norm(r.params.command) : null, file: r.params.file ?? null };
     default: return null;
   }
 }
@@ -117,7 +122,11 @@ export function describeRule(x, isSession) {
   const what = x.action === 'run_command'
     ? (x.match ? `lệnh \`${x.match.command}\` ở ${x.match.cwd}` : `lệnh thường ở ${x.scope.cwd}`)
     : x.action === 'service_restart' ? `khởi động lại ${(x.match ?? x.scope).unit}`
-      : x.action === 'file_delete' ? `xoá file trong ${x.scope.dir}` : x.action;
+      : x.action === 'file_delete' ? `xoá file trong ${x.scope.dir}`
+        : x.action === 'claude_tool' ? (x.match
+          ? `Claude dùng ${x.match.tool}${x.match.command ? ` \`${x.match.command}\`` : x.match.file ? ` vào ${x.match.file}` : ''}`
+          : `Claude dùng ${x.scope.tool}${x.scope.dir ? ` trong ${x.scope.dir}` : ''}`)
+          : x.action;
   return `#${x.id} ${isSession ? `phiên tới ${hhmm(x.until)}` : 'luôn'} · ${who} · ${what}`;
 }
 export const autoLabel = (a) => (a.kind === 'rule' ? `luật #${a.id}` : `phiên 1 giờ #${a.id} (tới ${hhmm(a.until)})`);
