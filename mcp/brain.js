@@ -161,6 +161,36 @@ export function kiem(dir = BRAIN) {
   return { so_trang: trang.size, link_hong: linkHongUniq, mo_coi: moCoi, mong, thieu_dau: thieuDau, tai_lieu_chua_trang: chuaTrang };
 }
 
+// ĐỒ THỊ liên kết wiki (app vẽ): nút = trang (slug, tiêu đề, loại), cạnh = [[link]] (một cạnh cho mỗi cặp); link tới
+// trang chưa có → nút loại "thieu" để nhìn thấy lỗ hổng. index/log không vẽ (là mục lục, nối tới tất cả).
+export function doThi(dir = BRAIN, { toiDaNut = 400 } = {}) {
+  const wiki = path.join(dir, 'wiki');
+  const nut = new Map();   // slug → { id, ten, loai, duong, mo_ta }
+  const walk = (d) => { for (const f of readdirSync(d)) { const p = path.join(d, f); if (statSync(p).isDirectory()) walk(p); else if (f.endsWith('.md')) {
+    const slug = f.replace(/\.md$/, ''); if (['index', 'log'].includes(slug)) continue;
+    const s = readFileSync(p, 'utf8');
+    const dau = /^---\n([\s\S]*?)\n---/.exec(s)?.[1] ?? '';
+    const ten = (/^title:\s*(.+)$/m.exec(dau)?.[1] ?? slug).trim().replace(/^["']|["']$/g, '');
+    const loai = (/^type:\s*(\w+)/m.exec(dau)?.[1] ?? path.basename(d).replace(/s$/, '') ?? 'concept').toLowerCase();
+    const than = s.replace(/^---[\s\S]*?---\s*/m, '').replace(/^#.*$/mg, '').replace(/\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/g, '$1').trim();
+    nut.set(slug, { id: slug, ten, loai, duong: path.relative(dir, p), mo_ta: than.slice(0, 120).replace(/\s+/g, ' '), noiDung: s });
+  } } };
+  if (existsSync(wiki)) walk(wiki);
+  const canh = new Map();
+  for (const [a, n] of nut) {
+    for (const m of n.noiDung.replace(/`[^`\n]*`/g, '').matchAll(/\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]/g)) {
+      const b = m[1].trim();
+      if (b === a || ['index', 'log'].includes(b)) continue;
+      if (!nut.has(b)) nut.set(b, { id: b, ten: b, loai: 'thieu', duong: '', mo_ta: 'trang chưa có (link hỏng)', noiDung: '' });
+      const k = [a, b].sort().join('|');
+      if (!canh.has(k)) canh.set(k, { a, b });
+    }
+  }
+  const nodes = [...nut.values()].slice(0, toiDaNut).map(({ noiDung, ...x }) => ({ ...x, so_link: [...canh.values()].filter((e) => e.a === x.id || e.b === x.id).length }));
+  const co = new Set(nodes.map((n) => n.id));
+  return { nodes, edges: [...canh.values()].filter((e) => co.has(e.a) && co.has(e.b)) };
+}
+
 // Gói Bộ não cho app (`query brain`): danh mục, tài liệu gần nhất, nhật ký gần nhất, đếm — cắt cho vừa hộp trạm (≤48KB)
 export function choApp(dir = BRAIN) {
   const co = existsSync(path.join(dir, 'QUY-UOC.md'));

@@ -56,6 +56,15 @@ try {
   ok(!k.link_hong.some((x) => x.link === 'tên-trang'), 'kiem: chữ mẫu trong dấu ` không tính là link hỏng');
   b.ghi('wiki/sources/bang-luong.md', '---\ntitle: Bảng lương\ntype: source\n---\nNguồn: raw/2026-09/1-bang.xlsx. Tổng lương 21,5 triệu. Hai nhân sự.');
   ok(!b.kiem().tai_lieu_chua_trang.includes('bang.xlsx'), 'kiem: trang nhắc tên tệp raw (không phải tên gốc) → vẫn tính là có trang');
+  // đồ thị liên kết
+  b.ghi('wiki/entities/cong-ty-abc.md', '---\ntitle: Công ty ABC\ntype: entity\n---\nKhách sỉ. Ký [[hop-dong-abc-2026-09]] — related. Xem thêm [[bang-luong]]. Đầu mối [[nguoi-lien-he-lan]].');
+  const g = b.doThi();
+  const ids = g.nodes.map((n) => n.id);
+  ok(!ids.includes('index') && !ids.includes('log') && ids.includes('cong-ty-abc') && ids.includes('hop-dong-abc-2026-09'), 'doThi: nút là trang, bỏ index/log');
+  ok(g.nodes.find((n) => n.id === 'cong-ty-abc')?.loai === 'entity' && g.nodes.find((n) => n.id === 'cong-ty-abc')?.ten === 'Công ty ABC', 'doThi: tiêu đề + loại từ YAML');
+  ok(g.edges.some((e) => [e.a, e.b].sort().join('|') === 'cong-ty-abc|hop-dong-abc-2026-09') && g.edges.filter((e) => [e.a, e.b].sort().join('|') === 'cong-ty-abc|hop-dong-abc-2026-09').length === 1, 'doThi: cạnh hai chiều gộp một (A→B và B→A)');
+  ok(g.nodes.find((n) => n.id === 'nguoi-lien-he-lan')?.loai === 'thieu' && !ids.includes('x-y'), 'doThi: link tới trang chưa có → nút loại thieu (link chỉ trong index thì không vẽ)');
+  ok(g.nodes.find((n) => n.id === 'cong-ty-abc')?.so_link === 3, 'doThi: đếm số link mỗi nút');
 } finally {
   rmSync(D, { recursive: true, force: true });
 }

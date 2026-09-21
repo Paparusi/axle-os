@@ -18,7 +18,7 @@ import { addRule, addSession, autoLabel, canRemember, canSession, describeRule, 
   saveRules, tierLine, tierOf, writeDurable } from './rules.js';
 import { buildDigest } from './digest.js';
 import { banChoApp, gopNhatKy, lenhCongCu, tenTepAnToan } from './mota.js';
-import { choApp as brainChoApp, tim as brainTim } from '../mcp/brain.js';
+import { choApp as brainChoApp, doThi as brainDoThi, tim as brainTim } from '../mcp/brain.js';
 import { createAppChannel } from './app-channel.js';
 import { machineState } from './machine-state.js';
 import { requestHash } from '../app/proto.js';
@@ -480,6 +480,7 @@ const app = createAppChannel({
     // nhà chủ (bộ duyệt là root) — chỉ đọc, chỉ trả về điện thoại đã ghép.
     const brainDir = `/home/${ownerUser()}/Axle/Brain`;
     if (what === 'brain') { try { return app.sendTo(d.id, { type: 'state', what: 'brain', data: brainChoApp(brainDir) }); } catch (e) { return app.sendTo(d.id, { type: 'state', what: 'brain', data: { co: false, loi: e.message } }); } }
+    if (what === 'brain-graph') { try { return app.sendTo(d.id, { type: 'state', what: 'brain-graph', data: brainDoThi(brainDir) }); } catch (e) { return app.sendTo(d.id, { type: 'state', what: 'brain-graph', data: { nodes: [], edges: [], loi: e.message } }); } }
     if (what === 'brain-tim') {
       const tk = String(msg?.tu_khoa || '').slice(0, 200);
       let ket_qua = [];

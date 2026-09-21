@@ -373,3 +373,9 @@ cả khối vào index.md (6 mục trống + 3 mục trùng, LINT phải dọn) 
 (một dòng vào đúng mục, idempotent theo [[slug]]), `brain_log` (dòng có giờ), `brain_kiem` (máy móc: link hỏng, mồ côi,
 mỏng, thiếu YAML, tài liệu chưa có trang; bỏ link trong dấu `, nhận cả tên tệp raw) — lời dặn INGEST/LINT đổi theo;
 `axle brain lint` bắt Claude gọi brain_kiem trước và sau khi sửa. Thử: test-brain 27 ca.
+
+**Đồ thị liên kết (22/9, 0.1.139 + app):** Bi hỏi "trên app có thể thấy Brain liên kết như thế nào không?" → `brain.doThi()`
+đọc mọi trang wiki (bỏ index/log), nút = trang (tên + loại từ YAML, số link), cạnh = mỗi cặp [[link]] gộp hai chiều,
+link tới trang chưa có thành nút loại `thieu` (vẽ đứt nét đỏ; bấm là điền sẵn câu "tạo trang đó"); tối đa 400 nút.
+App: `query brain-graph` → tấm **Liên kết trong Bộ não** trong 📚: xếp lực (đẩy–kéo, 200 vòng ngay trên điện thoại),
+màu theo loại, chạm chấm → thấy nó nối với ai + nút "Hỏi về trang này". Thử: test-brain 32 ca (5 ca đồ thị).
