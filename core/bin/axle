@@ -58,7 +58,7 @@ sudo axle app setup --relay <url>
 sudo axle app pair       in mã QR để app quét; khớp mã đối chiếu 6 số rồi gõ yes
 sudo axle app devices | remove <id>
                          điện thoại đã ghép / gỡ một điện thoại
-sudo axle duyet [<id> a|h|l|r]
+sudo axle duyet [<id> a|h|l|r] · axle duyet --json   duyệt tại máy · việc đang chờ (Bàn Axle đọc)
                          xem và duyệt yêu cầu ngay tại máy (dùng được cả khi mọi kênh khác hỏng)
 axle claude "câu hỏi" [--tiep]
                          Claude Code chạy TRÊN máy này: đọc/tìm thì làm ngay, còn ghi tệp/chạy lệnh
@@ -637,6 +637,7 @@ approve_cmd() {
 }
 
 ADMIN_SOCK=/run/axle-approve/admin.sock
+BAN_FILE=/run/axle/ban.json   # bộ duyệt tự công bố việc đang chờ + số hôm nay (root:chủ 0640) cho Bàn Axle
 admin_call() {   # $1 METHOD, $2 đường, $3 thân (tuỳ chọn) — socket quản trị chỉ root dùng được
   curl -s --unix-socket "$ADMIN_SOCK" -X "$1" -H 'content-type: application/json' ${3:+--data-binary "$3"} "http://x$2"
 }
@@ -835,6 +836,11 @@ app_cmd() {   # sudo axle app setup|pair|confirm|devices|remove|terminal
 }
 
 duyet_cmd() {   # sudo axle duyet [<id> a|h|l|r] — duyệt ngay tại máy (mức tin cậy cao nhất: mật khẩu sudo)
+  # XEM thì không cần mật khẩu: bộ duyệt tự công bố việc đang chờ + số hôm nay ra tệp root:chủ 0640
+  case "${1:-}" in
+    --json)    exec jq -c '.pending // []' "$BAN_FILE" 2>/dev/null || echo '[]' ;;
+    --hom-nay) exec jq -c '.homNay // {}' "$BAN_FILE" 2>/dev/null || echo '{}' ;;
+  esac
   [ "$(id -u)" = 0 ] || { echo "Cần sudo: sudo axle duyet" >&2; exit 1; }
   if [ -z "${1:-}" ]; then
     admin_call GET /pending | jq -r 'if length == 0 then "Không có yêu cầu nào đang chờ" else .[] |

@@ -189,3 +189,36 @@ ra `{"behavior":"allow","updatedInput":…}` hoặc `{"behavior":"deny","message
 
 Chưa làm: Claude Code trên máy còn phải **đăng nhập OAuth một lần** (`~/.local/bin/claude`, chọn Claude
 account) — việc của chủ máy, không tự làm hộ được.
+
+## Bàn Axle làm mặt tiền (nhịp D7)
+
+Bi (21/9): *"hiện tại thì Axle không khác gì Ubuntu cho lắm, t muốn có sự khác biệt hoàn toàn"*. Khác biệt không
+nằm ở kernel hay desktop — iPhone chạy Darwin, Android chạy Linux — mà ở **mô hình dùng máy**: Ubuntu là máy cho
+người dùng, Axle là máy cho **agent làm việc, người làm chủ**. Hai hàng đầu của mô hình đó là thứ người ta nhìn
+thấy trong 5 phút đầu, và tới 21/9 Axle chưa có: mặt tiền và tay cho ứng dụng. D7 làm hàng thứ nhất.
+
+**Đăng nhập xong là vào Bàn** (cửa sổ Axle mở to, mục Bàn), không rơi vào màn hình nền trống:
+
+| Vùng | Trả lời câu | Lấy từ đâu (không root, không sudo) |
+|---|---|---|
+| Bảo Axle làm | "làm việc này giúp" bằng tiếng Việt | `axle claude "…"` (D6): đọc thì làm ngay, ghi/chạy/xoá thì xin phép; hỏi tiếp nối mạch (`--tiep`), "Cuộc mới" để quên |
+| Cần bạn | có gì đang chờ mình | `/run/axle/ban.json` — **bộ duyệt tự công bố** (root:chủ 0640) mỗi khi trạng thái đổi; nút Lần này / 1 giờ / Luôn / Từ chối → `pkexec axle duyet <id> <d>` (hộp mật khẩu hệ thống, cùng đường với `sudo axle duyet`) |
+| Đang làm | máy có agent nào, đang gọi gì | `ban.json` (agent, tạm dừng) + `~/.local/state/axle/audit.jsonl` của trợ lý chính |
+| Hôm nay | hôm nay máy đã làm gì | `ban.json` (số duyệt, cùng cách đếm với tin tóm tắt tối) + audit + uptime |
+
+Ubuntu-desktop vẫn ở ngay dưới: nút **"Chế độ tay"** thu Bàn xuống để tự tay làm Excel, in ấn; **Super+B** gọi
+Bàn về (cửa sổ một phiên: gọi lại chỉ đưa lên trước). Autostart hệ thống `/etc/xdg/autostart/vn.axleos.Ban.desktop`,
+phím tắt là custom-keybinding trong dconf mặc định (`99-axle`).
+
+**Vì sao công bố ra tệp thay vì thêm một cửa hẹp sudo:** Bàn hỏi "việc đang chờ" mỗi 5–10 giây; đi qua `sudo -n`
+là ~17.000 dòng nhật ký sudo một ngày, và mỗi cửa hẹp là thêm một chỗ phải canh. Tệp chỉ đọc, đường *duyệt* vẫn
+chỉ có socket quản trị root 0600 và điện thoại. Bàn theo dõi tệp (GFileMonitor) nên đổi là thấy ngay.
+
+**`axle update` giờ làm mới cả lớp giao diện** (`AXLE_DESKTOP_REFRESH=1 provision-desktop.sh`: chỉ chép tệp, ghi
+mặc định, không tải gói) — trước đó update chỉ chạy provision.sh nên máy có giao diện giữ cửa sổ Axle cũ mãi.
+
+Thử không cần máy ảo: `python3 build/gui-shot.py out/ban.png --ban` mở cửa sổ với dữ liệu giả (2 việc chờ, 2 agent,
+vài lần gọi công cụ) rồi tự vẽ ra PNG để nhìn bố cục; `python3 build/gui-logic-smoke.py` thử phần thuần (đọc
+ban.json hỏng/thiếu, tóm tắt tin xin duyệt, đếm audit, gợi ý lỗi đăng nhập Claude).
+
+Chưa làm (nhịp sau): tay cho mọi ứng dụng qua cây trợ năng AT-SPI (`axle tay`) — hàng thứ hai của mô hình.

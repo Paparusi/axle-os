@@ -1,19 +1,25 @@
 #!/usr/bin/env python3
-"""Cửa sổ "Axle" trên desktop — chỗ chủ máy nhìn thấy và bật/tắt Axle mà không cần biết một dòng lệnh nào.
+"""Cửa sổ "Axle" trên desktop — và từ 21/9/2026 là MẶT TIỀN của máy (Bàn Axle): đăng nhập xong là vào Bàn,
+không rơi vào một màn hình nền trống. Ubuntu-desktop vẫn ở ngay dưới ("Chế độ tay"), Super+B gọi Bàn về.
 
-Vì sao có file này: tới 20/9/2026 mọi sức mạnh của Axle đều nằm sau `sudo axle …`. Người cài xong mà không
-có ai chỉ thì ngồi nhìn một bản Ubuntu đổi màu. Việc đáng làm không phải thêm tính năng, mà là đưa tính
-năng đã có ra khỏi terminal.
+Vì sao có file này: tới 20/9/2026 mọi sức mạnh của Axle đều nằm sau `sudo axle …` hoặc trong app điện thoại.
+Người cài xong mà không có ai chỉ thì ngồi nhìn một bản Ubuntu đổi màu. Bàn trả lời ba câu ngay khi mở máy:
+máy đang làm gì, có gì cần mình, và "bảo Axle làm" một việc bằng tiếng Việt.
 
 Nguyên tắc:
-  * Đọc trạng thái KHÔNG cần quyền root — mở app ra là thấy ngay, không hỏi mật khẩu.
-  * Chỉ lúc ĐỔI thứ gì mới gọi `pkexec axle …` → hộp thoại mật khẩu chuẩn của hệ thống.
+  * Đọc trạng thái KHÔNG cần quyền root và KHÔNG dội sudo: bộ duyệt tự công bố /run/axle/ban.json (root:chủ 0640),
+    Bàn chỉ đọc tệp — đổi là thấy ngay (theo dõi tệp), không có cửa hẹp nào mới để lạm dụng.
+  * Chỉ lúc ĐỔI thứ gì mới gọi `pkexec axle …` → hộp thoại mật khẩu chuẩn của hệ thống. Duyệt tại máy đi qua
+    đúng đường `axle duyet` (socket quản trị root 0600) — cùng mức tin cậy với sudo.
   * Mỗi công tắc kèm một câu nói rõ đánh đổi. Không có nút nào mà người dùng phải đoán nó làm gì.
 """
+import datetime
 import json
 import os
+import pwd
 import re
 import subprocess
+import sys
 import tempfile
 import threading
 
@@ -21,9 +27,20 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
-AXLE = "/usr/local/bin/axle"
+AXLE = os.environ.get("AXLE_BIN", "/usr/local/bin/axle")
+BAN_FILE = os.environ.get("AXLE_BAN_FILE", "/run/axle/ban.json")
+AUDIT = os.environ.get("AXLE_AUDIT_FILE", os.path.expanduser("~/.local/state/axle/audit.jsonl"))
+THU = ["Thứ hai", "Thứ ba", "Thứ tư", "Thứ năm", "Thứ sáu", "Thứ bảy", "Chủ nhật"]
+# Nút duyệt tại máy, theo chữ cái bộ duyệt gửi (a lần này · h 1 giờ · l luôn · r từ chối)
+NUT = {"a": ("Lần này", ["suggested-action"]), "h": ("1 giờ", []), "l": ("Luôn", []), "r": ("Từ chối", ["destructive-action"])}
+LOI_DAN = ("Việc đọc, tìm, xem thì Axle làm ngay. Ghi tệp, chạy lệnh, xoá sẽ hỏi bạn trước — "
+           "trên điện thoại, hoặc ngay ở “Cần bạn” bên dưới.")
+CSS = """
+.ban-the { padding: 16px 18px; }
+.ban-ket-qua { background: alpha(currentColor, 0.05); border-radius: 8px; }
+"""
 
 
 def chay(*args, root=False, timeout=30):
@@ -44,11 +61,101 @@ def doc(f, mac=""):
         return mac
 
 
+def doc_duoi(f, toi_da=262144):
+    """Vài trăm KB cuối của một tệp nhật ký (audit.jsonl lớn dần theo tháng — không đọc cả tệp mỗi phút)."""
+    try:
+        with open(f, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            n = fh.tell()
+            fh.seek(max(0, n - toi_da))
+            chu = fh.read().decode("utf-8", "replace")
+    except OSError:
+        return []
+    dong = chu.split("\n")
+    return dong[1:] if len(dong) > 1 and n > toi_da else dong
+
+
 def mot_dong(cmd):
     try:
         return subprocess.run(cmd, capture_output=True, text=True, timeout=10).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return ""
+
+
+# ---------- phần thuần (không GTK) — thử được bằng build/gui-logic-smoke.py ----------
+def doc_ban(chu):
+    """Nội dung ban.json → (việc chờ, số hôm nay, agent). Tệp hỏng/thiếu → None: Bàn nói thật, không giả vờ trống."""
+    try:
+        j = json.loads(chu)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(j, dict):
+        return None
+    pend = []
+    for r in j.get("pending") or []:
+        if not isinstance(r, dict) or not re.fullmatch(r"[0-9a-f]{8}", str(r.get("id", ""))):
+            continue
+        nut = "".join(c for c in str(r.get("buttons") or "") if c in NUT) or "ar"
+        pend.append({"id": r["id"], "tier": int(r.get("tier") or 2), "client": str(r.get("client") or "?"),
+                     "text": str(r.get("text") or ""), "buttons": nut, "ageSec": int(r.get("ageSec") or 0)})
+    hn = j.get("homNay") if isinstance(j.get("homNay"), dict) else {}
+    ag = [a for a in (j.get("agents") or []) if isinstance(a, dict) and a.get("ten")]
+    return pend, hn, ag
+
+
+def tom_tat_viec(r):
+    """Tin xin duyệt (🔐 máy · cần duyệt #id / Agent: … / Việc: … / Bậc …) → (việc, ai)."""
+    dong = [d.strip() for d in r["text"].splitlines() if d.strip()]
+    viec = next((d[5:].strip() for d in dong if d.startswith("Việc:")), "")
+    if not viec:
+        viec = next((d for d in dong if not d.startswith("🔐")), "") or "(không có mô tả)"
+    ai = next((d[6:].strip() for d in dong if d.startswith("Agent:")), r["client"])
+    return viec[:200], ai
+
+
+def tuoi(giay):
+    if giay < 60:
+        return f"{giay} giây trước"
+    if giay < 3600:
+        return f"{giay // 60} phút trước"
+    return f"{giay // 3600} giờ trước"
+
+
+def doc_audit(dong, hom_nay, toi_da=5):
+    """audit.jsonl của trợ lý chính → (số lần gọi công cụ hôm nay, vài dòng gần nhất). Bỏ http_auth như tin tóm tắt."""
+    n, gan = 0, []
+    for l in dong:
+        try:
+            e = json.loads(l)
+        except ValueError:
+            continue
+        tool, ts = e.get("tool"), e.get("ts")
+        if not tool or tool == "http_auth" or not isinstance(ts, str):
+            continue
+        try:
+            t = datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if t.tzinfo is not None:
+            t = t.astimezone()
+        if t.strftime("%Y-%m-%d") == hom_nay:
+            n += 1
+        gan.append(f"{t.strftime('%H:%M')} · {e.get('client') or '?'} · {tool}")
+    return n, gan[-toi_da:]
+
+
+def loi_chao(gio, ten):
+    buoi = "Chào buổi sáng" if gio < 12 else ("Chào buổi chiều" if gio < 18 else "Chào buổi tối")
+    return f"{buoi}, {ten}"
+
+
+def goi_y_loi(chu):
+    """Đầu ra hỏng của `axle claude` → một câu chỉ đường, không bắt người dùng đọc stack trace."""
+    if "Chưa cài Claude Code" in chu:
+        return "Máy này chưa có Claude Code (npm i -g @anthropic-ai/claude-code)."
+    if re.search(r"(?i)not logged in|log ?in|đăng nhập|unauthori|authenticat|api key", chu):
+        return "Cần đăng nhập Claude một lần: mở cửa sổ dòng lệnh, gõ  claude  rồi làm theo hướng dẫn."
+    return ""
 
 
 class Trang(Adw.PreferencesPage):
@@ -58,18 +165,29 @@ class Trang(Adw.PreferencesPage):
 
 class CuaSo(Adw.ApplicationWindow):
     def __init__(self, app):
-        super().__init__(application=app, title="Axle", default_width=900, default_height=720)
+        super().__init__(application=app, title="Bàn Axle", default_width=1000, default_height=740)
         self.toast = Adw.ToastOverlay()
         self.tabs = Adw.ViewStack()
+        self.dang_lam = False        # đang chạy một việc "bảo Axle làm"
+        self.co_cuoc = False         # đã có mạch hội thoại → lần sau nối tiếp (--tiep)
+        self.tien_trinh = None
+
+        css = Gtk.CssProvider()
+        try:
+            css.load_from_string(CSS)
+        except AttributeError:               # GTK < 4.12
+            css.load_from_data(CSS.encode())
+        Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
         # Thanh bên chứ không phải thẻ ngang: tới mục thứ năm là thẻ ngang cắt cụt chữ ("Điện t…", "Quay …").
-        # Đây cũng là cách Cài đặt của GNOME làm, và thêm mục sau này không vỡ bố cục.
-        muc = [("may", "Máy", "computer-symbolic", self.trang_tong_quan),
+        # Đây cũng là cách Cài đặt của GNOME làm, và thêm mục sau này không vỡ bố cục. Bàn đứng đầu: nó là mặt tiền.
+        muc = [("ban", "Bàn", "go-home-symbolic", self.trang_ban),
+               ("may", "Máy", "computer-symbolic", self.trang_tong_quan),
                ("dt", "Điện thoại", "phone-symbolic", self.trang_dien_thoai),
                ("tn", "Tính năng", "preferences-system-symbolic", self.trang_tinh_nang),
                ("ag", "Agent", "network-workgroup-symbolic", self.trang_agent),
                ("ql", "Quay lại", "edit-undo-symbolic", self.trang_quay_lai)]
-        self.ten_muc = Adw.WindowTitle(title="Axle")   # tiêu đề bên phải đổi theo mục đang mở
+        self.ten_muc = Adw.WindowTitle(title="Bàn Axle")   # tiêu đề bên phải đổi theo mục đang mở
         ds = Gtk.ListBox(css_classes=["navigation-sidebar"])
 
         def chon(_b, r):
@@ -77,7 +195,7 @@ class CuaSo(Adw.ApplicationWindow):
                 return
             ma, ten = muc[r.get_index()][0], muc[r.get_index()][1]
             self.tabs.set_visible_child_name(ma)
-            self.ten_muc.set_title(ten)
+            self.ten_muc.set_title("Bàn Axle" if ma == "ban" else ten)
         ds.connect("row-selected", chon)
         for ma, ten, icon, dung in muc:
             self.tabs.add_titled(dung(), ma, ten)
@@ -91,7 +209,12 @@ class CuaSo(Adw.ApplicationWindow):
         ben.add_top_bar(Adw.HeaderBar(title_widget=Adw.WindowTitle(title="Axle")))
         ben.set_content(Gtk.ScrolledWindow(child=ds, hscrollbar_policy=Gtk.PolicyType.NEVER))
         noi_dung = Adw.ToolbarView()
-        noi_dung.add_top_bar(Adw.HeaderBar(title_widget=self.ten_muc))
+        thanh = Adw.HeaderBar(title_widget=self.ten_muc)
+        # "Chế độ tay": thu Bàn xuống, còn lại là màn hình nền GNOME để tự tay làm. Super+B gọi Bàn về.
+        nut_tay = Gtk.Button(label="Chế độ tay", tooltip_text="Thu Bàn xuống, tự tay dùng máy. Super+B gọi Bàn về.")
+        nut_tay.connect("clicked", lambda *_: self.minimize())
+        thanh.pack_end(nut_tay)
+        noi_dung.add_top_bar(thanh)
         noi_dung.set_content(self.tabs)
 
         chia = Adw.NavigationSplitView(
@@ -101,9 +224,254 @@ class CuaSo(Adw.ApplicationWindow):
         self.toast.set_child(chia)
         self.set_content(self.toast)
         self.lam_moi()
+        self.theo_doi_ban()
 
     def bao(self, chu):
         self.toast.add_toast(Adw.Toast(title=chu, timeout=4))
+
+    # ---------- Bàn ----------
+    @staticmethod
+    def the(tieu_de):
+        """Một thẻ trên Bàn: tiêu đề + hộp nội dung xếp dọc (trả cả hai để đổ lại nội dung khi làm mới)."""
+        hop = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, css_classes=["card", "ban-the"], hexpand=True)
+        hop.append(Gtk.Label(label=tieu_de, xalign=0, css_classes=["heading"]))
+        noi = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        hop.append(noi)
+        return hop, noi
+
+    @staticmethod
+    def don(hop):
+        while (c := hop.get_first_child()) is not None:
+            hop.remove(c)
+
+    @staticmethod
+    def dong_mo(chu, phu=None):
+        """Một dòng chữ mờ (trạng thái trống / lỗi) — thẻ không bao giờ để trống không nói gì."""
+        hop = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        hop.append(Gtk.Label(label=chu, xalign=0, wrap=True, css_classes=["dim-label"]))
+        if phu:
+            hop.append(Gtk.Label(label=phu, xalign=0, wrap=True, css_classes=["dim-label", "caption"]))
+        return hop
+
+    def trang_ban(self):
+        """Mặt tiền của máy. Ba câu: có gì cần tôi, máy đang làm gì, bảo Axle làm."""
+        cuon = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
+        cot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18,
+                      margin_top=20, margin_bottom=24, margin_start=28, margin_end=28)
+        # Màn 4K mở to: không kẹp thì chữ dàn hết 3.800px, lọt thỏm góc trái (thấy khi tự chụp 21/9).
+        # Clamp giữ khối nội dung ≤1400px và căn giữa — cách Cài đặt của GNOME làm.
+        cuon.set_child(Adw.Clamp(child=cot, maximum_size=1400, tightening_threshold=1100))
+
+        self.chao = Gtk.Label(xalign=0, css_classes=["title-1"], label="Xin chào")
+        self.chao_phu = Gtk.Label(xalign=0, css_classes=["dim-label"], label="")
+        cot.append(self.chao)
+        cot.append(self.chao_phu)
+
+        # Bảo Axle làm — việc đầu tiên trên Bàn, vì đó là lý do có Axle
+        the, noi = self.the("Bảo Axle làm")
+        hang = Gtk.Box(spacing=8)
+        self.o_lenh = Gtk.Entry(hexpand=True, placeholder_text="ví dụ: tóm tắt log tối qua · máy in không in được, xem giúp · dọn ổ đĩa")
+        self.o_lenh.connect("activate", self.bao_lam)
+        self.nut_lam = Gtk.Button(label="Làm", css_classes=["suggested-action"])
+        self.nut_lam.connect("clicked", self.bao_lam)
+        self.nut_dung = Gtk.Button(label="Dừng", visible=False)
+        self.nut_dung.connect("clicked", self.dung_lam)
+        hang.append(self.o_lenh)
+        hang.append(self.nut_lam)
+        hang.append(self.nut_dung)
+        noi.append(hang)
+        self.lenh_trang_thai = Gtk.Label(xalign=0, wrap=True, css_classes=["dim-label"], label=LOI_DAN)
+        noi.append(self.lenh_trang_thai)
+        self.ket_qua = Gtk.TextView(editable=False, cursor_visible=False, wrap_mode=Gtk.WrapMode.WORD_CHAR,
+                                    css_classes=["monospace"], top_margin=8, bottom_margin=8, left_margin=10, right_margin=10)
+        self.ket_qua_cuon = Gtk.ScrolledWindow(child=self.ket_qua, min_content_height=140, max_content_height=340,
+                                               propagate_natural_height=True, visible=False, css_classes=["ban-ket-qua"])
+        noi.append(self.ket_qua_cuon)
+        self.nut_moi = Gtk.Button(label="Cuộc mới", css_classes=["flat"], halign=Gtk.Align.START, visible=False,
+                                  tooltip_text="Quên mạch hội thoại hiện tại, bắt đầu việc khác")
+        self.nut_moi.connect("clicked", self.cuoc_moi)
+        noi.append(self.nut_moi)
+        cot.append(the)
+
+        # Cần bạn — trọn chiều ngang, vì mỗi việc có tới bốn nút
+        self.the_can, self.noi_can = self.the("Cần bạn")
+        cot.append(self.the_can)
+
+        luoi = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, homogeneous=True, min_children_per_line=1,
+                           max_children_per_line=2, column_spacing=18, row_spacing=18)
+        self.the_dang, self.noi_dang = self.the("Đang làm")
+        self.the_nay, self.noi_nay = self.the("Hôm nay")
+        luoi.insert(self.the_dang, -1)
+        luoi.insert(self.the_nay, -1)
+        cot.append(luoi)
+        return cuon
+
+    def chao_hoi(self):
+        u = pwd.getpwuid(os.getuid())
+        ten = (u.pw_gecos or "").split(",")[0].strip() or u.pw_name
+        now = datetime.datetime.now()
+        self.chao.set_label(loi_chao(now.hour, ten))
+        self.chao_phu.set_label(f"{THU[now.weekday()]}, {now:%d/%m/%Y} · {mot_dong(['hostname'])} · Axle {doc('/etc/axle/version', '?')}")
+
+    def theo_doi_ban(self):
+        """Bộ duyệt ghi ban.json bằng cách ghi tạm rồi đổi tên → theo dõi tệp là thấy ngay; vẫn đọc lại mỗi 10 giây
+        cho tuổi việc chờ trôi và phòng khi bộ theo dõi tệp không bắn (tệp chưa tồn tại lúc mở Bàn)."""
+        try:
+            self.mon = Gio.File.new_for_path(BAN_FILE).monitor_file(Gio.FileMonitorFlags.NONE, None)
+            self.mon.connect("changed", lambda *_: self.nap_ban())
+        except GLib.Error:
+            self.mon = None
+        self.chao_hoi()
+        self.nap_ban()
+        self.nap_hom_nay()
+        GLib.timeout_add_seconds(10, self.nap_ban)
+        GLib.timeout_add_seconds(60, self.nap_hom_nay)
+
+    def nap_ban(self, *_):
+        chu = doc(BAN_FILE, "")
+        b = doc_ban(chu) if chu else None
+        self.don(self.noi_can)
+        self.don(self.noi_dang)
+        if b is None:
+            self.noi_can.append(self.dong_mo("Chưa đọc được việc đang chờ.",
+                                             "Bộ duyệt chưa chạy, hoặc máy đang chạy bản Axle cũ (sudo axle update)."))
+            self.noi_dang.append(self.dong_mo("Chưa đọc được danh sách agent."))
+            return True
+        pend, hn, ag = b
+        self.hom_nay_duyet = hn
+
+        if not pend:
+            self.noi_can.append(self.dong_mo("Không có việc nào chờ bạn.",
+                                             "Agent xin gì thì hiện ở đây — và rung trên điện thoại."))
+        else:
+            ds = Gtk.ListBox(css_classes=["boxed-list"], selection_mode=Gtk.SelectionMode.NONE)
+            for r in pend:
+                viec, ai = tom_tat_viec(r)
+                # use_markup=False: chữ trong tin xin duyệt (lệnh, đường dẫn) có thể chứa < > & — không cho Pango hiểu là thẻ
+                row = Adw.ActionRow(title=viec, subtitle=f"{ai} · bậc {r['tier']} · {tuoi(r['ageSec'])}", use_markup=False)
+                row.set_subtitle_lines(2)
+                for c in r["buttons"]:
+                    ten, css = NUT[c]
+                    b2 = Gtk.Button(label=ten, valign=Gtk.Align.CENTER, css_classes=css)
+                    b2.connect("clicked", self.duyet_tai_may, r["id"], c)
+                    row.add_suffix(b2)
+                ds.append(row)
+            self.noi_can.append(ds)
+            self.noi_can.append(Gtk.Label(label="Bấm là hiện hộp mật khẩu của hệ thống — cùng mức tin cậy với sudo.",
+                                          xalign=0, wrap=True, css_classes=["dim-label", "caption"]))
+
+        if not ag:
+            self.noi_dang.append(self.dong_mo("Chưa có agent nào trên máy.", "Thêm ở mục Agent."))
+        else:
+            for a in ag:
+                vai = "trợ lý chính · dùng quyền của bạn" if a.get("vai") == "chinh" else f"hộp cát {a.get('user') or ''}".strip()
+                tt = "TẠM DỪNG" if a.get("tam_dung") else "sẵn sàng"
+                self.noi_dang.append(Gtk.Label(label=f"{a['ten']} — {vai} · {tt}", xalign=0, wrap=True))
+        self.noi_dang.append(self.o_gan_day())
+        return True
+
+    def o_gan_day(self):
+        """Vài lần gọi công cụ gần nhất của trợ lý chính (audit.jsonl trong nhà chủ — đọc thẳng, không sudo)."""
+        n, gan = doc_audit(doc_duoi(AUDIT), datetime.date.today().isoformat())
+        self.so_goi_hom_nay = n
+        hop = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, margin_top=6)
+        hop.append(Gtk.Label(label="Gọi công cụ gần đây", xalign=0, css_classes=["caption-heading"]))
+        if not gan:
+            hop.append(Gtk.Label(label="chưa có", xalign=0, css_classes=["dim-label", "caption"]))
+        for d in gan:
+            hop.append(Gtk.Label(label=d, xalign=0, css_classes=["dim-label", "caption", "monospace"], ellipsize=3))
+        return hop
+
+    def nap_hom_nay(self, *_):
+        self.don(self.noi_nay)
+        hn = getattr(self, "hom_nay_duyet", None) or {}
+        if hn:
+            self.noi_nay.append(Gtk.Label(xalign=0, wrap=True, label=(
+                f"Duyệt: {hn.get('chu_duyet', 0)} bạn duyệt · {hn.get('tu_duyet', 0)} tự duyệt theo luật · "
+                f"{hn.get('tu_choi', 0)} từ chối · {hn.get('het_han', 0)} hết hạn")))
+        else:
+            self.noi_nay.append(self.dong_mo("Chưa có số duyệt hôm nay."))
+        n = getattr(self, "so_goi_hom_nay", None)
+        if n is None:
+            n, _ = doc_audit(doc_duoi(AUDIT), datetime.date.today().isoformat())
+        self.noi_nay.append(Gtk.Label(label=f"Trợ lý chính gọi công cụ {n} lần", xalign=0))
+        self.noi_nay.append(Gtk.Label(label=f"Máy chạy liên tục {self.chay_lau()}", xalign=0, css_classes=["dim-label"]))
+        return True
+
+    def duyet_tai_may(self, _nut, ma, c):
+        ten = NUT[c][0]
+        self.chay_nen(("duyet", ma, c), True, f"Đã ghi: {ten.lower()} (#{ma})", sau=self.nap_ban)
+
+    # "Bảo Axle làm": chạy `axle claude` (Claude Code trên máy, cổng xin phép là điện thoại / Cần bạn)
+    def bao_lam(self, *_):
+        cau = self.o_lenh.get_text().strip()
+        if not cau or self.dang_lam:
+            return
+        self.dang_lam = True
+        self.nut_lam.set_sensitive(False)
+        self.nut_dung.set_visible(True)
+        self.ket_qua_cuon.set_visible(True)
+        self.them_ket_qua(f"› {cau}\n")
+        self.lenh_trang_thai.set_label("Đang làm… việc hệ trọng sẽ hỏi bạn trước khi làm.")
+        args = [AXLE, "claude", cau] + (["--tiep"] if self.co_cuoc else [])
+
+        def worker():
+            try:
+                p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                                     text=True, bufsize=1)
+            except OSError as e:
+                GLib.idle_add(self.xong_lam, 1, str(e))
+                return
+            self.tien_trinh = p
+            for dong in p.stdout:
+                GLib.idle_add(self.them_ket_qua, dong)
+            p.wait()
+            GLib.idle_add(self.xong_lam, p.returncode, "")
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def them_ket_qua(self, chu):
+        buf = self.ket_qua.get_buffer()
+        buf.insert(buf.get_end_iter(), chu)
+        adj = self.ket_qua_cuon.get_vadjustment()
+        GLib.idle_add(lambda: adj.set_value(adj.get_upper() - adj.get_page_size()) or False)
+        return False
+
+    def xong_lam(self, ma, loi):
+        self.dang_lam = False
+        self.tien_trinh = None
+        self.nut_lam.set_sensitive(True)
+        self.nut_dung.set_visible(False)
+        if loi:
+            self.them_ket_qua(loi + "\n")
+        buf = self.ket_qua.get_buffer()
+        chu = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False)
+        if ma == 0:
+            self.co_cuoc = True
+            self.nut_moi.set_visible(True)
+            self.o_lenh.set_text("")
+            self.lenh_trang_thai.set_label("Xong. Hỏi tiếp thì Axle nhớ mạch — hoặc bấm “Cuộc mới”.")
+        elif ma == -15:
+            self.lenh_trang_thai.set_label("Đã dừng.")
+        else:
+            self.lenh_trang_thai.set_label(f"Không làm được (mã {ma}). {goi_y_loi(chu)}".strip())
+        self.them_ket_qua("\n")
+        return False
+
+    def dung_lam(self, *_):
+        p = self.tien_trinh
+        if p:
+            try:
+                p.terminate()
+            except OSError:
+                pass
+
+    def cuoc_moi(self, *_):
+        self.co_cuoc = False
+        self.nut_moi.set_visible(False)
+        self.ket_qua.get_buffer().set_text("")
+        self.ket_qua_cuon.set_visible(False)
+        self.lenh_trang_thai.set_label(LOI_DAN)
 
     # ---------- Máy ----------
     def trang_tong_quan(self):
@@ -474,12 +842,19 @@ class CuaSo(Adw.ApplicationWindow):
 
 
 class App(Adw.Application):
-    def __init__(self):
+    """Một phiên duy nhất (application-id): Super+B hay autostart gọi lại thì chỉ đưa cửa sổ đang có lên trước.
+    `--ban` (autostart sau đăng nhập, phím tắt) mở TO như một mặt tiền; mở từ trình đơn thì cỡ thường."""
+    def __init__(self, ban=False):
         super().__init__(application_id="vn.axleos.Axle")
+        self.ban = ban
 
     def do_activate(self):
-        (self.props.active_window or CuaSo(self)).present()
+        w = self.props.active_window or CuaSo(self)
+        if self.ban and not getattr(w, "_da_mo_to", False):
+            w._da_mo_to = True
+            w.maximize()
+        w.present()
 
 
 if __name__ == "__main__":
-    App().run(None)
+    App(ban="--ban" in sys.argv[1:]).run(None)

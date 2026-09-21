@@ -320,6 +320,16 @@ for _ in 1 2 3 4 5; do [ -S /run/axle-approve/approve.sock ] && break; sleep 1; 
 if [ -f /etc/axle/approve.json ]; then echo "  chủ Telegram: $(jq -r .owner /etc/axle/approve.json)"
 else echo "  chưa nối Telegram: sudo axle approve setup --owner <id>"; fi
 
+# Máy đã bật lớp giao diện thì làm mới luôn theo bản này: cửa sổ Axle, Bàn, autostart, mặc định dconf đều nằm
+# trong provision-desktop.sh, mà tới 21/9 `axle update` chỉ chạy provision.sh → máy có giao diện cứ giữ cửa sổ
+# Axle cũ mãi. Chế độ làm mới bỏ qua các bước tải gói (GNOME, văn phòng, snap) — chỉ chép tệp và ghi mặc định.
+if [ "$(systemctl get-default 2>/dev/null)" = graphical.target ] && [ -x /usr/local/bin/axle-gui ] \
+   && [ -z "${AXLE_SKIP_DESKTOP:-}" ] && [ -f /opt/axle/core/desktop/provision-desktop.sh ]; then
+  step "Lớp giao diện: làm mới theo bản này"
+  AXLE_DESKTOP_REFRESH=1 bash /opt/axle/core/desktop/provision-desktop.sh 2>&1 | sed 's/^/  /' \
+    || echo "  ! lớp giao diện chưa làm mới được — chạy tay: sudo axle desktop on"
+fi
+
 snapper -c root create -t single -c number -d "axle provision $(cat /etc/axle/version)" >/dev/null
 sync   # mất điện ngay sau khi dựng máy thì các file vừa ghi vẫn còn nguyên
 step "Xong. Việc còn lại: axle net up"

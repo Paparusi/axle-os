@@ -110,6 +110,15 @@ vm 'dpkg-query -W -f="\${Status}" fonts-inter 2>/dev/null | grep -q "ok installe
 vm 'grep -q "^Hidden=true" /etc/xdg/autostart/update-notifier.desktop'; ok $? "tắt cửa sổ Software Updater của Ubuntu"
 vm 'systemctl is-enabled --quiet unattended-upgrades'; ok $? "vẫn tự cài bản vá bảo mật (unattended-upgrades)"
 vm 'systemctl is-active --quiet axle-approve axle-vault axle-mcp-http'; ok $? "phần Server vẫn chạy nguyên (duyệt, vault, MCP)"
+# Bàn Axle làm mặt tiền (D7): tự mở sau đăng nhập, Super+B gọi về, và đọc được việc đang chờ KHÔNG cần sudo
+vm 'test -f /etc/xdg/autostart/vn.axleos.Ban.desktop && grep -q -- "--ban" /etc/xdg/autostart/vn.axleos.Ban.desktop'
+ok $? "Bàn Axle tự mở sau khi đăng nhập (autostart hệ thống)"
+[ "$(vm 'dconf read /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/axle-ban/binding')" = "'<Super>b'" ]
+ok $? "Super+B gọi Bàn Axle (phím tắt mặc định, đọc đúng như GNOME đọc)"
+vm 'test -r /run/axle/ban.json && python3 -c "import json; j=json.load(open(\"/run/axle/ban.json\")); assert isinstance(j[\"pending\"], list) and \"homNay\" in j and \"agents\" in j"'
+ok $? "bộ duyệt công bố /run/axle/ban.json, chủ máy đọc được không cần sudo"
+vm 'axle duyet --json | grep -q "^\["'; ok $? "axle duyet --json (Bàn đọc việc đang chờ) trả danh sách"
+vm '[ "$(stat -c %a /run/axle/ban.json)" = 640 ] && [ "$(stat -c %U /run/axle/ban.json)" = root ]'; ok $? "ban.json là root, quyền 0640 (tài khoản agent hộp cát không đọc được)"
 [ -s "$W/man-dang-nhap.png" ]; ok $? "chụp được màn hình máy ảo ($W/man-dang-nhap.png)"
 
 # Hàng rào hiệu năng: bản nào làm máy nặng thêm hay chờ lâu hơn thì đỏ ngay ở đây, thay vì đợi ai đó

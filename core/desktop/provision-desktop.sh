@@ -12,6 +12,9 @@ ROOT="$(cd "$HERE/../.." && pwd)"              # …/  (thường là /opt/axle)
 AXLE_USER="$(cat /etc/axle/owner 2>/dev/null || getent passwd 1000 | cut -d: -f1)"
 export DEBIAN_FRONTEND=noninteractive
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
+# AXLE_DESKTOP_REFRESH=1 (do `axle update` gọi khi máy đã có giao diện): CHỈ chép tệp và ghi mặc định, bỏ mọi bước
+# tải gói (GNOME, văn phòng, snap, initramfs) — vài giây thay vì 10–25 phút, và không cần mạng.
+LAM_MOI="${AXLE_DESKTOP_REFRESH:-}"
 . "$ROOT/core/lib/apt.sh"
 . "$ROOT/core/lib/brand.sh"
 apt_hold_timers
@@ -29,13 +32,16 @@ apt_try() {
 }
 
 step "Chụp hệ thống trước khi thêm giao diện"
-if command -v snapper >/dev/null && snapper -c root list >/dev/null 2>&1; then
+if [ -n "$LAM_MOI" ]; then
+  echo "  bỏ qua (làm mới từ axle update — provision đã chụp)"
+elif command -v snapper >/dev/null && snapper -c root list >/dev/null 2>&1; then
   snapper -c root create -t single -c number -d "trước khi cài Axle Desktop" >/dev/null || true
   echo "  xong (hỏng thì: sudo axle undo)"
 else
   echo "  bỏ qua: máy không có snapper"
 fi
 
+if [ -z "$LAM_MOI" ]; then
 step "GNOME"
 # Lần trước cài dở (mạng đứt, cửa hàng snap lỗi) thì dpkg còn gói chưa cấu hình xong → dọn trước
 dpkg --configure -a >/dev/null 2>&1 || true
@@ -48,9 +54,10 @@ echo "  $(dpkg-query -W -f='${Version}' gnome-shell 2>/dev/null)"
 step "Gõ tiếng Việt (IBus Unikey) + phông chữ"
 aptg install -yq ibus ibus-unikey fonts-noto-core language-pack-vi fonts-inter >/dev/null
 echo "  ibus-unikey $(dpkg-query -W -f='${Version}' ibus-unikey 2>/dev/null) · gõ Telex, chuyển bộ gõ bằng Super+Space"
+fi
 
 step "Cổng chia sẻ màn hình (để agent xin xem màn hình của chủ — docs/DESKTOP.md D3)"
-apt_try xdg-desktop-portal-gnome python3-gi gir1.2-gst-plugins-base-1.0 gstreamer1.0-pipewire gstreamer1.0-plugins-good \
+[ -n "$LAM_MOI" ] || apt_try xdg-desktop-portal-gnome python3-gi gir1.2-gst-plugins-base-1.0 gstreamer1.0-pipewire gstreamer1.0-plugins-good \
   || echo "  (chưa cài được, thử lại sau: sudo apt install python3-gi gstreamer1.0-pipewire)"
 install -m 0644 "$ROOT/core/desktop/portal/axle-portal.service" /etc/systemd/user/axle-portal.service
 systemctl --global enable axle-portal.service >/dev/null 2>&1 || true
@@ -62,6 +69,8 @@ step "Trình duyệt"
 BROWSER_APP=""
 if [ -f /var/lib/snapd/desktop/applications/firefox_firefox.desktop ]; then
   BROWSER_APP=firefox_firefox.desktop; echo "  Firefox (snap) đã có"
+elif [ -n "$LAM_MOI" ]; then
+  echo "  (làm mới: không tải trình duyệt)"
 elif snap install firefox >/dev/null 2>&1 || snap install firefox >/dev/null 2>&1; then
   BROWSER_APP=firefox_firefox.desktop; echo "  Firefox (snap)"
 else
@@ -69,7 +78,7 @@ else
 fi
 
 step "Bộ văn phòng"
-apt_try libreoffice-writer libreoffice-calc libreoffice-impress || echo "  (chưa cài được bộ văn phòng, cài lại sau: sudo apt install libreoffice-writer)"
+[ -n "$LAM_MOI" ] || apt_try libreoffice-writer libreoffice-calc libreoffice-impress || echo "  (chưa cài được bộ văn phòng, cài lại sau: sudo apt install libreoffice-writer)"
 echo "  LibreOffice $(dpkg-query -W -f='${Version}' libreoffice-writer 2>/dev/null | cut -d: -f2 | cut -d- -f1)"
 
 step "Nhận diện Axle"
@@ -103,20 +112,37 @@ StartupWMClass=vn.axleos.Axle
 EOF
 chmod 0644 /usr/share/applications/vn.axleos.Axle.desktop
 update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
-echo "  mở từ trình đơn ứng dụng, tên \"Axle\""
+
+# Bàn Axle làm MẶT TIỀN (21/9): đăng nhập xong là vào Bàn — máy đang làm gì, có gì cần mình, bảo Axle làm —
+# chứ không rơi vào một màn hình nền trống như Ubuntu. Ubuntu-desktop vẫn ở ngay dưới ("Chế độ tay" thu Bàn
+# xuống), Super+B gọi Bàn về. Autostart hệ thống: mọi tài khoản đều có; ai không muốn thì tắt trong Tweaks.
+cat > /etc/xdg/autostart/vn.axleos.Ban.desktop <<'DESK'
+[Desktop Entry]
+Type=Application
+Name=Bàn Axle
+Comment=Mặt tiền Axle: việc đang làm, việc cần bạn, bảo Axle làm
+Exec=/usr/local/bin/axle-gui --ban
+Icon=axle
+Terminal=false
+OnlyShowIn=GNOME;
+X-GNOME-Autostart-Phase=Applications
+X-GNOME-Autostart-Delay=2
+DESK
+chmod 0644 /etc/xdg/autostart/vn.axleos.Ban.desktop
+echo "  Bàn Axle mở to ngay sau khi đăng nhập · Super+B gọi về · trình đơn ứng dụng: \"Axle\""
 
 step "Bộ ứng dụng văn phòng"
 # Máy làm việc thật thì ngày nào cũng cần: mở PDF (vận đơn, hoá đơn), xem ảnh, quét giấy tờ, giải nén,
 # thêm máy in. Ubuntu bản tối giản không kèm mấy thứ này. Tên gói trên 26.04: papers thay evince,
 # loupe thay eog, 7zip thay p7zip-full.
-apt_try papers loupe simple-scan file-roller 7zip gnome-text-editor system-config-printer fonts-noto-core \
+[ -n "$LAM_MOI" ] || apt_try papers loupe simple-scan file-roller 7zip gnome-text-editor system-config-printer fonts-noto-core \
   || apt_try evince eog simple-scan file-roller gnome-text-editor system-config-printer fonts-noto-core \
   || echo "  (một số gói không cài được — máy vẫn chạy)"
 echo "  PDF, ảnh, máy quét, nén, máy in, soạn thảo nhanh"
 
 # Chromium: mở web app thành CỬA SỔ RIÊNG (--app=) chứ không phải tab lẫn trong trình duyệt, và cũng là
 # thứ agent điều khiển được. Để NGOÀI đường găng: kho snap lỗi 408 một cái là hỏng cả lần cài (bài học D4).
-if ! command -v chromium >/dev/null 2>&1; then
+if ! command -v chromium >/dev/null 2>&1 && [ -z "$LAM_MOI" ]; then
   snap install chromium >/dev/null 2>&1 && echo "  chromium (cho web app dạng cửa sổ riêng)" \
     || echo "  ! chưa cài được chromium — chạy lại sau: sudo snap install chromium"
 fi
@@ -219,6 +245,15 @@ per-window=false
 
 [org/gnome/shell]
 favorite-apps=[$FAVS]
+
+# Super+B: gọi Bàn Axle về (đang mở thì đưa lên trước; chưa mở thì mở to)
+[org/gnome/settings-daemon/plugins/media-keys]
+custom-keybindings=['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/axle-ban/']
+
+[org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/axle-ban]
+name='Bàn Axle'
+command='/usr/local/bin/axle-gui --ban'
+binding='<Super>b'
 EOF
 rm -f /etc/dconf/db/gdm.d/00-axle
 cat > /etc/dconf/db/gdm.d/99-axle <<'EOF'
@@ -282,7 +317,8 @@ systemctl --global mask gnome-initial-setup-first-login.service gnome-initial-se
 echo "  ảnh nền, màu nhấn, logo màn đăng nhập, tên hệ điều hành, biểu tượng"
 
 # Màn khởi động: dùng bộ spinner của Ubuntu nhưng thay hình chìm bằng logo Axle
-if [ -f /usr/share/plymouth/themes/spinner/spinner.plymouth ]; then
+# (update-initramfs mất 20–40 giây → lúc làm mới chỉ làm nếu chưa có bộ Axle)
+if [ -f /usr/share/plymouth/themes/spinner/spinner.plymouth ] && { [ -z "$LAM_MOI" ] || [ ! -f /usr/share/plymouth/themes/axle/axle.plymouth ]; }; then
   rm -rf /usr/share/plymouth/themes/axle
   cp -a /usr/share/plymouth/themes/spinner /usr/share/plymouth/themes/axle
   cp /usr/share/axle/logo.png /usr/share/plymouth/themes/axle/watermark.png
@@ -360,6 +396,11 @@ else
   echo "  bật từ lần khởi động sau (giữ nguyên phiên đang chạy)"
 fi
 
+if [ -n "$LAM_MOI" ]; then
+  step "Lớp giao diện đã làm mới theo bản này"
+  echo "  Bàn Axle mới hiện từ lần đăng nhập sau (đang mở thì đóng rồi bấm Super+B)"
+  exit 0
+fi
 step "Xong — khởi động lại để vào giao diện: sudo reboot"
 echo "  đăng nhập bằng tài khoản $AXLE_USER · gõ tiếng Việt: Super+Space"
 echo "  tắt giao diện, quay lại chế độ máy chủ: sudo axle desktop off"

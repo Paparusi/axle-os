@@ -11,7 +11,7 @@ import { createServer, request as httpRequest } from 'node:http';
 import { connect as netConnect } from 'node:net';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { appendFileSync, chownSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, chmodSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chownSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, chmodSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { hostname } from 'node:os';
 import { addRule, addSession, autoLabel, canRemember, canSession, describeRule, findAuto, keyboard, loadRules, prune,
@@ -325,6 +325,7 @@ function setState(r, state, result) {
   if (r.toApp && state !== 'pending') app.broadcast({ type: 'update', id: r.id, state }).catch(() => {});
   for (const w of waiters.get(r.id) ?? []) w();
   waiters.delete(r.id);
+  publishBan();
 }
 
 async function finishMessage(r, line) {
@@ -398,6 +399,7 @@ async function createRequest({ action, params, client }, who) {
   for (const x of ketQua) if (x.status === 'rejected') log({ id, warn: `một kênh duyệt hỏng: ${x.reason?.message}` });
   requests.set(id, r);
   log({ id, state: 'pending', action, client: r.client, params: clean });
+  publishBan();
   return r;
 }
 
@@ -686,6 +688,52 @@ function makeServer(who) {
 if (existsSync(SOCKET)) unlinkSync(SOCKET);
 makeServer(null).listen(SOCKET, () => { chmodSync(SOCKET, 0o660); console.log(`axle-approve nghe ở ${SOCKET}`); });
 
+// ---------- công bố cho Bàn Axle ----------
+// Bàn (mặt tiền trên máy, core/desktop/axle-gui.py) cần thấy việc đang chờ, số hôm nay và agent nào có trên máy —
+// mà không hỏi mật khẩu và không dội sudo mỗi 5 giây (một cửa hẹp sudo là ~17.000 dòng nhật ký một ngày).
+// Bộ duyệt tự ghi ra MỘT tệp root:<chủ> 0640 mỗi khi trạng thái đổi (và mỗi phút cho tuổi việc / số hôm nay).
+// CHỈ ĐỌC: đường duyệt vẫn là socket quản trị root 0600 (`sudo axle duyet`) hoặc điện thoại — không có gì mới để lạm dụng.
+const BAN_FILE = process.env.AXLE_BAN_FILE || '/run/axle/ban.json';
+function ownerGid() {
+  try {
+    const u = ownerUser();
+    const line = readFileSync('/etc/passwd', 'utf8').split('\n').find((l) => l.startsWith(`${u}:`));
+    return line ? Number(line.split(':')[3]) : null;
+  } catch { return null; }
+}
+// Cùng cách đếm với tin tóm tắt tối (digest.js): "running" gồm cả tự duyệt → chủ duyệt = running − auto
+function homNay() {
+  const dau = new Date(); dau.setHours(0, 0, 0, 0);
+  const n = { running: 0, auto: 0, rejected: 0, expired: 0 };
+  try {
+    for (const l of readFileSync(LOG, 'utf8').split('\n')) {
+      if (!l) continue;
+      let e; try { e = JSON.parse(l); } catch { continue; }
+      if (!(e.state in n) || Date.parse(e.ts) < dau.getTime()) continue;
+      n[e.state]++;
+    }
+  } catch { /* chưa có nhật ký */ }
+  return { chu_duyet: Math.max(0, n.running - n.auto), tu_duyet: n.auto, tu_choi: n.rejected, het_han: n.expired };
+}
+function publishBan() {
+  const c = cfg();
+  const pending = [...requests.values()].filter((r) => r.state === 'pending').map((r) => ({
+    id: r.id, tier: tierOf(r), client: r.client, action: r.action, text: r.text,
+    buttons: keyboard(r).flat().map((b) => b.callback_data.slice(-1)).join(''),
+    ageSec: Math.round((Date.now() - r.created) / 1000), expires: new Date(r.created + c.expireSec * 1000).toISOString() }));
+  const agents = agentList().map((a) => ({ ten: a.name, vai: a.role, user: a.user, tam_dung: a.suspended }));
+  const data = JSON.stringify({ ts: new Date().toISOString(), host: hostname(), pending, homNay: homNay(), agents });
+  try {
+    mkdirSync(path.dirname(BAN_FILE), { recursive: true, mode: 0o755 });
+    const tmp = `${BAN_FILE}.tmp`;
+    writeFileSync(tmp, data, { mode: 0o640 });
+    const gid = ownerGid();
+    try { if (gid != null) chownSync(tmp, 0, gid); } catch { /* không phải root (bài thử) → giữ chủ tệp hiện tại */ }
+    renameSync(tmp, BAN_FILE);
+  } catch (e) { log({ warn: `công bố Bàn: ${e.message}` }); }
+}
+setInterval(publishBan, 60_000);
+
 // Socket quản trị: root 0600 — ghép cặp app, gỡ điện thoại, duyệt tại máy (`sudo axle duyet`, mức tin cậy T3).
 // Agent (kể cả trợ lý chính chạy bằng quyền chủ) KHÔNG chạm được: không có đường tự duyệt.
 const ADMIN_SOCKET = process.env.AXLE_APPROVE_ADMIN_SOCKET || '/run/axle-approve/admin.sock';
@@ -723,7 +771,7 @@ const adminServer = createServer(async (req, res) => {
   } catch (e) { send(400, { error: e.message }); }
 });
 if (existsSync(ADMIN_SOCKET)) unlinkSync(ADMIN_SOCKET);
-adminServer.listen(ADMIN_SOCKET, () => { chmodSync(ADMIN_SOCKET, 0o600); });
+adminServer.listen(ADMIN_SOCKET, () => { chmodSync(ADMIN_SOCKET, 0o600); publishBan(); });
 
 // Socket riêng từng agent: root:ag-<tên> 0660 → chỉ agent đó nối được, danh tính = socket. Đồng bộ theo sổ agent.
 const agentServers = new Map();
