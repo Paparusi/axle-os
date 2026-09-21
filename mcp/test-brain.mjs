@@ -53,6 +53,9 @@ try {
   ok(k.mong.includes('wiki/sources/hop-dong-abc-2026-09.md') && !k.mong.includes('wiki/entities/mo-coi.md'), 'kiem: trang mỏng (<3 câu), trang 3 câu thì không');
   ok(k.thieu_dau.includes('wiki/entities/mo-coi.md') && !k.thieu_dau.includes('wiki/sources/hop-dong-abc-2026-09.md'), 'kiem: thiếu YAML đầu trang');
   ok(k.tai_lieu_chua_trang.includes('bang.xlsx'), 'kiem: tài liệu trong raw chưa có trang nào nhắc');
+  ok(!k.link_hong.some((x) => x.link === 'tên-trang'), 'kiem: chữ mẫu trong dấu ` không tính là link hỏng');
+  b.ghi('wiki/sources/bang-luong.md', '---\ntitle: Bảng lương\ntype: source\n---\nNguồn: raw/2026-09/1-bang.xlsx. Tổng lương 21,5 triệu. Hai nhân sự.');
+  ok(!b.kiem().tai_lieu_chua_trang.includes('bang.xlsx'), 'kiem: trang nhắc tên tệp raw (không phải tên gốc) → vẫn tính là có trang');
 } finally {
   rmSync(D, { recursive: true, force: true });
 }

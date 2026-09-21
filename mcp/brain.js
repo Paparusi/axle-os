@@ -138,7 +138,8 @@ export function kiem(dir = BRAIN) {
   const duocTro = new Set();
   const index = trang.get('index')?.noiDung ?? '';
   for (const [slug, t] of trang) {
-    for (const m of t.noiDung.matchAll(/\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]/g)) {
+    const khongMa = t.noiDung.replace(/`[^`\n]*`/g, '');   // link trong dấu ` (chữ mẫu, ví dụ) không tính
+    for (const m of khongMa.matchAll(/\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]/g)) {
       const den = m[1].trim();
       if (trang.has(den)) duocTro.add(den); else linkHong.push({ trang: t.duong, link: den });
     }
@@ -151,7 +152,11 @@ export function kiem(dir = BRAIN) {
     if (['index', 'log'].includes(slug)) continue;
     if (!duocTro.has(slug) && !index.includes(`[[${slug}]]`)) moCoi.push(t.duong);
   }
-  const chuaTrang = taiLieu(200, dir).filter((d) => !d.sources).map((d) => d.ten).filter((ten) => ![...trang.values()].some((t) => t.noiDung.includes(ten))).slice(0, 20);
+  // Tài liệu "có trang" khi trang nào đó nhắc tên gốc HOẶC tên tệp trong raw (Claude hay ghi đường dẫn raw, không ghi tên gốc)
+  const chuaTrang = taiLieu(200, dir).filter((d) => {
+    const dau = [d.ten, path.basename(String(d.duong || ''))].filter(Boolean);
+    return !dau.some((x) => [...trang.values()].some((t) => t.noiDung.includes(x)));
+  }).map((d) => d.ten).slice(0, 20);
   const linkHongUniq = [...new Map(linkHong.map((x) => [`${x.trang}|${x.link}`, x])).values()];
   return { so_trang: trang.size, link_hong: linkHongUniq, mo_coi: moCoi, mong, thieu_dau: thieuDau, tai_lieu_chua_trang: chuaTrang };
 }

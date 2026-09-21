@@ -367,3 +367,9 @@ quả là điền sẵn câu hỏi về nó; (2) Claude được dặn ghi vào 
 liệu, quyết định), không chỉ khi có tệp; (3) **dọn đêm**: `axle brain lint` = Claude làm LINT theo QUY-UOC (link hỏng,
 trang mồ côi, trang mỏng, thiếu trang, sửa được thì sửa, ghi log) — timer hệ thống `axle-brain-lint.timer` 21:30 chạy
 bằng tài khoản chủ, không cần ai đăng nhập; chưa có Brain/token thì tự thoát 0.
+
+**Kiểm định máy móc (21/9 đêm, 0.1.138):** lần ingest thật đầu tiên (hợp đồng Omron–HRVN, 21:42) cho thấy Claude "nối"
+cả khối vào index.md (6 mục trống + 3 mục trùng, LINT phải dọn) và LINT bằng mắt không đáng tin. Thêm `brain_index_them`
+(một dòng vào đúng mục, idempotent theo [[slug]]), `brain_log` (dòng có giờ), `brain_kiem` (máy móc: link hỏng, mồ côi,
+mỏng, thiếu YAML, tài liệu chưa có trang; bỏ link trong dấu `, nhận cả tên tệp raw) — lời dặn INGEST/LINT đổi theo;
+`axle brain lint` bắt Claude gọi brain_kiem trước và sau khi sửa. Thử: test-brain 27 ca.

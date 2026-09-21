@@ -56,6 +56,11 @@ trang/tệp → câu trả lời đáng giữ thì thành trang mới (compariso
 thuẫn — sửa được thì sửa.
 **LOG**: mọi lần ghi thêm một dòng `log.md`: `- YYYY-MM-DD HH:MM · <việc> · [[trang]]`.
 
+## Công cụ (Claude trên máy)
+`brain_index` (quy ước + danh mục) · `brain_tim` (tìm) · `brain_doc` (đọc) · `brain_tai_lieu` (tệp đã gửi) · `brain_ghi`
+(ghi/nối trang wiki/*.md) · `brain_index_them` (đặt MỘT dòng trang vào đúng mục của index.md — dùng cái này, đừng nối tay)
+· `brain_log` (một dòng nhật ký có giờ) · `brain_kiem` (kiểm định máy móc — LINT phải gọi trước).
+
 ## Luật
 - Không sửa, không xoá gì trong `raw/`. Không ghi ngoài `wiki/`. Không chép bí mật (mật khẩu, token, số thẻ) vào wiki.
 - Số liệu lấy từ tài liệu thì ghi kèm nguồn; suy đoán thì ghi `confidence: low`.
@@ -64,7 +69,7 @@ EOF
 [ -f "$B/wiki/index.md" ] || cat > "$B/wiki/index.md" <<'EOF'
 # Danh mục Bộ não Axle
 
-(Claude tự thêm dòng vào đúng mục khi có trang mới. Một dòng một trang: `- [[tên-trang]] — một câu nói nó là gì`.)
+(Claude đặt dòng vào đúng mục bằng brain_index_them. Một dòng một trang: gạch đầu dòng, tên trang trong ngoặc vuông kép, gạch dài, một câu nói nó là gì.)
 
 ## Dự án / mảng việc
 
