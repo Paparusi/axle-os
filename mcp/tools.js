@@ -12,6 +12,7 @@ import { z } from 'zod';
 import * as files from './files.js';
 import * as screen from './screen.js';
 import * as web from './web.js';
+import * as tay from './tay.js';
 
 const AUDIT = process.env.AXLE_AUDIT || path.join(homedir(), '.local/state/axle/audit.jsonl');
 const SNAP = process.env.AXLE_SNAP || '/usr/local/lib/axle/axle-snap';
@@ -386,6 +387,8 @@ export function buildServer({ allow, clientName } = {}) {
   else for (const [n, ro] of screen.TOOL_NAMES) TOOL_INFO.set(n, { readOnly: ro });
   // Đọc web app thành BẢNG PHẦN TỬ ĐÁNH SỐ — chỉ có nghĩa khi agent có màn hình riêng để mở app
   if (screen.hasDisplay() && web.coWeb()) web.registerWeb(tool);
+  // Tay cho MỌI ứng dụng trên desktop của chủ (AT-SPI) — chỉ trong ngữ cảnh chủ có bus phiên đăng nhập
+  if (tay.coTay()) tay.registerTay(tool);
   // Màn hình THẬT của chủ: luôn khai báo, nhưng dịch vụ duyệt chỉ cho qua khi chủ đã cấp quyền còn hạn
   screen.registerOwnerScreen(tool, approve);
 

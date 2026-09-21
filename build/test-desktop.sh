@@ -119,6 +119,10 @@ vm 'test -r /run/axle/ban.json && python3 -c "import json; j=json.load(open(\"/r
 ok $? "bộ duyệt công bố /run/axle/ban.json, chủ máy đọc được không cần sudo"
 vm 'axle duyet --json | grep -q "^\["'; ok $? "axle duyet --json (Bàn đọc việc đang chờ) trả danh sách"
 vm '[ "$(stat -c %a /run/axle/ban.json)" = 640 ] && [ "$(stat -c %U /run/axle/ban.json)" = root ]'; ok $? "ban.json là root, quyền 0640 (tài khoản agent hộp cát không đọc được)"
+# Tay cho mọi ứng dụng (D8): qua SSH, không có DBUS_SESSION_BUS_ADDRESS, vẫn đọc được cây trợ năng của phiên đang đăng nhập
+vm 'axle tay cuaso 2>&1 | grep -q "Bàn Axle"'; ok $? "axle tay cuaso thấy cửa sổ Bàn Axle của phiên đang đăng nhập (qua SSH)"
+vm 'axle tay chup 2>&1 | grep -q "\"Chế độ tay\""'; ok $? "axle tay chup đọc được nút trong Bàn qua AT-SPI"
+[ "$(vm 'gsettings get org.gnome.desktop.interface toolkit-accessibility')" = "true" ]; ok $? "mọi toolkit bật trợ năng (Chromium, LibreOffice khai cây cho axle tay)"
 [ -s "$W/man-dang-nhap.png" ]; ok $? "chụp được màn hình máy ảo ($W/man-dang-nhap.png)"
 
 # Hàng rào hiệu năng: bản nào làm máy nặng thêm hay chờ lâu hơn thì đỏ ngay ở đây, thay vì đợi ai đó

@@ -57,6 +57,8 @@ echo "  ibus-unikey $(dpkg-query -W -f='${Version}' ibus-unikey 2>/dev/null) · 
 fi
 
 step "Cổng chia sẻ màn hình (để agent xin xem màn hình của chủ — docs/DESKTOP.md D3)"
+# Tay cho mọi ứng dụng (axle tay, D8): đọc cây trợ năng cần gir1.2-atspi-2.0 — gói nhỏ, lúc làm mới cũng cài nếu thiếu
+dpkg -s gir1.2-atspi-2.0 >/dev/null 2>&1 || apt_try gir1.2-atspi-2.0 || echo "  (chưa cài được gir1.2-atspi-2.0 — axle tay chưa dùng được)"
 [ -n "$LAM_MOI" ] || apt_try xdg-desktop-portal-gnome python3-gi gir1.2-gst-plugins-base-1.0 gstreamer1.0-pipewire gstreamer1.0-plugins-good \
   || echo "  (chưa cài được, thử lại sau: sudo apt install python3-gi gstreamer1.0-pipewire)"
 install -m 0644 "$ROOT/core/desktop/portal/axle-portal.service" /etc/systemd/user/axle-portal.service
@@ -205,6 +207,8 @@ color-scheme='prefer-dark'
 accent-color='blue'
 icon-theme='Yaru-blue-dark'
 clock-show-weekday=true
+# Mọi ứng dụng (kể cả Chromium, LibreOffice) tự mô tả mình qua AT-SPI — `axle tay` mới đọc và bấm được (D8)
+toolkit-accessibility=true
 font-name='Inter 11'
 document-font-name='Inter 11'
 enable-hot-corners=true

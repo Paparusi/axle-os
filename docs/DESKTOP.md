@@ -222,3 +222,39 @@ vài lần gọi công cụ) rồi tự vẽ ra PNG để nhìn bố cục; `pyt
 ban.json hỏng/thiếu, tóm tắt tin xin duyệt, đếm audit, gợi ý lỗi đăng nhập Claude).
 
 Chưa làm (nhịp sau): tay cho mọi ứng dụng qua cây trợ năng AT-SPI (`axle tay`) — hàng thứ hai của mô hình.
+
+## Tay cho mọi ứng dụng — `axle tay` (nhịp D8)
+
+Hàng thứ hai của mô hình "agent làm việc, người làm chủ": **ứng dụng là công cụ có tay**, không phải đích đến để
+người bấm. `web` (D6) đã làm việc đó cho trang web bằng Playwright; `tay` làm cho *cả desktop* bằng cây trợ năng
+AT-SPI — thứ mà GTK4, GNOME, LibreOffice, hộp thoại in/chọn tệp đều tự khai: vai trò + tên + trạng thái của từng
+phần tử, và hành động phần tử đó nhận.
+
+```
+axle tay cuaso                 ▶#1  libreoffice  "Bảng lương T9.ods — LibreOffice Calc" · frame · pid 4211
+axle tay chup --loc "Lưu"      #37  nút  "Lưu"
+axle tay bam 37                ✓ click #37 nút "Lưu"
+axle tay go 12 "500000"        ✓ gõ vào #12 "B4": "500000"     (đọc lại kiểm tra)
+axle tay mo libreoffice-calc   ✓ mở …: cửa sổ "Không tên 1 — LibreOffice Calc"
+```
+
+**Ba luật:**
+1. **Chỉ hành động qua trợ năng** (Action `click/press/activate/toggle`, EditableText, lấy tiêu điểm). Không
+   ydotool, không tiêm phím lên màn hình chủ — đúng mục 3 ở trên. Phần tử không nhận hành động thì máy nói thẳng
+   `(không có hành động)`, không đoán toạ độ.
+2. **Số chỉ có nghĩa với bảng vừa chụp**: bảng lưu kèm *đường đi trong cây* (`~/.cache/axle-tay/bang.json`); lúc
+   bấm, đi lại đường đó và kiểm vai trò + tên còn khớp mới làm — lệch là "chụp lại", hết 10 phút cũng "chụp lại".
+3. **Bảng gọn**: bỏ phần tử ẩn (thẻ chưa mở, menu chưa xổ), bỏ nhãn con lặp tên nút, ≤400 phần tử / ≤80 con mỗi
+   nút (Calc có hàng nghìn ô: dùng `--loc`), ô trống hiện chữ gợi ý.
+
+**Ai dùng được:** trợ lý chính chạy bằng tài khoản chủ (`axle claude`, MCP `tay_*` — đọc thì tự do, bấm/gõ/mở đi
+qua cầu xin phép D6). Qua SSH cũng chạy: `tay` tự lấy bus phiên `/run/user/<uid>/bus`. Agent phụ trong hộp cát có
+màn X riêng nhưng *chưa* có bus trợ năng → chưa đăng ký, nhịp sau (chạy `at-spi-bus-launcher` trong
+`axle-display@`). Mặc định dconf `toolkit-accessibility=true` để Chromium/LibreOffice cũng khai cây.
+
+**Đã thử thật** (`build/tay-smoke.sh`, không cần máy ảo): dựng phiên D-Bus riêng + bus trợ năng, mở chính cửa sổ
+Bàn, `cuaso` thấy "Bàn Axle", `chup` ra nút "Làm"/"Chế độ tay"/ô nhập/nút duyệt "Lần này", `go` đặt chữ vào ô
+"Bảo Axle làm" qua EditableText rồi `doc` đọc lại đúng, `bam` bấm nút qua Action, số ngoài bảng → báo rõ.
+
+Chưa làm: Chromium qua AT-SPI (đã có `web` tốt hơn), gõ phím tổ hợp (không có đường trợ năng — cố ý), tay cho
+agent phụ.
