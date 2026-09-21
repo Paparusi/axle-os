@@ -97,6 +97,65 @@ export function taiLieu(toiDa = 50, dir = BRAIN) {
     .filter(Boolean).slice(-toiDa).reverse();
 }
 
+// Thêm/thay MỘT dòng trang vào đúng mục của wiki/index.md — idempotent theo [[slug]] (có rồi thì thay dòng), không nhân
+// đôi tiêu đề mục (lỗi 21/9: Claude "nối" cả khối vào index.md → 6 mục trống + 3 mục trùng, LINT phải dọn). Mục không
+// có thì tạo ở cuối.
+export function indexThem(muc, dong, dir = BRAIN) {
+  const f = duongAnToan('wiki/index.md', { ghi: true, dir });
+  const slug = /\[\[([^\]]+)\]\]/.exec(dong)?.[1];
+  if (!slug) throw new Error('Dòng phải chứa [[tên-trang]]');
+  const mucSach = String(muc).replace(/^#+\s*/, '').trim();
+  if (!mucSach) throw new Error('Cần tên mục (vd "Tài liệu (sources)")');
+  const dongSach = `- ${String(dong).trim().replace(/^-\s*/, '')}`;
+  let lines = existsSync(f) ? readFileSync(f, 'utf8').split('\n') : ['# Danh mục Bộ não Axle', ''];
+  lines = lines.filter((l) => !(l.startsWith('- ') && l.includes(`[[${slug}]]`)));   // bỏ dòng cũ của trang này ở mọi mục
+  let i = lines.findIndex((l) => /^##\s+/.test(l) && l.replace(/^#+\s*/, '').trim().toLowerCase() === mucSach.toLowerCase());
+  if (i === -1) { if (lines[lines.length - 1] !== '') lines.push(''); lines.push(`## ${mucSach}`, ''); i = lines.length - 2; }
+  let j = i + 1;
+  while (j < lines.length && !/^##\s+/.test(lines[j])) j++;      // cuối mục
+  while (j > i + 1 && lines[j - 1] === '') j--;                     // chèn trước dòng trống cuối mục
+  lines.splice(j, 0, dongSach);
+  writeFileSync(f, lines.join('\n').replace(/\n{3,}/g, '\n\n'));
+  execFile('git', ['-C', dir, 'add', '-A'], () => execFile('git', ['-C', dir, 'commit', '-qm', `Claude: index ${slug}`], () => {}));
+  return `Đã đặt [[${slug}]] vào mục "${mucSach}"`;
+}
+
+// Một dòng nhật ký có dấu thời gian (giờ máy)
+export function logThem(viec, dir = BRAIN) {
+  const t = new Date();
+  const hh = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')} ${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
+  return ghi('wiki/log.md', `- ${hh} · ${String(viec).trim().replace(/\s+/g, ' ')}`, 'noi', dir);
+}
+
+// KIỂM ĐỊNH máy móc (không để Claude tự nhìn rồi bảo "không có link hỏng" như 21/9): link hỏng, trang mồ côi (không ai
+// trỏ tới và không có trong index), trang mỏng (<3 câu nội dung), trang thiếu YAML đầu, tài liệu raw chưa có trang sources.
+export function kiem(dir = BRAIN) {
+  const wiki = path.join(dir, 'wiki');
+  const trang = new Map();   // slug → { duong, noiDung }
+  const walk = (d) => { for (const f of readdirSync(d)) { const p = path.join(d, f); if (statSync(p).isDirectory()) walk(p); else if (f.endsWith('.md')) trang.set(f.replace(/\.md$/, ''), { duong: path.relative(dir, p), noiDung: readFileSync(p, 'utf8') }); } };
+  if (existsSync(wiki)) walk(wiki);
+  const linkHong = [], moCoi = [], mong = [], thieuDau = [];
+  const duocTro = new Set();
+  const index = trang.get('index')?.noiDung ?? '';
+  for (const [slug, t] of trang) {
+    for (const m of t.noiDung.matchAll(/\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]/g)) {
+      const den = m[1].trim();
+      if (trang.has(den)) duocTro.add(den); else linkHong.push({ trang: t.duong, link: den });
+    }
+    if (['index', 'log'].includes(slug)) continue;
+    const than = t.noiDung.replace(/^---[\s\S]*?---\s*/m, '').replace(/\[\[[^\]]+\]\]/g, '');
+    if (!/^---\n(?:[\s\S]*?\n)?title:/m.test(t.noiDung)) thieuDau.push(t.duong);
+    if ((than.match(/[^.!?…\n]{15,}[.!?…]/g) || []).length < 3) mong.push(t.duong);
+  }
+  for (const [slug, t] of trang) {
+    if (['index', 'log'].includes(slug)) continue;
+    if (!duocTro.has(slug) && !index.includes(`[[${slug}]]`)) moCoi.push(t.duong);
+  }
+  const chuaTrang = taiLieu(200, dir).filter((d) => !d.sources).map((d) => d.ten).filter((ten) => ![...trang.values()].some((t) => t.noiDung.includes(ten))).slice(0, 20);
+  const linkHongUniq = [...new Map(linkHong.map((x) => [`${x.trang}|${x.link}`, x])).values()];
+  return { so_trang: trang.size, link_hong: linkHongUniq, mo_coi: moCoi, mong, thieu_dau: thieuDau, tai_lieu_chua_trang: chuaTrang };
+}
+
 // Gói Bộ não cho app (`query brain`): danh mục, tài liệu gần nhất, nhật ký gần nhất, đếm — cắt cho vừa hộp trạm (≤48KB)
 export function choApp(dir = BRAIN) {
   const co = existsSync(path.join(dir, 'QUY-UOC.md'));
@@ -149,6 +208,29 @@ export function register(tool) {
     return ds.length ? ds.map((d) => `${d.luc} · ${d.ten} → ${d.duong}${d.cau ? ` · hỏi: ${String(d.cau).slice(0, 80)}` : ''}`).join('\n') : 'Chưa có tài liệu nào';
   });
 
+  tool('brain_index_them', {
+    title: 'Put a page line into a section of wiki/index.md',
+    description: 'Idempotent: one line "- [[slug]] — what it is" under the given section ("Tài liệu (sources)", "Khách hàng, đối tác, thực thể", '
+      + '"Dự án / mảng việc", "Quyết định", "Bài học", "Khái niệm, quy trình"). Replaces an existing line for the same [[slug]]; never duplicates headers. '
+      + 'Use this instead of appending to index.md.',
+    inputSchema: { muc: z.string().max(80), dong: z.string().max(600) },
+    annotations: { readOnlyHint: false, idempotentHint: true },
+  }, async ({ muc, dong }) => { khoiTao(); return indexThem(muc, dong); });
+
+  tool('brain_log', {
+    title: 'Append a timestamped line to wiki/log.md',
+    inputSchema: { viec: z.string().max(400).describe('Việc vừa làm, kèm [[trang]] liên quan') },
+    annotations: { readOnlyHint: false },
+  }, async ({ viec }) => { khoiTao(); return `Đã ghi log: ${logThem(viec)}`; });
+
+  tool('brain_kiem', {
+    title: 'Mechanical lint of the Brain',
+    description: 'Deterministic check: broken [[links]], orphan pages, thin pages (<3 sentences), pages missing the YAML header, '
+      + 'documents in raw/ with no page mentioning them. Run this FIRST when asked to LINT; fix what it lists; do not guess.',
+    inputSchema: {},
+    annotations: { readOnlyHint: true },
+  }, async () => { khoiTao(); return JSON.stringify(kiem(), null, 1); });
+
   tool('brain_ghi', {
     title: 'Write or append a wiki page in the Axle Brain',
     description: 'Create/overwrite (che_do=ghi) or append (che_do=noi) a Markdown page under wiki/ following QUY-UOC.md '
@@ -159,4 +241,4 @@ export function register(tool) {
   }, async ({ duong, noi_dung, che_do }) => { khoiTao(); return `Đã ${che_do === 'noi' ? 'nối vào' : 'ghi'} ${ghi(duong, noi_dung, che_do)}`; });
 }
 
-export const BRAIN_TOOLS = ['brain_index', 'brain_tim', 'brain_doc', 'brain_tai_lieu', 'brain_ghi'];
+export const BRAIN_TOOLS = ['brain_index', 'brain_tim', 'brain_doc', 'brain_tai_lieu', 'brain_ghi', 'brain_index_them', 'brain_log', 'brain_kiem'];

@@ -34,6 +34,25 @@ try {
   ok(logGit.split('\n').filter(Boolean).length >= 2, `mỗi lần ghi một commit git (${logGit.split('\n').filter(Boolean).length} commit)`);
   writeFileSync(path.join(b.BRAIN, 'raw/.index.jsonl'), JSON.stringify({ sha: 'x', duong: 'raw/2026-09/1-bang.xlsx', ten: 'bang.xlsx', luc: '2026-09-21T21:00:00+07:00', thiet_bi: 'iPhone', cau: 'tổng lương' }) + '\n');
   ok(b.taiLieu()[0]?.ten === 'bang.xlsx', 'brain_tai_lieu đọc .index.jsonl');
+  // index_them: idempotent, đúng mục, không nhân đôi tiêu đề
+  b.indexThem('Tài liệu (sources)', '[[hop-dong-abc-2026-09]] — Hợp đồng ABC ký 15/9');
+  b.indexThem('Tài liệu (sources)', '- [[hop-dong-abc-2026-09]] — Hợp đồng ABC ký 15/9, phạt 0,5%/ngày');
+  b.indexThem('Khách hàng, đối tác, thực thể', '[[cong-ty-abc]] — khách sỉ Bình Dương');
+  b.indexThem('Mục mới lạ', '[[x-y]] — thử mục chưa có');
+  const idx = readFileSync(path.join(b.BRAIN, 'wiki/index.md'), 'utf8');
+  ok((idx.match(/\[\[hop-dong-abc-2026-09\]\]/g) || []).length === 1 && idx.includes('phạt 0,5%/ngày'), 'index_them: cùng slug → thay dòng, không nhân đôi');
+  ok((idx.match(/^## Tài liệu \(sources\)$/mg) || []).length === 1 && (idx.match(/^## /mg) || []).length === 7, `index_them: không nhân đôi tiêu đề, mục lạ thêm ở cuối (${(idx.match(/^## /mg) || []).length} mục)`);
+  const viTri = idx.indexOf('[[cong-ty-abc]]'); const viTriMuc = idx.indexOf('## Khách hàng'); const viTriMucSau = idx.indexOf('## Tài liệu');
+  ok(viTri > viTriMuc && viTri < viTriMucSau, 'index_them: dòng nằm đúng trong mục của nó');
+  ok(b.logThem('ingest thử · [[hop-dong-abc-2026-09]]').endsWith('log.md') && /- \d{4}-\d{2}-\d{2} \d{2}:\d{2} · ingest thử/.test(readFileSync(path.join(b.BRAIN, 'wiki/log.md'), 'utf8')), 'brain_log: dòng có dấu thời gian');
+  // kiem: link hỏng, mồ côi, mỏng, thiếu YAML, tài liệu chưa trang
+  writeFileSync(path.join(b.BRAIN, 'wiki/entities/mo-coi.md'), 'Trang này không có ai trỏ tới cả. Nó có đúng ba câu đủ dài để tính. Đây là câu thứ ba dài đủ mười lăm ký tự.');
+  const k = b.kiem();
+  ok(k.link_hong.some((x) => x.link === 'cong-ty-abc') && k.link_hong.some((x) => x.link === 'x-y'), `kiem: bắt link hỏng (${k.link_hong.map((x) => x.link).join(',')})`);
+  ok(k.mo_coi.includes('wiki/entities/mo-coi.md'), 'kiem: trang mồ côi');
+  ok(k.mong.includes('wiki/sources/hop-dong-abc-2026-09.md') && !k.mong.includes('wiki/entities/mo-coi.md'), 'kiem: trang mỏng (<3 câu), trang 3 câu thì không');
+  ok(k.thieu_dau.includes('wiki/entities/mo-coi.md') && !k.thieu_dau.includes('wiki/sources/hop-dong-abc-2026-09.md'), 'kiem: thiếu YAML đầu trang');
+  ok(k.tai_lieu_chua_trang.includes('bang.xlsx'), 'kiem: tài liệu trong raw chưa có trang nào nhắc');
 } finally {
   rmSync(D, { recursive: true, force: true });
 }
