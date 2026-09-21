@@ -768,8 +768,20 @@ function publishBan() {   // đổi trạng thái dồn dập (một việc: pen
   if (banHen) return;
   banHen = setTimeout(() => { banHen = null; publishBanNgay(); }, 150);
 }
+// Sổ đổi thì ĐẨY lên app luôn (app hiện `state so` không cần hỏi) — Bi 21/9: cập nhật xong mà app vẫn trống vì
+// app chỉ hỏi lúc mở/kéo. Chỉ đẩy khi nội dung đổi thật (việc chờ, số hôm nay, sổ, agent) — không phải mỗi phút
+// (tuổi việc/ts đổi liên tục), kẻo 1.440 tin một ngày dội trạm chuyển tiếp.
+let banKeyCu = null;
+const banKey = (b) => JSON.stringify([b.pending.map((r) => r.id), b.homNay, b.agents,
+  b.so.map((x) => [x.id, x.ket_qua, x.quyet_dinh, x.exitCode])]);
 function publishBanNgay() {
-  const data = JSON.stringify(layBan());
+  const ban = layBan();
+  const data = JSON.stringify(ban);
+  const key = banKey(ban);
+  if (key !== banKeyCu && app.enabled()) {
+    banKeyCu = key;
+    app.broadcast({ type: 'state', what: 'so', data: banChoApp(ban) }).catch((e) => log({ warn: `đẩy sổ lên app: ${e.message}` }));
+  }
   try {
     mkdirSync(path.dirname(BAN_FILE), { recursive: true, mode: 0o755 });
     const tmp = `${BAN_FILE}.tmp`;
