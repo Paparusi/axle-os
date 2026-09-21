@@ -449,7 +449,11 @@ const app = createAppChannel({
     app.sendTo(d.id, { type: 'command-result', cmd: msg.type, agent: msg.agent, ok: out.exitCode === 0, text: out.output.trim() });
     app.broadcast({ type: 'agents', list: agentList() }).catch(() => {});
   },
-  onHello(d) { app.sendTo(d.id, { type: 'agents', list: agentList() }); },
+  onHello(d) {
+    log({ app: 'hello', device: d.name });
+    app.sendTo(d.id, { type: 'agents', list: agentList() });
+    app.sendTo(d.id, { type: 'state', what: 'so', data: banChoApp(layBan()) });   // mở app là có sổ ngay; app cũ bỏ qua, vô hại
+  },
   async onTask(d, task) {
     const v = TASKS[task];
     if (!v) return log({ warn: `app: ${d.name} xin việc lạ ${task}` });
@@ -463,6 +467,7 @@ const app = createAppChannel({
     v.sau?.();
   },
   async onQuery(d, what) {
+    log({ app: `hỏi ${what}`, device: d.name });   // soi được app hỏi gì (bản nào) từ nhật ký, khỏi đoán
     if (what === 'status') return app.sendTo(d.id, { type: 'state', what: 'status', data: await machineState() });
     // Tab Sổ trên app: cùng nội dung công bố cho Bàn (số hôm nay + ~40 việc đã hỏi chủ), bỏ pending, cắt vừa hộp
     if (what === 'so') return app.sendTo(d.id, { type: 'state', what: 'so', data: banChoApp(layBan()) });
@@ -780,6 +785,7 @@ function publishBanNgay() {
   const key = banKey(ban);
   if (key !== banKeyCu && app.enabled()) {
     banKeyCu = key;
+    log({ app: 'đẩy sổ', so: ban.so.length, pending: ban.pending.length });
     app.broadcast({ type: 'state', what: 'so', data: banChoApp(ban) }).catch((e) => log({ warn: `đẩy sổ lên app: ${e.message}` }));
   }
   try {
