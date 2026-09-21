@@ -48,6 +48,12 @@ addSession(R, ct('Edit', { file: '/p/z/a.js' }), T0);
 ok(findAuto(ct('Edit', { file: '/p/z/b.js' }), R, T0)?.kind === 'session', 'phiên 1 giờ: Edit tệp khác cùng thư mục → tự duyệt');
 ok(!findAuto(ct('Write', { file: '/p/z/c.js' }), R, T0), 'phiên 1 giờ: công cụ khác (Write) → hỏi lại');
 ok(!findAuto(ct('Edit', { file: '/etc/hosts', nguy: true }), R, T0), 'phiên không bao giờ áp cho việc nguy hiểm');
+// Công cụ web_*/tay_*: "luôn" nhớ theo ĐÍCH (app + nút) nằm trong command, không theo tên công cụ
+addRule(R, ct('mcp__axle__tay_click', { command: 'tay_click libreoffice "Calc": push button "Lưu"' }), T0);
+ok(findAuto(ct('mcp__axle__tay_click', { command: 'tay_click libreoffice "Calc": push button "Lưu"' }), R, T0)?.kind === 'rule', 'luật "luôn" tay_click: đúng nút Lưu trong Calc → tự duyệt');
+ok(!findAuto(ct('mcp__axle__tay_click', { command: 'tay_click libreoffice "Calc": push button "Xoá hết"' }), R, T0), 'luật "luôn" tay_click: nút khác → hỏi (không phải mọi cú bấm)');
+ok(tierOf(ct('mcp__axle__tay_click', { command: 'tay_click #99 (không rõ phần tử)', mo: true })) === 3, 'tay_click không rõ đích → bậc 3, luôn hỏi');
+ok(!canRemember(ct('mcp__axle__tay_click', { command: 'tay_click #99 (không rõ phần tử)', mo: true })), 'không rõ đích thì không có nút "luôn"');
 
 const changed = prune(R, (k) => k !== 'chu:ssh:cog', T0);
 ok(changed && R.rules.length === 0 && R.sessions.length === 0, 'gỡ agent → luật + phiên của nó bị xoá');

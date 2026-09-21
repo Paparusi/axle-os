@@ -207,7 +207,8 @@ color-scheme='prefer-dark'
 accent-color='blue'
 icon-theme='Yaru-blue-dark'
 clock-show-weekday=true
-# Mọi ứng dụng (kể cả Chromium, LibreOffice) tự mô tả mình qua AT-SPI — `axle tay` mới đọc và bấm được (D8)
+# Mọi ứng dụng (kể cả Chromium, LibreOffice) tự mô tả mình qua AT-SPI — axle tay mới đọc và bấm được (D8).
+# (heredoc này không bọc nháy vì cần FAVS: KHÔNG viết dấu huyền hay dollar-ngoặc trong comment — bash sẽ chạy nó)
 toolkit-accessibility=true
 font-name='Inter 11'
 document-font-name='Inter 11'

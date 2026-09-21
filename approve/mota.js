@@ -47,3 +47,26 @@ export function banChoApp(ban, gioiHan = 48000) {
     so = so.slice(0, Math.floor(so.length / 2));
   }
 }
+
+// Công cụ MCP của Axle mà Claude xin dùng (web_*, tay_*): dựng một DÒNG LỆNH mô tả đích thật (app, phần tử) để
+// (1) tin xin duyệt đọc được: "bấm nút 'Lưu' trong Calc" thay vì {"so":37}; (2) "Luôn việc này" nhớ theo ĐÚNG
+// đích đó, không phải theo tên công cụ (nếu không, một lần "luôn" là tự duyệt mọi cú bấm về sau — lỗ 21/9).
+// tayBang: nội dung ~/.cache/axle-tay/bang.json của chủ (bảng vừa chụp) để đổi số thứ tự thành phần tử.
+// Trả { command, mo } — mo=true khi KHÔNG xác định được đích (bảng cũ/mất) → bậc 3, luôn hỏi, không nhớ.
+export function lenhCongCu(tool, input = {}, tayBang = null) {
+  const t = String(tool).replace(/^mcp__axle__/, '');
+  const s = (v, n = 120) => String(v ?? '').slice(0, n);
+  if (!/^(web_|tay_)/.test(t)) return null;
+  if (t === 'web_click' || t === 'web_type') return { command: `${t} ${s(input.app, 30)}: ${s(input.vai, 20)} "${s(input.ten)}"`, mo: false };
+  if (t === 'web_key') return { command: `web_key ${s(input.app, 30)}: ${s(input.phim, 20)}`, mo: false };
+  if (t === 'web_scroll' || t === 'web_snapshot' || t === 'web_text') return { command: `${t} ${s(input.app, 30)}`, mo: false };
+  if (t === 'tay_open') return { command: `tay_open ${s(input.app, 80)}`, mo: false };
+  if (t === 'tay_click' || t === 'tay_type') {
+    const so = Number(input.so);
+    const muc = tayBang && tayBang.muc && tayBang.muc[String(so)];
+    const cu = !tayBang || !tayBang.luc || Date.now() / 1000 - Number(tayBang.luc) > 600;
+    if (!muc || cu) return { command: `${t} #${Number.isFinite(so) ? so : '?'} (không rõ phần tử — bảng cũ hoặc chưa chụp)`, mo: true };
+    return { command: `${t} ${s(tayBang.app, 30)} "${s(tayBang.cua_so, 60)}": ${s(muc.vai, 20)} "${s(muc.ten)}"`, mo: false };
+  }
+  return { command: `${t}`, mo: false };   // tay_windows / tay_snapshot / tay_read: chỉ đọc
+}

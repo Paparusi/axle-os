@@ -281,3 +281,20 @@ Hôm nay chỉ xuất; chưa có model nào đọc — quyết định laya đã
 
 **Sổ trên điện thoại** (0.1.121 + app): tab Lịch sử thành **Sổ** — app hỏi `query so`, máy trả cùng nội dung công bố cho
 Bàn (bỏ pending, cắt vừa hộp ≤64KB); danh sách cục bộ "điện thoại này đã nhận" giữ ở dưới cho lúc mất mạng.
+
+## Siết và tối ưu sau ngày đầu (nhịp D10)
+
+- **"Luôn việc này" cho web_*/tay_* nhớ theo ĐÍCH, không theo tên công cụ.** Trước: Claude xin `tay_click {so: 37}`,
+  chủ bấm "Luôn" → luật `{tool: tay_click}` tự duyệt *mọi* cú bấm về sau. Giờ `approve/mota.js lenhCongCu()` dựng
+  dòng lệnh từ đích thật — `tay_click libreoffice "Bảng lương — Calc": push button "Lưu"` (đổi số qua bảng vừa
+  chụp của chủ, chỉ đọc) — tin duyệt đọc được, luật khớp đúng nút đó. Số không tra được / bảng quá 10 phút → `mo`
+  (không rõ đích) = bậc 3, luôn hỏi, không nhớ. Thử: `approve/test-mota.mjs`, `approve/test-rules.mjs`.
+- **Chảy chữ cho "Bảo Axle làm":** `axle claude --dong` = `--output-format stream-json` qua `core/desktop/claude-dong.py`:
+  chữ trả lời hiện ngay khi có, mỗi lần dùng công cụ một dòng `→ Read /etc/hostname`, kết thúc `— xong (5,5 giây)`
+  hoặc `✗ …`. Bàn hiện dòng `→` ở trạng thái để thấy Claude đang làm tới đâu. `</dev/null` vì claude chờ stdin 3 giây
+  khi thấy ống dẫn.
+- **Dặn Claude trên máy** (Bi: "dùng Claude có cần tay gì đâu cũng chạy ầm ầm"): có lệnh hay API thì dùng lệnh; chỉ
+  động tới cửa sổ khi việc chỉ tồn tại dưới dạng cửa sổ.
+- **Daemon:** số hôm nay đọc đuôi 1MB nhật ký thay vì cả tệp; nhiều lần đổi trạng thái trong 150ms gộp thành một
+  lần ghi ban.json. Provision: lint `build/provision-lint.sh` bắt dấu huyền/`$(` trong heredoc không bọc nháy (một
+  dấu huyền trong comment đã chạy nhầm `axle tay` lúc cập nhật máy thật 21/9).

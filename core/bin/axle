@@ -62,7 +62,7 @@ sudo axle duyet [<id> a|h|l|r] · axle duyet --json   duyệt tại máy · vi�
 axle tay cuaso|chup|bam N|go N "chữ"|doc N|mo <app>   tay cho mọi ứng dụng: bảng phần tử qua trợ năng, không tiêm phím
 sudo axle phanxa xuat [--tu ngày]   xuất nhãn (chủ đã quyết gì) cho lớp phản xạ
                          xem và duyệt yêu cầu ngay tại máy (dùng được cả khi mọi kênh khác hỏng)
-axle claude "câu hỏi" [--tiep]
+axle claude "câu hỏi" [--tiep] [--dong]
                          Claude Code chạy TRÊN máy này: đọc/tìm thì làm ngay, còn ghi tệp/chạy lệnh
                          thì hiện lên điện thoại của mày để duyệt (Face ID). --tiep: nối phiên trước
 axle bench [--nghiem]    đo cái giá Axle bắt máy trả: RAM lúc rảnh, khởi động, snapshot, đĩa
@@ -712,17 +712,25 @@ dangnhap_cmd() {
 #   --tiep: nối tiếp phiên trước (giữ mạch hội thoại).
 CLAUDE_MCP_CFG='{"mcpServers":{"axle":{"command":"/usr/local/bin/axle","args":["mcp","--as","claude"]}}}'
 claude_cmd() {
-  local bin tiep="" hoi=()
+  local bin tiep="" dong="" hoi=()
   for bin in "$HOME/.local/bin/claude" /usr/local/bin/claude /usr/bin/claude; do [ -x "$bin" ] && break; bin=""; done
   [ -n "$bin" ] || { echo "Chưa cài Claude Code trên máy này (npm i -g @anthropic-ai/claude-code, rồi đăng nhập một lần)" >&2; exit 1; }
-  while [ $# -gt 0 ]; do case "$1" in --tiep) tiep=--continue ;; *) hoi+=("$1") ;; esac; shift; done
-  [ "${#hoi[@]}" -gt 0 ] || { echo 'axle claude "câu hỏi" [--tiep]' >&2; exit 2; }
+  while [ $# -gt 0 ]; do case "$1" in --tiep) tiep=--continue ;; --dong) dong=1 ;; *) hoi+=("$1") ;; esac; shift; done
+  [ "${#hoi[@]}" -gt 0 ] || { echo 'axle claude "câu hỏi" [--tiep] [--dong]' >&2; exit 2; }
   # Không --bare: cần OAuth của gói thuê bao. Không --dangerously-skip-permissions: chính cái cổng là điểm.
-  exec "$bin" -p "${hoi[*]}" $tiep \
-    --mcp-config "$CLAUDE_MCP_CFG" \
-    --permission-prompt-tool mcp__axle__duyet_quyen \
-    --allowedTools "Read,Grep,Glob,LS,WebFetch,WebSearch,mcp__axle__system_status,mcp__axle__service_status,mcp__axle__file_list,mcp__axle__file_read,mcp__axle__file_search,mcp__axle__tay_windows,mcp__axle__tay_snapshot,mcp__axle__tay_read" \
-    --append-system-prompt "Bạn đang chạy trên máy Axle của chủ. Việc ĐỌC thì cứ làm. Việc ghi tệp, chạy lệnh, xoá sẽ hiện lên điện thoại chủ để duyệt — nói ngắn gọn trước khi xin, đừng xin dồn dập, và bị từ chối thì đừng thử lại bằng cách khác."
+  # Dặn thêm (Bi 21/9: "dùng Claude có cần tay gì đâu"): có lệnh/API thì dùng lệnh; chỉ động cửa sổ khi không còn đường.
+  local opts=(--mcp-config "$CLAUDE_MCP_CFG"
+    --permission-prompt-tool mcp__axle__duyet_quyen
+    --allowedTools "Read,Grep,Glob,LS,WebFetch,WebSearch,mcp__axle__system_status,mcp__axle__service_status,mcp__axle__file_list,mcp__axle__file_read,mcp__axle__file_search,mcp__axle__tay_windows,mcp__axle__tay_snapshot,mcp__axle__tay_read"
+    --append-system-prompt "Bạn đang chạy trên máy Axle của chủ. Việc ĐỌC thì cứ làm. Việc ghi tệp, chạy lệnh, xoá sẽ hiện lên điện thoại chủ để duyệt — nói ngắn gọn trước khi xin, đừng xin dồn dập, và bị từ chối thì đừng thử lại bằng cách khác. Có lệnh hay API thì dùng lệnh; chỉ động tới cửa sổ (tay_*) khi việc chỉ tồn tại dưới dạng cửa sổ: tài liệu đang mở chưa lưu, hộp thoại, ứng dụng không có lệnh.")
+  # --dong (Bàn dùng): sự kiện JSON từng dòng → bộ lọc in chữ trả lời NGAY khi có + mỗi lần dùng công cụ một dòng "→".
+  # </dev/null: claude chờ stdin 3 giây nếu thấy ống dẫn (đo 21/9) — Bàn/cron không có gì để đưa vào.
+  if [ -n "$dong" ]; then
+    "$bin" -p "${hoi[*]}" $tiep --output-format stream-json --verbose "${opts[@]}" </dev/null \
+      | /usr/bin/python3 /opt/axle/core/desktop/claude-dong.py || exit "${PIPESTATUS[0]}"
+    exit 0
+  fi
+  exec "$bin" -p "${hoi[*]}" $tiep "${opts[@]}" </dev/null
 }
 
 desktop_cmd() {   # sudo axle desktop on|off|status — lớp giao diện (docs/DESKTOP.md)

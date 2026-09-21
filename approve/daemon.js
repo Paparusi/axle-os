@@ -17,7 +17,7 @@ import { hostname } from 'node:os';
 import { addRule, addSession, autoLabel, canRemember, canSession, describeRule, findAuto, keyboard, loadRules, prune,
   saveRules, tierLine, tierOf, writeDurable } from './rules.js';
 import { buildDigest } from './digest.js';
-import { banChoApp, gopNhatKy } from './mota.js';
+import { banChoApp, gopNhatKy, lenhCongCu } from './mota.js';
 import { createAppChannel } from './app-channel.js';
 import { machineState } from './machine-state.js';
 import { requestHash } from '../app/proto.js';
@@ -222,13 +222,22 @@ const ACTIONS = {
       const raw = JSON.stringify(input);
       if (raw.length > 16_000) input = { _cat: `${raw.slice(0, 16_000)}…` };
       // Lọc ra mấy mẩu chủ cần thấy: Bash → lệnh; Edit/Write → tệp + nội dung ngắn
-      const command = typeof input.command === 'string' ? input.command : null;
+      let command = typeof input.command === 'string' ? input.command : null;
       const file = typeof input.file_path === 'string' ? input.file_path : null;
-      return { tool, input, command, file, nguy: nguyHiem(tool, command, file) };
+      // Công cụ web_*/tay_* của Axle: dòng lệnh = ĐÍCH THẬT (app, nút) để tin duyệt đọc được và "luôn" nhớ đúng
+      // đích đó chứ không phải mọi cú bấm. tay_* đổi số thứ tự qua bảng vừa chụp trong nhà chủ (chỉ đọc).
+      let mo = false;
+      const mcp = lenhCongCu(tool, input, tayBangCuaChu());
+      if (mcp) { command = mcp.command; mo = mcp.mo; }
+      return { tool, input, command, file, nguy: nguyHiem(tool, command, file), mo };
     },
     describe(p) {
-      const dong = [`Claude trên máy xin dùng công cụ ${p.tool}${p.nguy ? ' ⚠️ NGUY HIỂM' : ''}`];
-      if (p.command) dong.push(`Lệnh:\n${cap(p.command, 1500)}`);
+      const dong = [`Claude trên máy xin dùng công cụ ${p.tool}${p.nguy ? ' ⚠️ NGUY HIỂM' : ''}${p.mo ? ' (không rõ đích — luôn hỏi)' : ''}`];
+      if (/^(web_|tay_)/.test(p.command ?? '')) {
+        dong.push(`Việc: ${cap(p.command, 400)}`);
+        const chu = p.input?.chu;
+        if (typeof chu === 'string') dong.push(`Gõ: ${cap(chu, 300)}`);
+      } else if (p.command) dong.push(`Lệnh:\n${cap(p.command, 1500)}`);
       else if (p.file) {
         dong.push(`Tệp: ${p.file}`);
         const t = p.input.content ?? p.input.new_string;
@@ -710,17 +719,27 @@ function ownerGid() {
 function homNay() {
   const dau = new Date(); dau.setHours(0, 0, 0, 0);
   const n = { running: 0, auto: 0, rejected: 0, expired: 0 };
-  try {
-    for (const l of readFileSync(LOG, 'utf8').split('\n')) {
-      if (!l) continue;
-      let e; try { e = JSON.parse(l); } catch { continue; }
-      if (!(e.state in n) || Date.parse(e.ts) < dau.getTime()) continue;
-      n[e.state]++;
-    }
-  } catch { /* chưa có nhật ký */ }
+  // Đuôi 1MB (~5.000 sự kiện) thay vì cả tệp: nhật ký lớn dần theo tháng mà hàm này chạy mỗi lần đổi trạng thái
+  for (const l of docDuoiLog(1_048_576)) {
+    if (!l) continue;
+    let e; try { e = JSON.parse(l); } catch { continue; }
+    if (!(e.state in n) || Date.parse(e.ts) < dau.getTime()) continue;
+    n[e.state]++;
+  }
   return { chu_duyet: Math.max(0, n.running - n.auto), tu_duyet: n.auto, tu_choi: n.rejected, het_han: n.expired };
 }
 // Sổ: ~40 việc gần nhất máy đã hỏi chủ (đọc đuôi nhật ký, không phải cả tệp — nhật ký lớn dần theo tháng)
+// Bảng phần tử `axle tay chup` vừa chụp của chủ (~/.cache/axle-tay/bang.json) — để tin duyệt tay_click #37 nói
+// được "nút Lưu trong Calc". Chỉ đọc, ≤256KB, hỏng thì coi như không có (→ yêu cầu thành "không rõ đích", bậc 3).
+function tayBangCuaChu() {
+  try {
+    const f = path.join(ownerWho().home, '.cache/axle-tay/bang.json');
+    if (statSync(f).size > 262144) return null;
+    const j = JSON.parse(readFileSync(f, 'utf8'));
+    return j && typeof j === 'object' && j.muc ? j : null;
+  } catch { return null; }
+}
+
 function docDuoiLog(toiDa = 262144) {
   try {
     const fd = openSync(LOG, 'r');
@@ -744,7 +763,12 @@ function layBan() {
   const agents = agentList().map((a) => ({ ten: a.name, vai: a.role, user: a.user, tam_dung: a.suspended }));
   return { ts: new Date().toISOString(), host: hostname(), pending, homNay: homNay(), agents, so: soGanDay() };
 }
-function publishBan() {
+let banHen = null;
+function publishBan() {   // đổi trạng thái dồn dập (một việc: pending → running → done) → ghi một lần
+  if (banHen) return;
+  banHen = setTimeout(() => { banHen = null; publishBanNgay(); }, 150);
+}
+function publishBanNgay() {
   const data = JSON.stringify(layBan());
   try {
     mkdirSync(path.dirname(BAN_FILE), { recursive: true, mode: 0o755 });
@@ -794,7 +818,7 @@ const adminServer = createServer(async (req, res) => {
   } catch (e) { send(400, { error: e.message }); }
 });
 if (existsSync(ADMIN_SOCKET)) unlinkSync(ADMIN_SOCKET);
-adminServer.listen(ADMIN_SOCKET, () => { chmodSync(ADMIN_SOCKET, 0o600); publishBan(); });
+adminServer.listen(ADMIN_SOCKET, () => { chmodSync(ADMIN_SOCKET, 0o600); publishBanNgay(); });
 
 // Socket riêng từng agent: root:ag-<tên> 0660 → chỉ agent đó nối được, danh tính = socket. Đồng bộ theo sổ agent.
 const agentServers = new Map();

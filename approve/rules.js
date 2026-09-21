@@ -43,7 +43,7 @@ export const keyOf = (r) => (r.who?.agent ? `phu:${r.who.agent}` : `chu:${r.clie
 
 export function tierOf(r) {
   if (r.action === 'login') return 3;          // người xin CHƯA chứng minh là ai: không bao giờ nhớ, hỏi từng lần
-  if (r.action === 'claude_tool') return r.params.nguy ? 3 : 2;   // Claude trên máy xin công cụ: phá máy thì bậc 3
+  if (r.action === 'claude_tool') return r.params.nguy || r.params.mo ? 3 : 2;   // Claude xin công cụ: phá máy, hay không rõ đích → bậc 3
   if (r.action === 'screen_grant') return 3;   // xem màn hình thật của chủ: luôn hỏi từng lần
   if (r.action === 'snapshot_undo') return 3;
   if (r.action === 'run_command' && r.params.asRoot) return 3;

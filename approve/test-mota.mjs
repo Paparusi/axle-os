@@ -34,3 +34,24 @@ ok(banChoApp({ ts: 'x', host: 'h', so: [] }).so.length === 0, 'sổ rỗng vẫn
 
 if (fail) { console.log(`✗ ${fail} mục hỏng`); process.exit(1); }
 console.log('✓ mota (Sổ + bản cho app) đạt');
+
+// ---- lệnh mô tả cho công cụ MCP (đích thật cho tin duyệt + luật "luôn") ----
+import { lenhCongCu } from './mota.js';
+{
+  let f2 = 0;
+  const ok2 = (c, m) => { console.log(`  ${c ? '✓' : '✗'} ${m}`); if (!c) f2++; };
+  const bang = { pid: 1, app: 'libreoffice', cua_so: 'Bảng lương T9 — Calc', luc: Date.now() / 1000 - 30,
+    muc: { 37: { duong: [0, 1], vai: 'push button', ten: 'Lưu' }, 12: { duong: [0, 2], vai: 'text', ten: 'B4' } } };
+  ok2(lenhCongCu('Bash', { command: 'ls' }) === null, 'công cụ thường (Bash/Edit) → null, giữ đường cũ');
+  ok2(lenhCongCu('mcp__axle__web_click', { app: 'zalo', vai: 'button', ten: 'Gửi' }).command === 'web_click zalo: button "Gửi"', 'web_click: app + vai + tên');
+  ok2(lenhCongCu('mcp__axle__tay_click', { so: 37 }, bang).command === 'tay_click libreoffice "Bảng lương T9 — Calc": push button "Lưu"', 'tay_click #37 → đổi thành nút "Lưu" trong Calc');
+  ok2(lenhCongCu('mcp__axle__tay_type', { so: 12, chu: '500000' }, bang).command === 'tay_type libreoffice "Bảng lương T9 — Calc": text "B4"', 'tay_type nhớ theo ô, không theo chữ gõ');
+  const m1 = lenhCongCu('mcp__axle__tay_click', { so: 99 }, bang);
+  ok2(m1.mo === true && m1.command.includes('#99'), 'số không có trong bảng → mờ (bậc 3, không nhớ)');
+  ok2(lenhCongCu('mcp__axle__tay_click', { so: 37 }, null).mo === true, 'chưa có bảng → mờ');
+  ok2(lenhCongCu('mcp__axle__tay_click', { so: 37 }, { ...bang, luc: Date.now() / 1000 - 700 }).mo === true, 'bảng quá 10 phút → mờ');
+  ok2(lenhCongCu('mcp__axle__tay_open', { app: 'libreoffice-calc' }).command === 'tay_open libreoffice-calc', 'tay_open theo app');
+  ok2(lenhCongCu('mcp__axle__web_type', { app: 'gmail', vai: 'textbox', ten: 'x'.repeat(300) }).command.length < 200, 'cắt tên dài');
+  if (f2) { console.log(`✗ ${f2} mục hỏng`); process.exit(1); }
+  console.log('✓ lệnh mô tả công cụ MCP đạt');
+}

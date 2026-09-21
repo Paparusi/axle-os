@@ -494,7 +494,8 @@ class CuaSo(Adw.ApplicationWindow):
         self.ket_qua_cuon.set_visible(True)
         self.them_ket_qua(f"› {cau}\n")
         self.lenh_trang_thai.set_label("Đang làm… việc hệ trọng sẽ hỏi bạn trước khi làm.")
-        args = [AXLE, "claude", cau] + (["--tiep"] if self.co_cuoc else [])
+        # --dong: chữ chảy ngay khi có + mỗi lần Claude dùng công cụ một dòng "→ …" (core/desktop/claude-dong.py)
+        args = [AXLE, "claude", cau, "--dong"] + (["--tiep"] if self.co_cuoc else [])
 
         def worker():
             try:
@@ -514,6 +515,8 @@ class CuaSo(Adw.ApplicationWindow):
     def them_ket_qua(self, chu):
         buf = self.ket_qua.get_buffer()
         buf.insert(buf.get_end_iter(), chu)
+        if chu.startswith("→ ") and self.dang_lam:          # dòng công cụ → cho thấy Claude đang làm tới đâu
+            self.lenh_trang_thai.set_label(f"Đang: {chu[2:].strip()[:120]}")
         adj = self.ket_qua_cuon.get_vadjustment()
         GLib.idle_add(lambda: adj.set_value(adj.get_upper() - adj.get_page_size()) or False)
         return False
