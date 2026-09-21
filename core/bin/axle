@@ -717,6 +717,9 @@ claude_cmd() {
   [ -n "$bin" ] || { echo "Chưa cài Claude Code trên máy này (npm i -g @anthropic-ai/claude-code, rồi đăng nhập một lần)" >&2; exit 1; }
   while [ $# -gt 0 ]; do case "$1" in --tiep) tiep=--continue ;; --dong) dong=1 ;; *) hoi+=("$1") ;; esac; shift; done
   [ "${#hoi[@]}" -gt 0 ] || { echo 'axle claude "câu hỏi" [--tiep] [--dong]' >&2; exit 2; }
+  # Token dài hạn cho máy (claude setup-token, 1 năm): máy chạy Claude không cần đăng nhập tương tác — Hỏi Axle từ app
+  # và Bàn đều đi qua đây. Tệp 0600 trong nhà chủ (~/.config/axle/claude.env: CLAUDE_CODE_OAUTH_TOKEN=…), không root.
+  [ -r "$HOME/.config/axle/claude.env" ] && { set -a; . "$HOME/.config/axle/claude.env"; set +a; }
   # Không --bare: cần OAuth của gói thuê bao. Không --dangerously-skip-permissions: chính cái cổng là điểm.
   # Dặn thêm (Bi 21/9: "dùng Claude có cần tay gì đâu"): có lệnh/API thì dùng lệnh; chỉ động cửa sổ khi không còn đường.
   local opts=(--mcp-config "$CLAUDE_MCP_CFG"
