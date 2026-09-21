@@ -278,3 +278,6 @@ trạng thái (running/rejected), không biết chủ đã bấm "1 giờ" hay "
 luon/khong khi có chữ quyết định). Bỏ việc tự duyệt (không phải quyết định mới) và hết hạn (chủ không quyết).
 Hôm nay chỉ xuất; chưa có model nào đọc — quyết định laya đã chốt: đủ ≥1.000 nhãn mới cân nhắc fine-tune
 (`reference-laya`). Không byte nào rời máy.
+
+**Sổ trên điện thoại** (0.1.121 + app): tab Lịch sử thành **Sổ** — app hỏi `query so`, máy trả cùng nội dung công bố cho
+Bàn (bỏ pending, cắt vừa hộp ≤64KB); danh sách cục bộ "điện thoại này đã nhận" giữ ở dưới cho lúc mất mạng.

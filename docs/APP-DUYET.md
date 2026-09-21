@@ -45,8 +45,8 @@ info = "axle-box-v1")`; nội dung = ChaCha20-Poly1305(k, nonce 12 byte ngẫu n
 | máy → app | `update` | `id`, `state` (đã quyết ở kênh khác / hết hạn / xong) |
 | app → máy | `decision` | `id`, `hash`, `decision` (`a` lần này · `h` 1 giờ · `l` luôn · `r` từ chối), `ts`, **`dsig`** |
 | app → máy | `stop` / `start` | `agent`, `ts`, **`dsig`** (dừng khẩn cấp / mở lại) |
-| app → máy | `query` | `what` (`status`) — hỏi, chỉ đọc, không cần chữ ký duyệt |
-| máy → app | `state` | `what`, `data` — trả lời câu hỏi trên |
+| app → máy | `query` | `what` (`status` · `so`) — hỏi, chỉ đọc, không cần chữ ký duyệt |
+| máy → app | `state` | `what`, `data` — trả lời câu hỏi trên. `so` (từ 0.1.121): `host`, `homNay` {chu_duyet, tu_duyet, tu_choi, het_han}, `agents`, `so` [~40 việc: id, luc, agent, action, viec (một dòng, KHÔNG có lệnh đầy đủ), tu_duyet, quyet_dinh a/h/l/r, via, ket_qua, exitCode] — cùng nội dung bộ duyệt công bố cho Bàn, bỏ pending, cắt cho vừa hộp (`approve/mota.js banChoApp`, thử `approve/test-mota.mjs`) |
 | app → máy | `task` | `task`, `ts`, **`dsig`** — việc nhanh trong danh sách đóng của máy |
 | máy → app | `task-result` | `task`, `ok`, `text` |
 | app → máy | `shell` | `cmd`, `ts`, **`dsig`** — gõ lệnh; máy mặc định TẮT đường này |

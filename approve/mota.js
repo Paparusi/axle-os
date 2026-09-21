@@ -35,3 +35,15 @@ export function gopNhatKy(dong) {
   }
   return [...m.values()].sort((a, b) => Date.parse(b.luc) - Date.parse(a.luc));
 }
+
+// Bản cho app (`query so`): bỏ `pending` (app đã nhận từng yêu cầu bằng tin `request` rồi) và cắt `so` cho vừa
+// hộp chuyển tiếp (≤64KB kể cả phong bì mã hoá — giữ dưới 48KB cho chắc). Cắt một nửa mỗi vòng tới khi vừa.
+export function banChoApp(ban, gioiHan = 48000) {
+  const { pending, ...rest } = ban;   // eslint-disable-line no-unused-vars
+  let so = rest.so ?? [];
+  for (;;) {
+    const data = { ...rest, so };
+    if (Buffer.byteLength(JSON.stringify(data)) <= gioiHan || so.length === 0) return data;
+    so = so.slice(0, Math.floor(so.length / 2));
+  }
+}

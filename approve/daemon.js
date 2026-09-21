@@ -17,7 +17,7 @@ import { hostname } from 'node:os';
 import { addRule, addSession, autoLabel, canRemember, canSession, describeRule, findAuto, keyboard, loadRules, prune,
   saveRules, tierLine, tierOf, writeDurable } from './rules.js';
 import { buildDigest } from './digest.js';
-import { gopNhatKy } from './mota.js';
+import { banChoApp, gopNhatKy } from './mota.js';
 import { createAppChannel } from './app-channel.js';
 import { machineState } from './machine-state.js';
 import { requestHash } from '../app/proto.js';
@@ -454,8 +454,10 @@ const app = createAppChannel({
     v.sau?.();
   },
   async onQuery(d, what) {
-    if (what !== 'status') return log({ warn: `app: ${d.name} hỏi chuyện lạ ${what}` });
-    app.sendTo(d.id, { type: 'state', what: 'status', data: await machineState() });
+    if (what === 'status') return app.sendTo(d.id, { type: 'state', what: 'status', data: await machineState() });
+    // Tab Sổ trên app: cùng nội dung công bố cho Bàn (số hôm nay + ~40 việc đã hỏi chủ), bỏ pending, cắt vừa hộp
+    if (what === 'so') return app.sendTo(d.id, { type: 'state', what: 'so', data: banChoApp(layBan()) });
+    log({ warn: `app: ${d.name} hỏi chuyện lạ ${what}` });
   },
   async onShell(d, cmd) {
     const t = terminalCfg();
@@ -733,14 +735,17 @@ function docDuoiLog(toiDa = 262144) {
 }
 const soGanDay = (toiDa = 40) => gopNhatKy(docDuoiLog()).slice(0, toiDa).map(({ params, ...x }) => x);   // không đưa params (lệnh đầy đủ) ra tệp
 
-function publishBan() {
+function layBan() {
   const c = cfg();
   const pending = [...requests.values()].filter((r) => r.state === 'pending').map((r) => ({
     id: r.id, tier: tierOf(r), client: r.client, action: r.action, text: r.text,
     buttons: keyboard(r).flat().map((b) => b.callback_data.slice(-1)).join(''),
     ageSec: Math.round((Date.now() - r.created) / 1000), expires: new Date(r.created + c.expireSec * 1000).toISOString() }));
   const agents = agentList().map((a) => ({ ten: a.name, vai: a.role, user: a.user, tam_dung: a.suspended }));
-  const data = JSON.stringify({ ts: new Date().toISOString(), host: hostname(), pending, homNay: homNay(), agents, so: soGanDay() });
+  return { ts: new Date().toISOString(), host: hostname(), pending, homNay: homNay(), agents, so: soGanDay() };
+}
+function publishBan() {
+  const data = JSON.stringify(layBan());
   try {
     mkdirSync(path.dirname(BAN_FILE), { recursive: true, mode: 0o755 });
     const tmp = `${BAN_FILE}.tmp`;
