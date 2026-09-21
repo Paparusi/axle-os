@@ -9,7 +9,7 @@ from unittest import mock
 # gi giả: đủ để `import gi; gi.require_version; from gi.repository import …` đi qua, còn lớp GTK thì là MagicMock
 gi = types.ModuleType("gi"); gi.require_version = lambda *a: None
 rep = types.ModuleType("gi.repository")
-for n in ("Adw", "Gdk", "Gio", "GLib", "Gtk"):
+for n in ("Adw", "Gdk", "Gio", "GLib", "Gtk", "Pango"):
     m = mock.MagicMock(name=n)
     setattr(rep, n, m)
 # Lớp cơ sở phải là class thật để `class Trang(Adw.PreferencesPage)` định nghĩa được
@@ -27,6 +27,7 @@ def ok(c, m):
     if not c: fail += 1
 
 doc_ban, tom_tat_viec, doc_audit, goi_y_loi, tuoi, loi_chao, mo_ta_so = (g[k] for k in ("doc_ban", "tom_tat_viec", "doc_audit", "goi_y_loi", "tuoi", "loi_chao", "mo_ta_so"))
+md_lite = g["md_lite"]
 
 ok(doc_ban("") is None and doc_ban("{oops") is None and doc_ban("[]") is None, "ban.json rỗng / hỏng / sai kiểu → None (Bàn nói 'chưa đọc được', không giả vờ trống)")
 p, hn, ag, so = doc_ban(json.dumps({"pending": [], "homNay": {"chu_duyet": 1}, "agents": []}))
@@ -68,6 +69,13 @@ ok(s3[0] == "⚙" and "tự duyệt (phiên 1 giờ #3)" in s3[2], "sổ: tự d
 s4 = mo_ta_so({"id": "4", "luc": "rác", "agent": "x", "action": "run_command", "ket_qua": "expired"})
 ok(s4 == ("⌛", "run_command", "? · x · hết hạn, không chạy"), f"sổ: hết hạn, thiếu mô tả và giờ hỏng → vẫn ra dòng đọc được ({s4})")
 ok(mo_ta_so({"id": "5", "luc": now.isoformat(), "agent": "a", "viec": "v", "ket_qua": "failed", "exitCode": 2, "quyet_dinh": "a"})[2].endswith("lần này · lỗi (mã 2)"), "sổ: cho phép lần này, chạy lỗi mã 2")
+
+ok(md_lite("**Tóm tắt:** máy `axle-office` ổn\n") == [("Tóm tắt:", {"dam"}), (" máy ", set()), ("axle-office", {"ma"}), (" ổn", set())], "md_lite: đậm + mã giữa câu")
+ok(md_lite("## Hoạt động") == [("Hoạt động", {"dam"})], "md_lite: tiêu đề → đậm")
+ok(md_lite("- disk 8%") == [("• disk 8%", set())] and md_lite("  * con") == [("  • con", set())], "md_lite: đầu dòng → •")
+ok(md_lite("→ system_status") == [("→ system_status", {"mo"})] and md_lite("— xong (14,6 giây)")[0][1] == {"mo"}, "md_lite: dòng công cụ / xong → mờ")
+ok(md_lite("› tóm tắt hôm nay") == [("› tóm tắt hôm nay", {"dam"})], "md_lite: câu hỏi → đậm")
+ok(md_lite("**dở dang") == [("dở dang", {"dam"})] and md_lite("") == [], "md_lite: đậm không đóng vẫn ra chữ; dòng trống → rỗng")
 
 ok("đăng nhập Claude" in goi_y_loi("Error: Not logged in. Please run /login"), "lỗi chưa đăng nhập → chỉ cách đăng nhập")
 ok("chưa có Claude Code" in goi_y_loi("Chưa cài Claude Code trên máy này (npm …)"), "chưa cài → nói chưa cài")

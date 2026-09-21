@@ -22,12 +22,14 @@ import subprocess
 import sys
 import tempfile
 import threading
+import uuid
 
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
+gi.require_version("Pango", "1.0")
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
 AXLE = os.environ.get("AXLE_BIN", "/usr/local/bin/axle")
 BAN_FILE = os.environ.get("AXLE_BAN_FILE", "/run/axle/ban.json")
@@ -170,6 +172,44 @@ def doc_audit(dong, hom_nay, toi_da=5):
     return n, gan[-toi_da:]
 
 
+def md_lite(dong):
+    """Một dòng Claude trả về → [(chữ, tập tag)] cho TextView: **đậm**, `mã`, # tiêu đề → đậm, - đầu dòng → •,
+    "→ …"/"— xong" → mờ, "› câu hỏi" → đậm. Không phải Markdown đầy đủ — đủ để đọc được trên Bàn."""
+    s = dong.rstrip("\n")
+    if s.startswith("→ ") or s.startswith("— xong"):
+        return [(s, {"mo"})]
+    if s.startswith("› "):
+        return [(s, {"dam"})]
+    m = re.match(r"^#{1,6}\s+(.*)$", s)
+    if m:
+        return [(m.group(1), {"dam"})]
+    m = re.match(r"^(\s*)[-*]\s+(.*)$", s)
+    if m:
+        s = f"{m.group(1)}• {m.group(2)}"
+    ra, buf, dam, ma, i = [], "", False, False, 0
+    tags = lambda: {t for t, on in (("dam", dam), ("ma", ma)) if on}   # noqa: E731
+    while i < len(s):
+        if s.startswith("**", i):
+            if buf:
+                ra.append((buf, tags()))
+                buf = ""
+            dam = not dam
+            i += 2
+            continue
+        if s[i] == "`":
+            if buf:
+                ra.append((buf, tags()))
+                buf = ""
+            ma = not ma
+            i += 1
+            continue
+        buf += s[i]
+        i += 1
+    if buf:
+        ra.append((buf, tags()))
+    return ra
+
+
 def loi_chao(gio, ten):
     buoi = "Chào buổi sáng" if gio < 12 else ("Chào buổi chiều" if gio < 18 else "Chào buổi tối")
     return f"{buoi}, {ten}"
@@ -196,6 +236,7 @@ class CuaSo(Adw.ApplicationWindow):
         self.tabs = Adw.ViewStack()
         self.dang_lam = False        # đang chạy một việc "bảo Axle làm"
         self.co_cuoc = False         # đã có mạch hội thoại → lần sau nối tiếp (--tiep)
+        self.phien = str(uuid.uuid4())   # id cuộc riêng của Bàn (app có id khác) — không lẫn mạch với nhau
         self.tien_trinh = None
 
         css = Gtk.CssProvider()
@@ -495,7 +536,7 @@ class CuaSo(Adw.ApplicationWindow):
         self.them_ket_qua(f"› {cau}\n")
         self.lenh_trang_thai.set_label("Đang làm… việc hệ trọng sẽ hỏi bạn trước khi làm.")
         # --dong: chữ chảy ngay khi có + mỗi lần Claude dùng công cụ một dòng "→ …" (core/desktop/claude-dong.py)
-        args = [AXLE, "claude", cau, "--dong"] + (["--tiep"] if self.co_cuoc else [])
+        args = [AXLE, "claude", cau, "--dong", "--phien", self.phien] + (["--tiep"] if self.co_cuoc else [])
 
         def worker():
             try:
@@ -514,7 +555,17 @@ class CuaSo(Adw.ApplicationWindow):
 
     def them_ket_qua(self, chu):
         buf = self.ket_qua.get_buffer()
-        buf.insert(buf.get_end_iter(), chu)
+        if not getattr(self, "_tag_ok", False):     # tag tạo một lần: đậm / mã / mờ
+            tb = buf.get_tag_table()
+            for ten, kw in (("dam", {"weight": Pango.Weight.BOLD}), ("ma", {"family": "monospace"}), ("mo", {"foreground": "#8b93a1"})):
+                if not tb.lookup(ten):
+                    buf.create_tag(ten, **kw)
+            self._tag_ok = True
+        for dong in chu.splitlines(True):
+            for phan, tags in md_lite(dong):
+                buf.insert_with_tags_by_name(buf.get_end_iter(), phan, *sorted(tags)) if tags else buf.insert(buf.get_end_iter(), phan)
+            if dong.endswith("\n"):
+                buf.insert(buf.get_end_iter(), "\n")
         if chu.startswith("→ ") and self.dang_lam:          # dòng công cụ → cho thấy Claude đang làm tới đâu
             self.lenh_trang_thai.set_label(f"Đang: {chu[2:].strip()[:120]}")
         adj = self.ket_qua_cuon.get_vadjustment()
@@ -552,6 +603,7 @@ class CuaSo(Adw.ApplicationWindow):
 
     def cuoc_moi(self, *_):
         self.co_cuoc = False
+        self.phien = str(uuid.uuid4())
         self.nut_moi.set_visible(False)
         self.ket_qua.get_buffer().set_text("")
         self.ket_qua_cuon.set_visible(False)

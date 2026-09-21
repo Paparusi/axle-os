@@ -712,11 +712,18 @@ dangnhap_cmd() {
 #   --tiep: nối tiếp phiên trước (giữ mạch hội thoại).
 CLAUDE_MCP_CFG='{"mcpServers":{"axle":{"command":"/usr/local/bin/axle","args":["mcp","--as","claude"]}}}'
 claude_cmd() {
-  local bin tiep="" dong="" hoi=()
+  local bin tiep="" dong="" phien="" hoi=()
   for bin in "$HOME/.local/bin/claude" /usr/local/bin/claude /usr/bin/claude; do [ -x "$bin" ] && break; bin=""; done
   [ -n "$bin" ] || { echo "Chưa cài Claude Code trên máy này (npm i -g @anthropic-ai/claude-code, rồi đăng nhập một lần)" >&2; exit 1; }
-  while [ $# -gt 0 ]; do case "$1" in --tiep) tiep=--continue ;; --dong) dong=1 ;; *) hoi+=("$1") ;; esac; shift; done
-  [ "${#hoi[@]}" -gt 0 ] || { echo 'axle claude "câu hỏi" [--tiep] [--dong]' >&2; exit 2; }
+  while [ $# -gt 0 ]; do case "$1" in --tiep) tiep=1 ;; --dong) dong=1 ;; --phien) phien="${2:-}"; shift ;; *) hoi+=("$1") ;; esac; shift; done
+  [ "${#hoi[@]}" -gt 0 ] || { echo 'axle claude "câu hỏi" [--tiep] [--dong] [--phien <uuid>]' >&2; exit 2; }
+  # --phien <uuid>: mỗi CUỘC một id riêng (app một, Bàn một) — trước đây --tiep = --continue "cuộc gần nhất trong thư
+  # mục", Bàn và app hỏi chen nhau là lẫn mạch. Không --phien thì giữ nếp cũ.
+  local mach=()
+  if [ -n "$phien" ]; then
+    [[ "$phien" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || { echo "--phien phải là UUID chữ thường" >&2; exit 2; }
+    if [ -n "$tiep" ]; then mach=(--resume "$phien"); else mach=(--session-id "$phien"); fi
+  elif [ -n "$tiep" ]; then mach=(--continue); fi
   # Token dài hạn cho máy (claude setup-token, 1 năm): máy chạy Claude không cần đăng nhập tương tác — Hỏi Axle từ app
   # và Bàn đều đi qua đây. Tệp 0600 trong nhà chủ (~/.config/axle/claude.env: CLAUDE_CODE_OAUTH_TOKEN=…), không root.
   [ -r "$HOME/.config/axle/claude.env" ] && { set -a; . "$HOME/.config/axle/claude.env"; set +a; }
@@ -728,15 +735,15 @@ claude_cmd() {
   local opts=(--mcp-config "$CLAUDE_MCP_CFG"
     --permission-prompt-tool mcp__axle__duyet_quyen
     --allowedTools "Read,Grep,Glob,LS,WebFetch,WebSearch${ro:+,$ro}"
-    --append-system-prompt "Bạn đang chạy trên máy Axle của chủ. Việc ĐỌC thì cứ làm. Việc ghi tệp, chạy lệnh, xoá sẽ hiện lên điện thoại chủ để duyệt — nói ngắn gọn trước khi xin, đừng xin dồn dập, và bị từ chối thì đừng thử lại bằng cách khác. Có lệnh hay API thì dùng lệnh; chỉ động tới cửa sổ (tay_*) khi việc chỉ tồn tại dưới dạng cửa sổ: tài liệu đang mở chưa lưu, hộp thoại, ứng dụng không có lệnh.")
+    --append-system-prompt "Bạn đang chạy trên máy Axle của chủ. Việc ĐỌC thì cứ làm. Việc ghi tệp, chạy lệnh, xoá sẽ hiện lên điện thoại chủ để duyệt — nói ngắn gọn trước khi xin, đừng xin dồn dập, và bị từ chối thì đừng thử lại bằng cách khác. Có lệnh hay API thì dùng lệnh; chỉ động tới cửa sổ (tay_*) khi việc chỉ tồn tại dưới dạng cửa sổ: tài liệu đang mở chưa lưu, hộp thoại, ứng dụng không có lệnh. Trả lời bằng tiếng Việt, ngắn gọn, gạch đầu dòng khi liệt kê, đừng lặp lại câu hỏi; chủ đọc trên điện thoại.")
   # --dong (Bàn dùng): sự kiện JSON từng dòng → bộ lọc in chữ trả lời NGAY khi có + mỗi lần dùng công cụ một dòng "→".
   # </dev/null: claude chờ stdin 3 giây nếu thấy ống dẫn (đo 21/9) — Bàn/cron không có gì để đưa vào.
   if [ -n "$dong" ]; then
-    "$bin" -p "${hoi[*]}" $tiep --output-format stream-json --verbose "${opts[@]}" </dev/null \
+    "$bin" -p "${hoi[*]}" "${mach[@]}" --output-format stream-json --verbose "${opts[@]}" </dev/null \
       | /usr/bin/python3 /opt/axle/core/desktop/claude-dong.py || exit "${PIPESTATUS[0]}"
     exit 0
   fi
-  exec "$bin" -p "${hoi[*]}" $tiep "${opts[@]}" </dev/null
+  exec "$bin" -p "${hoi[*]}" "${mach[@]}" "${opts[@]}" </dev/null
 }
 
 desktop_cmd() {   # sudo axle desktop on|off|status — lớp giao diện (docs/DESKTOP.md)

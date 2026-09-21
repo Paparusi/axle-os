@@ -147,7 +147,8 @@ export function createAppChannel({ log, hostname, onDecision, onCommand, onHello
       if (!ok) { log({ warn: `app: câu hỏi từ ${d.name} sai chữ ký / lặp lại / quá giờ` }); return; }
       daLam.add(khoa);
       if (daLam.size > 200) daLam.delete(daLam.values().next().value);
-      onHoi?.(d, { cau: c.trim(), tiep: msg.tiep === true });
+      const phien = typeof msg.phien === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(msg.phien) ? msg.phien : null;
+      onHoi?.(d, { cau: c.trim(), tiep: msg.tiep === true, phien });
       return;
     }
     if (msg.type === 'stop' || msg.type === 'start') {

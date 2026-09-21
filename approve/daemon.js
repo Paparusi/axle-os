@@ -500,7 +500,7 @@ const app = createAppChannel({
   // Hỏi Axle từ app (chat, D11): chạy Claude Code trên máy bằng tài khoản chủ (`axle claude --dong`), cổng xin phép
   // là chính điện thoại này: đọc thì làm ngay, ghi/chạy/xoá đi qua duyet_quyen → rung điện thoại. Chữ chảy về app
   // từng khúc (hoi-chunk, gộp 0,7 giây một lần để không dội trạm), kết thúc bằng hoi-result.
-  async onHoi(d, { cau, tiep }) {
+  async onHoi(d, { cau, tiep, phien }) {
     const h = hoiCfg();
     if (!h.enabled) return app.sendTo(d.id, { type: 'hoi-result', ok: false, text: 'Hỏi Axle đang tắt trên máy. Bật: sudo axle app hoi on' });
     if (dangHoi.has(d.id)) return app.sendTo(d.id, { type: 'hoi-result', ok: false, text: 'Đang trả lời câu trước — bấm Dừng hoặc chờ xong' });
@@ -508,8 +508,8 @@ const app = createAppChannel({
     // 30 phút: Claude có thể phải chờ chủ duyệt (10 phút/yêu cầu) rồi làm tiếp. Không qua bash -l: bị giết thì bash in
     // "Session terminated, killing shell…" lên app (thấy 21/9); axle tự tìm claude ở ~/.local/bin, không cần profile.
     const giay = Math.min(Math.max(Number(h.timeoutSec ?? 1800), 30), 3600);
-    log({ app: 'hỏi Axle', device: d.name, cau: cap(cau, 300), tiep });
-    const p = spawn('timeout', ['-k', '5', String(giay), 'runuser', '-u', owner, '--', AXLE, 'claude', cau, '--dong', ...(tiep ? ['--tiep'] : [])],
+    log({ app: 'hỏi Axle', device: d.name, cau: cap(cau, 300), tiep, ...(phien ? { phien } : {}) });
+    const p = spawn('timeout', ['-k', '5', String(giay), 'runuser', '-u', owner, '--', AXLE, 'claude', cau, '--dong', ...(tiep ? ['--tiep'] : []), ...(phien ? ['--phien', phien] : [])],
       { cwd: `/home/${owner}`, env: { ...process.env, HOME: `/home/${owner}` }, stdio: ['ignore', 'pipe', 'pipe'] });
     dangHoi.set(d.id, p);
     let buf = ''; let dau = ''; let tong = 0; let timer = null; let cat = false;

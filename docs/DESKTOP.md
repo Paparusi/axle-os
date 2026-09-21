@@ -314,3 +314,8 @@ Máy chưa đăng nhập Claude (OAuth) thì app nhận đúng câu: *"Máy chư
 Terminal, gõ claude và đăng nhập một lần."*
 
 Thử: vector Node ⇄ Swift thêm hộp `hoi` (6 hộp) + chuỗi `hoiString`; CI iOS biên dịch HoiView.
+
+**Nâng cấp 21/9 tối (0.1.129):** mỗi cuộc có **id phiên riêng** (`axle claude --phien <uuid>`: app một, Bàn một — trước
+đây `--tiep` = `--continue` "cuộc gần nhất trong thư mục", hai bên hỏi chen nhau là lẫn mạch); Claude được dặn trả lời
+tiếng Việt ngắn, gạch đầu dòng; app dựng Markdown gọn (đậm, mã, tiêu đề, đầu dòng), nhớ cuộc chat khi tắt app, có gợi
+ý câu hỏi; Bàn dựng đậm/mã/mờ bằng tag TextView (`md_lite`, thử trong gui-logic-smoke).
