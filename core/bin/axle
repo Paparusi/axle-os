@@ -61,7 +61,7 @@ sudo axle app devices | remove <id>
 sudo axle duyet [<id> a|h|l|r] · axle duyet --json   duyệt tại máy · việc đang chờ (Bàn Axle đọc)
 axle tay cuaso|chup|bam N|go N "chữ"|doc N|mo <app>   tay cho mọi ứng dụng: bảng phần tử qua trợ năng, không tiêm phím
 sudo axle phanxa xuat [--tu ngày]   xuất nhãn (chủ đã quyết gì) cho lớp phản xạ
-axle brain ds|tim <từ>|mo           Bộ não Axle (~/Axle/Brain): tài liệu gửi lên + wiki Claude tự bảo trì
+axle brain ds|tim <từ>|mo|lint      Bộ não Axle (~/Axle/Brain): tài liệu gửi lên + wiki Claude tự bảo trì; lint = dọn đêm
                          xem và duyệt yêu cầu ngay tại máy (dùng được cả khi mọi kênh khác hỏng)
 axle claude "câu hỏi" [--tiep] [--dong]
                          Claude Code chạy TRÊN máy này: đọc/tìm thì làm ngay, còn ghi tệp/chạy lệnh
@@ -736,7 +736,7 @@ claude_cmd() {
   local opts=(--mcp-config "$CLAUDE_MCP_CFG"
     --permission-prompt-tool mcp__axle__duyet_quyen
     --allowedTools "Read,Grep,Glob,LS,WebFetch,WebSearch${ro:+,$ro},mcp__axle__brain_ghi"
-    --append-system-prompt "Bạn đang chạy trên máy Axle của chủ. Việc ĐỌC thì cứ làm. Việc ghi tệp, chạy lệnh, xoá sẽ hiện lên điện thoại chủ để duyệt — nói ngắn gọn trước khi xin, đừng xin dồn dập, và bị từ chối thì đừng thử lại bằng cách khác. Có lệnh hay API thì dùng lệnh; chỉ động tới cửa sổ (tay_*) khi việc chỉ tồn tại dưới dạng cửa sổ: tài liệu đang mở chưa lưu, hộp thoại, ứng dụng không có lệnh. Trả lời bằng tiếng Việt, ngắn gọn, gạch đầu dòng khi liệt kê, đừng lặp lại câu hỏi; chủ đọc trên điện thoại. BỘ NÃO AXLE (~/Axle/Brain): câu hỏi về tài liệu, khách hàng, dự án, quyết định cũ → gọi brain_index trước rồi brain_tim/brain_doc, trả lời kèm tên trang/tệp; có tài liệu mới trong raw/ → sau khi trả lời hãy INGEST theo QUY-UOC.md bằng brain_ghi (trang wiki/sources, trang thực thể liên quan, dòng index.md và log.md).")
+    --append-system-prompt "Bạn đang chạy trên máy Axle của chủ. Việc ĐỌC thì cứ làm. Việc ghi tệp, chạy lệnh, xoá sẽ hiện lên điện thoại chủ để duyệt — nói ngắn gọn trước khi xin, đừng xin dồn dập, và bị từ chối thì đừng thử lại bằng cách khác. Có lệnh hay API thì dùng lệnh; chỉ động tới cửa sổ (tay_*) khi việc chỉ tồn tại dưới dạng cửa sổ: tài liệu đang mở chưa lưu, hộp thoại, ứng dụng không có lệnh. Trả lời bằng tiếng Việt, ngắn gọn, gạch đầu dòng khi liệt kê, đừng lặp lại câu hỏi; chủ đọc trên điện thoại. BỘ NÃO AXLE (~/Axle/Brain): câu hỏi về tài liệu, khách hàng, dự án, quyết định cũ → gọi brain_index trước rồi brain_tim/brain_doc, trả lời kèm tên trang/tệp; có tài liệu mới trong raw/ → sau khi trả lời hãy INGEST theo QUY-UOC.md bằng brain_ghi (trang wiki/sources, trang thực thể liên quan, dòng index.md và log.md); chủ nói ra điều mới đáng nhớ (khách hàng, hẹn, số liệu, quyết định) → ghi vào trang thực thể/quyết định liên quan + một dòng log.md, ngắn gọn, không hỏi lại.")
   # --dong (Bàn dùng): sự kiện JSON từng dòng → bộ lọc in chữ trả lời NGAY khi có + mỗi lần dùng công cụ một dòng "→".
   # </dev/null: claude chờ stdin 3 giây nếu thấy ống dẫn (đo 21/9) — Bàn/cron không có gì để đưa vào.
   if [ -n "$dong" ]; then
@@ -880,6 +880,10 @@ brain_cmd() {   # axle brain [ds|tim <từ khoá>|mo|duong] — Bộ não Axle c
             AXLE_BRAIN_DIR="$B" /usr/bin/node -e 'import("/opt/axle/mcp/brain.js").then((b) => { for (const x of b.tim(process.argv[1])) console.log(`${x.duong}  (${x.diem})\n  ${x.trich.join("\n  ")}`); })' "${*:2}" ;;
     mo)     xdg-open "$B" >/dev/null 2>&1 & echo "Đã mở $B" ;;
     duong)  echo "$B" ;;
+    lint)   # dọn đêm (timer axle-brain-lint 21:30): Claude làm LINT theo QUY-UOC — link hỏng, trang mồ côi, trang mỏng, thiếu trang
+            if [ "$(find "$B/wiki" -name '*.md' ! -name index.md ! -name log.md | wc -l)" = 0 ]; then echo "Bộ não chưa có trang nào — chưa có gì để dọn"; exit 0; fi
+            [ -r "$HOME/.config/axle/claude.env" ] || { echo "Máy chưa có token Claude (~/.config/axle/claude.env) — bỏ qua dọn đêm"; exit 0; }
+            exec timeout 1500 /usr/local/bin/axle claude "Làm LINT Bộ não Axle theo QUY-UOC.md (gọi brain_index trước): kiểm [[link]] hỏng, trang mồ côi, trang mỏng dưới 3 câu, khái niệm/thực thể được nhắc mà chưa có trang, nội dung cũ hay mâu thuẫn. Sửa được thì sửa bằng brain_ghi (không đụng raw/), rồi ghi một dòng tóm tắt vào wiki/log.md với dấu thời gian. Cuối cùng trả lời 3 dòng: đã sửa gì, còn gì cần chủ quyết." --dong ;;
     *)      echo "axle brain ds | tim <từ khoá> | mo | duong" >&2; exit 2 ;;
   esac
 }

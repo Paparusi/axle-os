@@ -330,6 +330,32 @@ if [ "$(systemctl get-default 2>/dev/null)" = graphical.target ] && [ -x /usr/lo
     || echo "  ! lớp giao diện chưa làm mới được — chạy tay: sudo axle desktop on"
 fi
 
+step "Bộ não Axle: dọn đêm"
+# 21:30 mỗi ngày, bằng tài khoản chủ (không cần ai đăng nhập): Claude LINT wiki theo QUY-UOC (link hỏng, trang mồ côi,
+# trang mỏng). Không có Brain / không có token thì lệnh tự thoát 0 — timer vô hại trên máy chưa dùng Brain.
+cat > /etc/systemd/system/axle-brain-lint.service <<EOF
+[Unit]
+Description=Axle Brain — dọn đêm (LINT wiki theo QUY-UOC)
+[Service]
+Type=oneshot
+User=$AXLE_USER
+WorkingDirectory=/home/$AXLE_USER
+Environment=HOME=/home/$AXLE_USER
+ExecStart=/usr/local/bin/axle brain lint
+EOF
+cat > /etc/systemd/system/axle-brain-lint.timer <<'EOF'
+[Unit]
+Description=Axle Brain — dọn đêm 21:30
+[Timer]
+OnCalendar=*-*-* 21:30:00
+Persistent=false
+RandomizedDelaySec=300
+[Install]
+WantedBy=timers.target
+EOF
+systemctl daemon-reload
+systemctl enable --now axle-brain-lint.timer >/dev/null 2>&1 && echo "  axle-brain-lint.timer: 21:30 hằng ngày (chưa có Brain/token thì tự bỏ qua)"
+
 snapper -c root create -t single -c number -d "axle provision $(cat /etc/axle/version)" >/dev/null
 sync   # mất điện ngay sau khi dựng máy thì các file vừa ghi vẫn còn nguyên
 step "Xong. Việc còn lại: axle net up"

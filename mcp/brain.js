@@ -18,24 +18,25 @@ export function coBrain() {
   try { return !userInfo().username.startsWith('ag-'); } catch { return true; }
 }
 
-export function khoiTao() {
-  if (existsSync(path.join(BRAIN, 'QUY-UOC.md'))) return;
-  if (existsSync(INIT)) execFileSync('bash', [INIT, BRAIN], { stdio: 'ignore' });
-  else mkdirSync(path.join(BRAIN, 'wiki'), { recursive: true });
+// Mọi hàm nhận `dir` (mặc định BRAIN của tài khoản đang chạy) — bộ duyệt chạy root thì chỉ vào nhà chủ.
+export function khoiTao(dir = BRAIN) {
+  if (existsSync(path.join(dir, 'QUY-UOC.md'))) return;
+  if (existsSync(INIT)) execFileSync('bash', [INIT, dir], { stdio: 'ignore' });
+  else mkdirSync(path.join(dir, 'wiki'), { recursive: true });
 }
 
 // Đường dẫn tương đối trong Brain → tuyệt đối, chặn leo thư mục; ghi=true → chỉ wiki/*.md
-export function duongAnToan(p, { ghi = false } = {}) {
+export function duongAnToan(p, { ghi = false, dir = BRAIN } = {}) {
   const rel = String(p ?? '').replace(/\\/g, '/').replace(/^\.\//, '');
   if (!rel || rel.startsWith('/') || rel.split('/').includes('..')) throw new Error('Đường dẫn phải tương đối trong Brain, ví dụ wiki/sources/hop-dong-abc.md');
-  const abs = path.resolve(BRAIN, rel);
-  if (!abs.startsWith(BRAIN + path.sep)) throw new Error('Ngoài Brain');
-  if (ghi && !(abs.startsWith(path.join(BRAIN, 'wiki') + path.sep) && abs.endsWith('.md'))) throw new Error('Chỉ ghi được trang .md trong wiki/ (raw/ là bất biến)');
+  const abs = path.resolve(dir, rel);
+  if (!abs.startsWith(dir + path.sep)) throw new Error('Ngoài Brain');
+  if (ghi && !(abs.startsWith(path.join(dir, 'wiki') + path.sep) && abs.endsWith('.md'))) throw new Error('Chỉ ghi được trang .md trong wiki/ (raw/ là bất biến)');
   return abs;
 }
 
-export function doc(p, { toiDa = 60_000 } = {}) {
-  const abs = duongAnToan(p);
+export function doc(p, { toiDa = 60_000, dir = BRAIN } = {}) {
+  const abs = duongAnToan(p, { dir });
   const st = statSync(abs);
   if (st.isDirectory()) return readdirSync(abs).map((f) => `${f}${statSync(path.join(abs, f)).isDirectory() ? '/' : ''}`).sort().join('\n');
   if (st.size > MAX_DOC) throw new Error(`Tệp ${(st.size / 1048576).toFixed(1)}MB — quá 2MB, đọc bản đã đổi (.doi/) hoặc dùng brain_tim`);
@@ -56,16 +57,17 @@ function* tepChu(dir, depth = 0) {
 }
 
 // Tìm theo từ khoá (không phân biệt hoa thường, mỗi từ đếm riêng) → xếp theo số lần trúng, kèm 2 dòng trích mỗi tệp
-export function tim(tuKhoa, { toiDa = 12 } = {}) {
+export function tim(tuKhoa, { toiDa = 12, dir = BRAIN } = {}) {
   const tu = String(tuKhoa).toLowerCase().split(/\s+/).filter((x) => x.length >= 2).slice(0, 8);
   if (!tu.length) throw new Error('Cho ít nhất một từ khoá');
   const ra = [];
-  for (const p of tepChu(BRAIN)) {
+  if (!existsSync(dir)) return ra;
+  for (const p of tepChu(dir)) {
     const s = readFileSync(p, 'utf8');
     const thap = s.toLowerCase();
     let diem = 0;
     for (const t of tu) { let i = -1; while ((i = thap.indexOf(t, i + 1)) !== -1 && diem < 500) diem++; }
-    const rel = path.relative(BRAIN, p);
+    const rel = path.relative(dir, p);
     if (tu.some((t) => rel.toLowerCase().includes(t))) diem += 5;
     if (!diem) continue;
     const dong = s.split('\n');
@@ -76,23 +78,35 @@ export function tim(tuKhoa, { toiDa = 12 } = {}) {
   return ra.slice(0, toiDa);
 }
 
-export function ghi(p, noiDung, cheDo = 'ghi') {
-  const abs = duongAnToan(p, { ghi: true });
+export function ghi(p, noiDung, cheDo = 'ghi', dir = BRAIN) {
+  const abs = duongAnToan(p, { ghi: true, dir });
   if (typeof noiDung !== 'string' || noiDung.length > 200_000) throw new Error('Nội dung phải là chuỗi ≤ 200.000 ký tự');
   mkdirSync(path.dirname(abs), { recursive: true });
   if (cheDo === 'noi') appendFileSync(abs, (existsSync(abs) && !readFileSync(abs, 'utf8').endsWith('\n') ? '\n' : '') + noiDung + (noiDung.endsWith('\n') ? '' : '\n'));
   else writeFileSync(abs, noiDung);
-  const rel = path.relative(BRAIN, abs);
+  const rel = path.relative(dir, abs);
   // git giữ lịch sử — chạy nền, hỏng thì bỏ (không có git cũng vẫn ghi được)
-  execFile('git', ['-C', BRAIN, 'add', '-A'], () => execFile('git', ['-C', BRAIN, 'commit', '-qm', `Claude: ${cheDo} ${rel}`], () => {}));
+  execFile('git', ['-C', dir, 'add', '-A'], () => execFile('git', ['-C', dir, 'commit', '-qm', `Claude: ${cheDo} ${rel}`], () => {}));
   return rel;
 }
 
-export function taiLieu(toiDa = 50) {
-  const f = path.join(BRAIN, 'raw/.index.jsonl');
+export function taiLieu(toiDa = 50, dir = BRAIN) {
+  const f = path.join(dir, 'raw/.index.jsonl');
   if (!existsSync(f)) return [];
   return readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } })
     .filter(Boolean).slice(-toiDa).reverse();
+}
+
+// Gói Bộ não cho app (`query brain`): danh mục, tài liệu gần nhất, nhật ký gần nhất, đếm — cắt cho vừa hộp trạm (≤48KB)
+export function choApp(dir = BRAIN) {
+  const co = existsSync(path.join(dir, 'QUY-UOC.md'));
+  const cat = (s, n) => (s.length > n ? `${s.slice(0, n)}\n…` : s);
+  const dem = (d, loc) => { let n = 0; try { for (const f of readdirSync(d)) { const p = path.join(d, f); const st = statSync(p); if (st.isDirectory()) n += f.endsWith('.doi') ? 0 : dem(p, loc); else if (loc(f)) n++; } } catch { /* rỗng */ } return n; };
+  if (!co) return { co: false, index: '', log: [], tai_lieu: [], so_tep: 0, so_trang: 0 };
+  const log = (() => { try { return readFileSync(path.join(dir, 'wiki/log.md'), 'utf8').split('\n').filter((l) => l.startsWith('- ')).slice(-20).reverse(); } catch { return []; } })();
+  return { co: true, index: cat((() => { try { return readFileSync(path.join(dir, 'wiki/index.md'), 'utf8'); } catch { return ''; } })(), 20_000),
+    log, tai_lieu: taiLieu(30, dir).map((t) => ({ ten: t.ten, luc: t.luc, cau: String(t.cau || '').slice(0, 100), duong: t.duong })),
+    so_tep: dem(path.join(dir, 'raw'), (f) => !f.startsWith('.')), so_trang: dem(path.join(dir, 'wiki'), (f) => f.endsWith('.md')) };
 }
 
 export function register(tool) {

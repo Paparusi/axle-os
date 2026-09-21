@@ -18,6 +18,7 @@ import { addRule, addSession, autoLabel, canRemember, canSession, describeRule, 
   saveRules, tierLine, tierOf, writeDurable } from './rules.js';
 import { buildDigest } from './digest.js';
 import { banChoApp, gopNhatKy, lenhCongCu, tenTepAnToan } from './mota.js';
+import { choApp as brainChoApp, tim as brainTim } from '../mcp/brain.js';
 import { createAppChannel } from './app-channel.js';
 import { machineState } from './machine-state.js';
 import { requestHash } from '../app/proto.js';
@@ -472,9 +473,19 @@ const app = createAppChannel({
     log({ app: 'việc nhanh xong', task, ok, ...(r.byte ? { anhByte: r.byte } : {}), ...(ok ? {} : { output: cap(r.output.trim(), 300) }) });
     v.sau?.();
   },
-  async onQuery(d, what) {
+  async onQuery(d, what, msg) {
     log({ app: `hỏi ${what}`, device: d.name });   // soi được app hỏi gì (bản nào) từ nhật ký, khỏi đoán
     if (what === 'status') return app.sendTo(d.id, { type: 'state', what: 'status', data: await machineState() });
+    // Bộ não Axle cho app (nút 📚 trong Hỏi Axle): danh mục + tài liệu + nhật ký; brain-tim = tìm từ khoá. Đọc thẳng
+    // nhà chủ (bộ duyệt là root) — chỉ đọc, chỉ trả về điện thoại đã ghép.
+    const brainDir = `/home/${ownerUser()}/Axle/Brain`;
+    if (what === 'brain') { try { return app.sendTo(d.id, { type: 'state', what: 'brain', data: brainChoApp(brainDir) }); } catch (e) { return app.sendTo(d.id, { type: 'state', what: 'brain', data: { co: false, loi: e.message } }); } }
+    if (what === 'brain-tim') {
+      const tk = String(msg?.tu_khoa || '').slice(0, 200);
+      let ket_qua = [];
+      try { ket_qua = tk.trim().length >= 2 ? brainTim(tk, { dir: brainDir, toiDa: 15 }) : []; } catch (e) { log({ warn: `brain-tim: ${e.message}` }); }
+      return app.sendTo(d.id, { type: 'state', what: 'brain-tim', data: { tu_khoa: tk, ket_qua } });
+    }
     // Tab Sổ trên app: cùng nội dung công bố cho Bàn (số hôm nay + ~40 việc đã hỏi chủ), bỏ pending, cắt vừa hộp
     if (what === 'so') return app.sendTo(d.id, { type: 'state', what: 'so', data: banChoApp(layBan()) });
     log({ warn: `app: ${d.name} hỏi chuyện lạ ${what}` });

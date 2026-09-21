@@ -360,3 +360,10 @@ Thử: `node mcp/test-brain.mjs` (15 ca: dựng, chặn đường dẫn lạ, kh
 index tài liệu). **Không phải NotebookLM:** không embedding, không app riêng — trang Markdown người đọc được, Claude
 vừa viết vừa đọc; cần tìm ngữ nghĩa thì thêm sau. Notion: có thể soi gương sang một database Notion khi Bi đưa token
 (chưa làm).
+
+**Bộ não sống (21/9 đêm, 0.1.136 + app):** (1) app: nút 📚 trong Hỏi Axle → `query brain` (danh mục, tài liệu đã gửi,
+nhật ký, đếm) và `query brain-tim` (tìm từ khoá; máy chạy `brain.tim` trong nhà chủ, chỉ đọc) — bấm một tài liệu / kết
+quả là điền sẵn câu hỏi về nó; (2) Claude được dặn ghi vào Brain cả khi chủ **nói** ra điều đáng nhớ (khách, hẹn, số
+liệu, quyết định), không chỉ khi có tệp; (3) **dọn đêm**: `axle brain lint` = Claude làm LINT theo QUY-UOC (link hỏng,
+trang mồ côi, trang mỏng, thiếu trang, sửa được thì sửa, ghi log) — timer hệ thống `axle-brain-lint.timer` 21:30 chạy
+bằng tài khoản chủ, không cần ai đăng nhập; chưa có Brain/token thì tự thoát 0.
