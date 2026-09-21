@@ -163,7 +163,9 @@ export function kiem(dir = BRAIN) {
 
 // ĐỒ THỊ liên kết wiki (app vẽ): nút = trang (slug, tiêu đề, loại), cạnh = [[link]] (một cạnh cho mỗi cặp); link tới
 // trang chưa có → nút loại "thieu" để nhìn thấy lỗ hổng. index/log không vẽ (là mục lục, nối tới tất cả).
-export function doThi(dir = BRAIN, { toiDaNut = 400 } = {}) {
+// Trả về đồ thị cho app: nút = trang, cạnh = [[link]] gộp hai chiều. Gói phải lọt hộp trạm (64KB đã mã hoá) → giữ
+// ≤ toiDaByte JSON: quá thì giữ những trang NHIỀU liên kết nhất (cắt dần 20%), rồi bỏ cạnh chạm nút đã cắt.
+export function doThi(dir = BRAIN, { toiDaNut = 400, toiDaByte = 40_000 } = {}) {
   const wiki = path.join(dir, 'wiki');
   const nut = new Map();   // slug → { id, ten, loai, duong, mo_ta }
   const walk = (d) => { for (const f of readdirSync(d)) { const p = path.join(d, f); if (statSync(p).isDirectory()) walk(p); else if (f.endsWith('.md')) {
@@ -186,9 +188,18 @@ export function doThi(dir = BRAIN, { toiDaNut = 400 } = {}) {
       if (!canh.has(k)) canh.set(k, { a, b });
     }
   }
-  const nodes = [...nut.values()].slice(0, toiDaNut).map(({ noiDung, ...x }) => ({ ...x, so_link: [...canh.values()].filter((e) => e.a === x.id || e.b === x.id).length }));
-  const co = new Set(nodes.map((n) => n.id));
-  return { nodes, edges: [...canh.values()].filter((e) => co.has(e.a) && co.has(e.b)) };
+  const bac = new Map();
+  for (const e of canh.values()) { bac.set(e.a, (bac.get(e.a) || 0) + 1); bac.set(e.b, (bac.get(e.b) || 0) + 1); }
+  const tatCa = [...nut.values()].map(({ noiDung, ...x }) => ({ ...x, so_link: bac.get(x.id) || 0 }))
+    .sort((x, y) => y.so_link - x.so_link || (x.loai === 'thieu') - (y.loai === 'thieu') || x.ten.localeCompare(y.ten, 'vi'));
+  let n = Math.min(toiDaNut, tatCa.length);
+  for (;;) {
+    const nodes = tatCa.slice(0, n);
+    const co = new Set(nodes.map((x) => x.id));
+    const g = { nodes, edges: [...canh.values()].filter((e) => co.has(e.a) && co.has(e.b)) };
+    if (n <= 20 || JSON.stringify(g).length <= toiDaByte) { if (n < tatCa.length) g.bo_bot = tatCa.length - n; return g; }
+    n = Math.floor(n * 0.8);
+  }
 }
 
 // Gói Bộ não cho app (`query brain`): danh mục, tài liệu gần nhất, nhật ký gần nhất, đếm — cắt cho vừa hộp trạm (≤48KB)

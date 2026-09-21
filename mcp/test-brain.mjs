@@ -65,6 +65,13 @@ try {
   ok(g.edges.some((e) => [e.a, e.b].sort().join('|') === 'cong-ty-abc|hop-dong-abc-2026-09') && g.edges.filter((e) => [e.a, e.b].sort().join('|') === 'cong-ty-abc|hop-dong-abc-2026-09').length === 1, 'doThi: cạnh hai chiều gộp một (A→B và B→A)');
   ok(g.nodes.find((n) => n.id === 'nguoi-lien-he-lan')?.loai === 'thieu' && !ids.includes('x-y'), 'doThi: link tới trang chưa có → nút loại thieu (link chỉ trong index thì không vẽ)');
   ok(g.nodes.find((n) => n.id === 'cong-ty-abc')?.so_link === 3, 'doThi: đếm số link mỗi nút');
+  ok(g.bo_bot === undefined && g.nodes[0].id === 'cong-ty-abc', 'doThi: nhỏ thì không cắt; nút nhiều link đứng đầu');
+  for (let i = 0; i < 350; i++) writeFileSync(path.join(b.BRAIN, `wiki/concepts/kn-${i}.md`), `---\ntitle: Khái niệm số ${i} với cái tên khá là dài để nặng gói\ntype: concept\n---\n${'Mô tả dài dòng đủ một trăm hai mươi ký tự cho mỗi trang. '.repeat(4)} [[cong-ty-abc]]`);
+  const g2 = b.doThi();
+  const kb = JSON.stringify(g2).length;
+  ok(kb <= 40_000 && g2.bo_bot > 0 && g2.nodes.length + g2.bo_bot === 350 + 5, `doThi: 355 trang → gói ${kb} byte ≤ 40KB, bỏ bớt ${g2.bo_bot} trang ít link`);
+  ok(g2.nodes[0].id === 'cong-ty-abc' && g2.nodes[0].so_link === 353 && g2.edges.every((e) => g2.nodes.some((n) => n.id === e.a) && g2.nodes.some((n) => n.id === e.b)), 'doThi: giữ trang nhiều link nhất, cạnh không chạm nút đã cắt');
+  ok(b.doThi(b.BRAIN, { toiDaNut: 30 }).nodes.length === 30, 'doThi: toiDaNut vẫn có hiệu lực');
 } finally {
   rmSync(D, { recursive: true, force: true });
 }
