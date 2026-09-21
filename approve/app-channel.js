@@ -2,7 +2,7 @@
 // nhận quyết định và TỰ KIỂM chữ ký P-256 (khoá trong chip điện thoại) — trạm chuyển tiếp chỉ chở hộp đã mã hoá.
 import { existsSync, readFileSync } from 'node:fs';
 import crypto from 'node:crypto';
-import { b64u, commandString, decisionString, idOf, newKeys, openMsg, p256Verify, qrEncode, relayHeaders, requestHash,
+import { b64u, commandString, decisionString, hoiString, idOf, newKeys, openMsg, p256Verify, qrEncode, relayHeaders, requestHash,
   sas, sealMsg, shellString, sha256, taskString } from '../app/proto.js';
 import { writeDurable } from './rules.js';
 
@@ -12,7 +12,7 @@ const SKEW = 600_000;   // quyết định phải ký trong 10 phút
 
 const readJson = (f, dflt) => { try { return JSON.parse(readFileSync(f, 'utf8')); } catch { return dflt; } };
 
-export function createAppChannel({ log, hostname, onDecision, onCommand, onHello, onQuery, onTask, onShell }) {
+export function createAppChannel({ log, hostname, onDecision, onCommand, onHello, onQuery, onTask, onShell, onHoi }) {
   const cfg = () => readJson(CFG, {});
   const keysFile = `${DIR}/app-keys.json`; const devFile = `${DIR}/devices.json`; const stFile = `${DIR}/app-state.json`;
   let me = readJson(keysFile, null);
@@ -136,6 +136,18 @@ export function createAppChannel({ log, hostname, onDecision, onCommand, onHello
       daLam.add(khoa);
       if (daLam.size > 200) daLam.delete(daLam.values().next().value);
       onShell?.(d, c);
+      return;
+    }
+    // Hỏi Axle (chat) từ app: ký băm câu hỏi như gõ lệnh; máy chạy Claude với cầu xin phép (onHoi)
+    if (msg.type === 'hoi') {
+      const c = typeof msg.cau === 'string' ? msg.cau : '';
+      const khoa = `hoi|${msg.ts}`;
+      const ok = Number.isFinite(msg.ts) && Math.abs(Date.now() - msg.ts) <= SKEW && c.trim() && c.length <= 2000
+        && !daLam.has(khoa) && p256Verify(d.ds, hoiString(me.id, c, msg.ts), msg.dsig);
+      if (!ok) { log({ warn: `app: câu hỏi từ ${d.name} sai chữ ký / lặp lại / quá giờ` }); return; }
+      daLam.add(khoa);
+      if (daLam.size > 200) daLam.delete(daLam.values().next().value);
+      onHoi?.(d, { cau: c.trim(), tiep: msg.tiep === true });
       return;
     }
     if (msg.type === 'stop' || msg.type === 'start') {

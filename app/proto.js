@@ -82,6 +82,8 @@ export const commandString = (machineId, cmd, agent, ts) => `axle-command-v1|${m
 // Gõ lệnh từ app (mặc định TẮT — sudo axle app terminal on). Ký BĂM CỦA NỘI DUNG lệnh chứ không chỉ mốc giờ:
 // chữ ký chỉ đúng với đúng chuỗi lệnh đó, không tráo được lệnh sẽ chạy.
 export const shellString = (machineId, cmd, ts) => `axle-shell-v1|${machineId}|${b64u(sha256(cmd))}|${ts}`;
+// Hỏi Axle từ app (chat, D11): ký BĂM CÂU HỎI + mốc giờ như gõ lệnh — câu hỏi không tráo được, mỗi mốc giờ một lần.
+export const hoiString = (machineId, cau, ts) => `axle-hoi-v1|${machineId}|${b64u(sha256(cau))}|${ts}`;
 // Việc nhanh bấm thẳng từ app (khoá máy, chụp ảnh hệ thống, cập nhật, khởi động lại). Điện thoại đã ghép + ký
 // bằng khoá trong chip (Face ID) = mức tin cậy T3, nên máy làm luôn, không hỏi lại qua kênh duyệt.
 export const taskString = (machineId, task, ts) => `axle-task-v1|${machineId}|${task}|${ts}`;

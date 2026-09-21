@@ -491,7 +491,55 @@ const app = createAppChannel({
       text: cap(ra || '(không in ra gì)', 8000) });
     log({ app: 'lệnh xong', code: r.exitCode, byte: ra.length });
   },
+  // Hỏi Axle từ app (chat, D11): chạy Claude Code trên máy bằng tài khoản chủ (`axle claude --dong`), cổng xin phép
+  // là chính điện thoại này: đọc thì làm ngay, ghi/chạy/xoá đi qua duyet_quyen → rung điện thoại. Chữ chảy về app
+  // từng khúc (hoi-chunk, gộp 0,7 giây một lần để không dội trạm), kết thúc bằng hoi-result.
+  async onHoi(d, { cau, tiep }) {
+    const h = hoiCfg();
+    if (!h.enabled) return app.sendTo(d.id, { type: 'hoi-result', ok: false, text: 'Hỏi Axle đang tắt trên máy. Bật: sudo axle app hoi on' });
+    if (dangHoi.has(d.id)) return app.sendTo(d.id, { type: 'hoi-result', ok: false, text: 'Đang trả lời câu trước — chờ xong đã' });
+    dangHoi.add(d.id);
+    const owner = ownerUser();
+    const giay = Math.min(Math.max(Number(h.timeoutSec ?? 600), 30), 1800);
+    log({ app: 'hỏi Axle', device: d.name, cau: cap(cau, 300), tiep });
+    const script = `axle claude "$AXLE_CAU" --dong${tiep ? ' --tiep' : ''}`;
+    const p = spawn('timeout', ['-k', '5', String(giay), 'runuser', '-u', owner, '--', 'bash', '-lc', script],
+      { cwd: `/home/${owner}`, env: { ...process.env, AXLE_CAU: cau }, stdio: ['ignore', 'pipe', 'pipe'] });
+    let buf = ''; let dau = ''; let tong = 0; let timer = null; let cat = false;
+    const day = () => { if (!buf) return; const t = buf; buf = ''; app.sendTo(d.id, { type: 'hoi-chunk', text: t }); };
+    const them = (chunk) => {
+      if (cat) return;
+      if (dau.length < 2000) dau += chunk;
+      tong += chunk.length;
+      if (tong > 60000) { cat = true; buf += '\n… (cắt: câu trả lời quá 60.000 ký tự — xem trên máy)\n'; day(); return; }
+      buf += chunk;
+      if (buf.length >= 3000) { clearTimeout(timer); timer = null; day(); }
+      else if (!timer) timer = setTimeout(() => { timer = null; day(); }, 700);
+    };
+    p.stdout.on('data', (b) => them(b.toString()));
+    p.stderr.on('data', (b) => them(b.toString()));
+    p.on('error', (e) => { buf += `✗ không chạy được: ${e.message}\n`; });
+    p.on('close', (code) => {
+      clearTimeout(timer); timer = null; day();
+      dangHoi.delete(d.id);
+      app.sendTo(d.id, { type: 'hoi-result', ok: code === 0, code, text: code === 0 ? '' : goiYLoiClaude(dau, code) });
+      log({ app: 'hỏi xong', code, byte: tong });
+    });
+  },
 });
+// Hỏi Axle từ app: MẶC ĐỊNH BẬT (không có tệp = bật) — khác gõ lệnh, vì Claude trên máy chỉ đọc tự do, còn ghi/chạy
+// đều phải qua điện thoại duyệt. Tắt: sudo axle app hoi off. Một điện thoại hỏi một câu một lúc.
+const HOI_CFG = process.env.AXLE_APP_HOI || '/etc/axle/app-hoi.json';
+const hoiCfg = () => { try { return { enabled: true, timeoutSec: 600, ...JSON.parse(readFileSync(HOI_CFG, 'utf8')) }; } catch { return { enabled: true, timeoutSec: 600 }; } };
+const dangHoi = new Set();
+function goiYLoiClaude(chu, code) {
+  if (/Chưa cài Claude Code/.test(chu)) return 'Máy chưa có Claude Code (npm i -g @anthropic-ai/claude-code).';
+  if (/not logged in|log ?in|đăng nhập|unauthori|authenticat|api key/i.test(chu)) {
+    return 'Máy chưa đăng nhập Claude — ngồi vào máy, mở Terminal, gõ  claude  và đăng nhập một lần.';
+  }
+  if (code === 124 || code === 137) return 'Quá thời gian — Axle đã dừng việc này.';
+  return `Không làm được (mã ${code}).`;
+}
 app.start();
 
 // Việc nhanh bấm thẳng từ app (đã ký bằng khoá Face ID trong chip = mức tin cậy T3, khỏi hỏi lại).

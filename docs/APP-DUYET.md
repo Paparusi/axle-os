@@ -51,6 +51,9 @@ info = "axle-box-v1")`; nội dung = ChaCha20-Poly1305(k, nonce 12 byte ngẫu n
 | máy → app | `task-result` | `task`, `ok`, `text` |
 | app → máy | `shell` | `cmd`, `ts`, **`dsig`** — gõ lệnh; máy mặc định TẮT đường này |
 | máy → app | `shell-result` | `ok`, `code`, `user`, `text` (cắt 1500 ký tự) |
+| app → máy | `hoi` | `cau`, `tiep`, `ts`, **`dsig`** — hỏi Axle (chat, D11): máy chạy `axle claude --dong` bằng tài khoản chủ; ký băm câu hỏi (`hoiString`), mỗi mốc giờ một lần; mặc định BẬT (`sudo axle app hoi off` để tắt) |
+| máy → app | `hoi-chunk` | `text` — chữ chảy về (gộp 0,7 giây một lần, ≤3000 ký tự/khúc, tổng ≤60.000) |
+| máy → app | `hoi-result` | `ok`, `code`, `text` (gợi ý khi hỏng: chưa đăng nhập Claude, quá giờ…) |
 
 `hash` = sha256 của JSON chuẩn hoá `{ id, action, params, client, nonce }` — **đúng việc đã chốt lúc xin**.
 `taskString` = `axle-task-v1|<id máy>|<tên việc>|<ts>`. Mỗi `(việc, ts)` máy chỉ làm **một lần** (chặn phát lại
@@ -66,7 +69,7 @@ trong cửa sổ 10 phút). Danh sách việc nằm ở phía MÁY và không nh
 Không bao giờ nhận chuỗi lệnh từ điện thoại: mất điện thoại (mà mở khoá được) thì kẻ lấy được chừng ấy nút,
 không phải cả cái máy.
 
-`shellString` = `axle-shell-v1|<id máy>|<base64url(sha256(lệnh))>|<ts>` — ký **băm của nội dung lệnh**, nên
+`shellString` = `axle-shell-v1|<id máy>|<base64url(sha256(lệnh))>|<ts>`; `hoiString` = `axle-hoi-v1|<id máy>|<base64url(sha256(câu hỏi))>|<ts>` — ký **băm của nội dung lệnh**, nên
 chữ ký chỉ đúng với đúng chuỗi lệnh đó; nối thêm một chữ vào lệnh là chữ ký hỏng.
 
 Gõ lệnh **mặc định TẮT** (`sudo axle app terminal on [--root]`, tắt: `off`). Bật rồi thì:

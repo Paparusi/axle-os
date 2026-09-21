@@ -298,3 +298,19 @@ Bàn (bỏ pending, cắt vừa hộp ≤64KB); danh sách cục bộ "điện t
 - **Daemon:** số hôm nay đọc đuôi 1MB nhật ký thay vì cả tệp; nhiều lần đổi trạng thái trong 150ms gộp thành một
   lần ghi ban.json. Provision: lint `build/provision-lint.sh` bắt dấu huyền/`$(` trong heredoc không bọc nháy (một
   dấu huyền trong comment đã chạy nhầm `axle tay` lúc cập nhật máy thật 21/9).
+
+## Hỏi Axle trên điện thoại (nhịp D11)
+
+Bi (21/9): *"trên app t có hỏi được Axle không? chứ t có thấy chỗ nào để t chat với Axle đâu?"* — "Bảo Axle làm"
+mới có trên Bàn ở máy; giờ là thẻ đầu tiên trên app: **Hỏi Axle**.
+
+Đường đi: app ký băm câu hỏi bằng khoá Face ID (`hoi`, cùng khuôn với Gõ lệnh) → máy chạy `axle claude "<câu>"
+--dong [--tiep]` bằng tài khoản chủ → chữ chảy về app từng khúc (`hoi-chunk`, dòng `→ …` = đang dùng công cụ) →
+`hoi-result`. Việc ghi tệp / chạy lệnh / xoá mà Claude xin thì đi qua `duyet_quyen` như thường → **rung chính điện
+thoại đó** (thẻ Chờ duyệt). Mặc định BẬT (khác Gõ lệnh) vì Claude chỉ đọc tự do, còn ghi/chạy đều phải qua duyệt;
+`sudo axle app hoi off` để tắt. Một điện thoại hỏi một câu một lúc; hạn 10 phút; trả lời quá 60.000 ký tự thì cắt.
+
+Máy chưa đăng nhập Claude (OAuth) thì app nhận đúng câu: *"Máy chưa đăng nhập Claude — ngồi vào máy, mở
+Terminal, gõ claude và đăng nhập một lần."*
+
+Thử: vector Node ⇄ Swift thêm hộp `hoi` (6 hộp) + chuỗi `hoiString`; CI iOS biên dịch HoiView.

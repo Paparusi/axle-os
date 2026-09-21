@@ -769,6 +769,11 @@ desktop_cmd() {   # sudo axle desktop on|off|status — lớp giao diện (docs/
 app_cmd() {   # sudo axle app setup|pair|confirm|devices|remove|terminal
   # `terminal status` chỉ đọc một tệp 0644 — cho xem không cần sudo, để cửa sổ Axle mở ra là thấy ngay
   # trạng thái công tắc mà không phải hỏi mật khẩu.
+  if [ "${1:-}" = hoi ] && [ "${2:-status}" = status ]; then
+    if [ -f /etc/axle/app-hoi.json ] && grep -q '"enabled": *false' /etc/axle/app-hoi.json; then echo "Hỏi Axle từ app: TẮT (bật: sudo axle app hoi on)"
+    else echo "Hỏi Axle từ app: BẬT (mặc định) · Claude chạy bằng tài khoản chủ, ghi/chạy phải duyệt trên điện thoại · tắt: sudo axle app hoi off"; fi
+    return
+  fi
   if [ "${1:-}" = terminal ] && [ "${2:-}" = status ]; then
     if [ -f /etc/axle/app-terminal.json ]; then
       echo "Gõ lệnh từ app: BẬT"; sed 's/^/  /' /etc/axle/app-terminal.json
@@ -781,6 +786,13 @@ app_cmd() {   # sudo axle app setup|pair|confirm|devices|remove|terminal
   case "${1:-devices}" in
     # Cho phép gõ lệnh từ app. MẶC ĐỊNH TẮT: đây là thứ duy nhất trong kênh app cho điện thoại gửi nội dung
     # tuỳ ý sang máy. Mặc định chạy bằng tài khoản chủ; --root thì cân nhắc kỹ, mất điện thoại là mất máy.
+    hoi)   # Hỏi Axle (chat) từ app — mặc định BẬT; tắt khi không muốn điện thoại sai Claude trên máy
+      case "${2:-}" in
+        on)  printf '{"enabled": true, "timeoutSec": 600}\n' | atomic_write /etc/axle/app-hoi.json root:root 0644; echo "Hỏi Axle từ app: BẬT" ;;
+        off) printf '{"enabled": false}\n' | atomic_write /etc/axle/app-hoi.json root:root 0644; echo "Hỏi Axle từ app: TẮT" ;;
+        *)   echo "sudo axle app hoi on | off · axle app hoi status" >&2; exit 2 ;;
+      esac
+      return ;;
     terminal)
       case "${2:-status}" in
         on)
