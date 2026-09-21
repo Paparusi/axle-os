@@ -35,6 +35,20 @@ ok(banChoApp({ ts: 'x', host: 'h', so: [] }).so.length === 0, 'sổ rỗng vẫn
 if (fail) { console.log(`✗ ${fail} mục hỏng`); process.exit(1); }
 console.log('✓ mota (Sổ + bản cho app) đạt');
 
+// ---- tên tệp đính kèm an toàn ----
+import { tenTepAnToan } from './mota.js';
+{
+  let f3 = 0;
+  const ok3 = (c, m) => { console.log(`  ${c ? '✓' : '✗'} ${m}`); if (!c) f3++; };
+  ok3(tenTepAnToan('Bảng lương T9 (đã chốt).xlsx') === 'Bang-luong-T9-da-chot.xlsx', `tiếng Việt có dấu → không dấu, khoảng trắng/ngoặc → - (${tenTepAnToan('Bảng lương T9 (đã chốt).xlsx')})`);
+  ok3(tenTepAnToan('../../etc/passwd') === 'passwd', 'bỏ đường dẫn, không leo thư mục');
+  ok3(tenTepAnToan('HỢP ĐỒNG.DOCX', 2) === 'HOP-DONG.docx', 'đuôi về chữ thường, giữ tên');
+  ok3(tenTepAnToan('', 3) === 'tep-3' && tenTepAnToan('.....', 4) === 'tep-4', 'tên rỗng/hỏng → tep-<i>');
+  ok3(tenTepAnToan('x'.repeat(200) + '.pdf').length <= 60, 'cắt tên dài');
+  if (f3) { console.log(`✗ ${f3} mục hỏng`); process.exit(1); }
+  console.log('✓ tên tệp an toàn đạt');
+}
+
 // ---- lệnh mô tả cho công cụ MCP (đích thật cho tin duyệt + luật "luôn") ----
 import { lenhCongCu } from './mota.js';
 {

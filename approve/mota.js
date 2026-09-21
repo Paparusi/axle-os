@@ -36,6 +36,18 @@ export function gopNhatKy(dong) {
   return [...m.values()].sort((a, b) => Date.parse(b.luc) - Date.parse(a.luc));
 }
 
+// Tên tệp đính kèm an toàn để ghi vào đĩa: bỏ đường dẫn, dấu tiếng Việt → không dấu (đ→d), chỉ giữ [A-Za-z0-9._-],
+// giữ phần mở rộng (chữ thường), ≤60 ký tự. Tên rỗng/hỏng → tep-<i>.
+export function tenTepAnToan(ten, i = 1) {
+  let t = String(ten ?? '').split(/[\\/]/).pop().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D');
+  t = t.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[.-]+|[.-]+$/g, '').replace(/-{2,}/g, '-');
+  const m = /^(.*?)(\.[A-Za-z0-9]{1,8})?$/.exec(t);
+  let goc = (m?.[1] || '').slice(0, 50);
+  const duoi = (m?.[2] || '').toLowerCase();
+  if (!goc) goc = `tep-${i}`;
+  return goc + duoi;
+}
+
 // Bản cho app (`query so`): bỏ `pending` (app đã nhận từng yêu cầu bằng tin `request` rồi) và cắt `so` cho vừa
 // hộp chuyển tiếp (≤64KB kể cả phong bì mã hoá — giữ dưới 48KB cho chắc). Cắt một nửa mỗi vòng tới khi vừa.
 export function banChoApp(ban, gioiHan = 48000) {

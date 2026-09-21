@@ -36,8 +36,13 @@ try {
   ok((await call(may, 'GET', `/v1/blob/${up.j.id}`)).status === 404, 'lấy xong là xoá — lần hai 404');
   ok((await call(ke, 'POST', '/v1/blob', { to: may.id, blob: box })).status === 403, 'kẻ chưa được liên kết gửi → 403');
   ok((await call(dt, 'POST', '/v1/blob', { to: may.id, blob: 'x'.repeat(40) })).status === 400, 'hộp quá ngắn → 400');
-  const to = await call(dt, 'POST', '/v1/blob', { to: may.id, blob: 'A'.repeat(3 * 1024 * 1024 + 100) });
-  ok(to.status === 413, `quá 3MB → 413 (${to.status})`);
+  const lon = crypto.randomBytes(6 * 1024 * 1024);
+  const upLon = await call(dt, 'POST', '/v1/blob', { to: may.id, blob: seal(may.xPub, lon) });
+  ok(upLon.status === 200, `tệp 6MB (PDF scan) đi lọt (${upLon.status})`);
+  const layLon = await call(may, 'GET', `/v1/blob/${upLon.j.id}`);
+  ok(layLon.status === 200 && b64u(sha256(openBytes(may.xPriv, may.xPub, layLon.j.blob))) === b64u(sha256(lon)), 'máy mở tệp 6MB đúng từng byte');
+  const to = await call(dt, 'POST', '/v1/blob', { to: may.id, blob: 'A'.repeat(16 * 1024 * 1024 + 100) });
+  ok(to.status === 413, `quá 16MB → 413 (${to.status})`);
   ok((await call(dt, 'POST', '/v1/send', { to: may.id, box: seal(may.xPub, 'x'.repeat(70 * 1024)) })).status === 413, 'hộp thư thường vẫn giới hạn 80KB thân');
 } finally {
   srv.kill(); rmSync(D, { recursive: true, force: true });

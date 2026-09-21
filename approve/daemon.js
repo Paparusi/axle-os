@@ -11,13 +11,13 @@ import { createServer, request as httpRequest } from 'node:http';
 import { connect as netConnect } from 'node:net';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { appendFileSync, chownSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, statSync, unlinkSync, chmodSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chownSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, chmodSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { hostname } from 'node:os';
 import { addRule, addSession, autoLabel, canRemember, canSession, describeRule, findAuto, keyboard, loadRules, prune,
   saveRules, tierLine, tierOf, writeDurable } from './rules.js';
 import { buildDigest } from './digest.js';
-import { banChoApp, gopNhatKy, lenhCongCu } from './mota.js';
+import { banChoApp, gopNhatKy, lenhCongCu, tenTepAnToan } from './mota.js';
 import { createAppChannel } from './app-channel.js';
 import { machineState } from './machine-state.js';
 import { requestHash } from '../app/proto.js';
@@ -500,41 +500,48 @@ const app = createAppChannel({
   // Hỏi Axle từ app (chat, D11): chạy Claude Code trên máy bằng tài khoản chủ (`axle claude --dong`), cổng xin phép
   // là chính điện thoại này: đọc thì làm ngay, ghi/chạy/xoá đi qua duyet_quyen → rung điện thoại. Chữ chảy về app
   // từng khúc (hoi-chunk, gộp 0,7 giây một lần để không dội trạm), kết thúc bằng hoi-result.
-  async onHoi(d, { cau, tiep, phien, anh }) {
+  async onHoi(d, { cau, tiep, phien, tep }) {
     const h = hoiCfg();
     if (!h.enabled) return app.sendTo(d.id, { type: 'hoi-result', ok: false, text: 'Hỏi Axle đang tắt trên máy. Bật: sudo axle app hoi on' });
     if (dangHoi.has(d.id)) return app.sendTo(d.id, { type: 'hoi-result', ok: false, text: 'Đang trả lời câu trước — bấm Dừng hoặc chờ xong' });
     const owner = ownerUser();
-    // Ảnh đính kèm (D12): lấy từ trạm, ghi vào ~/.cache/axle-hoi của chủ (0600) rồi nhắc Claude đọc bằng Read.
+    // Tệp đính kèm (D12): lấy từ trạm, ghi vào ~/.cache/axle-hoi của chủ (0600, dọn sau 1 ngày); Excel/Word/PowerPoint/PDF
+    // đổi sẵn sang CSV/văn bản/PDF bằng LibreOffice chạy dưới tài khoản chủ (core/desktop/doi-tep.sh) — Read không đọc
+    // được .xlsx/.docx nhị phân, mà bắt Claude tự chạy soffice là lại phải xin phép.
     let cauDay = cau;
-    if (anh?.length) {
+    if (tep?.length) {
       const dir = `/home/${owner}/.cache/axle-hoi`;
       const { uid, gid } = ownerIds();
       try {
         mkdirSync(dir, { recursive: true, mode: 0o700 });
         if (uid != null) chownSync(dir, uid, gid);
-        for (const f of readdirSync(dir)) { const p = path.join(dir, f); if (Date.now() - statSync(p).mtimeMs > 86_400_000) unlinkSync(p); }   // ảnh cũ hơn 1 ngày
-      } catch (e) { log({ warn: `thư mục ảnh: ${e.message}` }); }
-      const tep = [];
-      for (const [i, id] of anh.entries()) {
+        for (const f of readdirSync(dir)) {
+          const p = path.join(dir, f);
+          if (Date.now() - statSync(p).mtimeMs > 86_400_000) { try { rmSync(p, { recursive: true, force: true }); } catch { /* bỏ */ } }
+        }
+      } catch (e) { log({ warn: `thư mục tệp đính kèm: ${e.message}` }); }
+      const dong = [];
+      for (const [i, t] of tep.entries()) {
         try {
-          const bytes = await app.layBlob(id);
-          if (bytes.length > 4 * 1024 * 1024) throw new Error('ảnh quá 4MB');
-          const f = path.join(dir, `${Date.now()}-${i + 1}.jpg`);
+          const bytes = await app.layBlob(t.id);
+          if (bytes.length > 12 * 1024 * 1024) throw new Error(`${t.ten}: quá 12MB`);
+          const f = path.join(dir, `${Date.now()}-${tenTepAnToan(t.ten, i + 1)}`);
           writeFileSync(f, bytes, { mode: 0o600 });
           if (uid != null) chownSync(f, uid, gid);
-          tep.push(f);
+          const r = await runProc('timeout', ['110', 'runuser', '-u', owner, '--', 'bash', '/opt/axle/core/desktop/doi-tep.sh', f, `${f}.doi`], { env: { ...process.env, HOME: `/home/${owner}` } });
+          const doi = r.output.split('\n').map((x) => x.trim()).filter((x) => x.startsWith(dir));
+          dong.push(`· ${t.ten} → ${f}${doi.length ? ` ; bản đọc được: ${doi.join(' , ')}` : ''}`);
         } catch (e) {
-          log({ warn: `ảnh đính kèm: ${e.message}` });
-          return app.sendTo(d.id, { type: 'hoi-result', ok: false, text: `Không lấy được ảnh từ trạm (${e.message}) — gửi lại nhé.` });
+          log({ warn: `tệp đính kèm: ${e.message}` });
+          return app.sendTo(d.id, { type: 'hoi-result', ok: false, text: `Không lấy được tệp từ trạm (${e.message}) — gửi lại nhé.` });
         }
       }
-      cauDay = `${cau}\n\n(Đính kèm ${tep.length} ảnh — xem bằng công cụ Read: ${tep.join(' ; ')})`;
+      cauDay = `${cau}\n\n(Đính kèm ${tep.length} tệp — đọc bằng công cụ Read; .xlsx/.docx là nhị phân, hãy đọc bản CSV/văn bản đã đổi:\n${dong.join('\n')})`;
     }
     // 30 phút: Claude có thể phải chờ chủ duyệt (10 phút/yêu cầu) rồi làm tiếp. Không qua bash -l: bị giết thì bash in
     // "Session terminated, killing shell…" lên app (thấy 21/9); axle tự tìm claude ở ~/.local/bin, không cần profile.
     const giay = Math.min(Math.max(Number(h.timeoutSec ?? 1800), 30), 3600);
-    log({ app: 'hỏi Axle', device: d.name, cau: cap(cau, 300), tiep, ...(phien ? { phien } : {}), ...(anh?.length ? { anh: anh.length } : {}) });
+    log({ app: 'hỏi Axle', device: d.name, cau: cap(cau, 300), tiep, ...(phien ? { phien } : {}), ...(tep?.length ? { tep: tep.map((t) => t.ten) } : {}) });
     const p = spawn('timeout', ['-k', '5', String(giay), 'runuser', '-u', owner, '--', AXLE, 'claude', cauDay, '--dong', ...(tiep ? ['--tiep'] : []), ...(phien ? ['--phien', phien] : [])],
       { cwd: `/home/${owner}`, env: { ...process.env, HOME: `/home/${owner}` }, stdio: ['ignore', 'pipe', 'pipe'] });
     dangHoi.set(d.id, p);

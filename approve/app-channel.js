@@ -148,9 +148,12 @@ export function createAppChannel({ log, hostname, onDecision, onCommand, onHello
       daLam.add(khoa);
       if (daLam.size > 200) daLam.delete(daLam.values().next().value);
       const phien = typeof msg.phien === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(msg.phien) ? msg.phien : null;
-      // Ảnh đính kèm: id tệp trên trạm (điện thoại đã niêm phong cho máy) — tối đa 4, máy lấy một lần rồi trạm xoá
-      const anh = Array.isArray(msg.anh) ? msg.anh.filter((x) => typeof x === 'string' && /^[A-Za-z0-9_-]{22}$/.test(x)).slice(0, 4) : [];
-      onHoi?.(d, { cau: c.trim(), tiep: msg.tiep === true, phien, anh });
+      // Tệp đính kèm (ảnh, Excel, Word, PDF…): {id trên trạm, tên gốc} — tối đa 6; điện thoại đã niêm phong cho máy,
+      // máy lấy một lần rồi trạm xoá. `anh` (bản app cũ) = ảnh không tên.
+      const idOk = (x) => typeof x === 'string' && /^[A-Za-z0-9_-]{22}$/.test(x);
+      const tep = Array.isArray(msg.tep) ? msg.tep.filter((t) => t && idOk(t.id)).map((t, i) => ({ id: t.id, ten: typeof t.ten === 'string' ? t.ten.slice(0, 120) : `tep-${i + 1}` })) : [];
+      if (Array.isArray(msg.anh)) for (const [i, id] of msg.anh.entries()) if (idOk(id)) tep.push({ id, ten: `anh-${i + 1}.jpg` });
+      onHoi?.(d, { cau: c.trim(), tiep: msg.tiep === true, phien, tep: tep.slice(0, 6) });
       return;
     }
     if (msg.type === 'stop' || msg.type === 'start') {

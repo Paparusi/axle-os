@@ -328,3 +328,8 @@ trong bộ nhớ); tin `hoi` chỉ mang id tệp. Máy lấy tệp (chỉ ngư�
 (`openBytes`), ghi vào `~/.cache/axle-hoi/` của chủ (0600, dọn sau 1 ngày) và nhắc Claude đọc bằng công cụ Read (đọc
 được ảnh). Trạm không bao giờ thấy ảnh. Thử: `build/relay-blob-smoke.mjs` (trạm thật ở cổng rỗi, 10 mục), vector
 Node ⇄ Swift thêm hộp byte hai chiều. Chưa có: chụp thẳng bằng camera trong app (chọn từ thư viện trước).
+
+**Tệp văn phòng (21/9 tối, 0.1.133):** ngoài ảnh, app gửi được Excel / Word / PowerPoint / PDF / văn bản ≤12MB (nút
+tệp cạnh nút ảnh, từ Files/iCloud/Zalo đã lưu). Máy giữ tên gốc (đã làm an toàn: bỏ dấu, chỉ [A-Za-z0-9._-]) và đổi
+sẵn bằng LibreOffice dưới tài khoản chủ: Excel → mỗi sheet một CSV, Word → txt, PowerPoint → PDF, PDF → txt
+(pdftotext) rồi nhắc Claude đọc bản đã đổi. Trạm chở tới 16MB thân, vẫn mù nội dung.
