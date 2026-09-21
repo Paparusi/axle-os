@@ -59,6 +59,8 @@ fi
 step "Cổng chia sẻ màn hình (để agent xin xem màn hình của chủ — docs/DESKTOP.md D3)"
 # Tay cho mọi ứng dụng (axle tay, D8): đọc cây trợ năng cần gir1.2-atspi-2.0 — gói nhỏ, lúc làm mới cũng cài nếu thiếu
 dpkg -s gir1.2-atspi-2.0 >/dev/null 2>&1 || apt_try gir1.2-atspi-2.0 || echo "  (chưa cài được gir1.2-atspi-2.0 — axle tay chưa dùng được)"
+# Đồ thị liên kết Bộ não trên Bàn vẽ bằng cairo → cần cầu nối python3-gi-cairo (gói nhỏ, làm mới cũng cài nếu thiếu)
+dpkg -s python3-gi-cairo >/dev/null 2>&1 || apt_try python3-gi-cairo || echo "  (chưa cài được python3-gi-cairo — Bàn không vẽ được đồ thị liên kết)"
 [ -n "$LAM_MOI" ] || apt_try xdg-desktop-portal-gnome python3-gi gir1.2-gst-plugins-base-1.0 gstreamer1.0-pipewire gstreamer1.0-plugins-good \
   || echo "  (chưa cài được, thử lại sau: sudo apt install python3-gi gstreamer1.0-pipewire)"
 install -m 0644 "$ROOT/core/desktop/portal/axle-portal.service" /etc/systemd/user/axle-portal.service

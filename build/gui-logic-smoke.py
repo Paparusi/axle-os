@@ -7,15 +7,19 @@ import datetime, json, os, runpy, sys, types
 from unittest import mock
 
 # gi giả: đủ để `import gi; gi.require_version; from gi.repository import …` đi qua, còn lớp GTK thì là MagicMock
-gi = types.ModuleType("gi"); gi.require_version = lambda *a: None
+gi = types.ModuleType("gi"); gi.require_version = lambda *a: None; gi.require_foreign = lambda *a: None
 rep = types.ModuleType("gi.repository")
-for n in ("Adw", "Gdk", "Gio", "GLib", "Gtk", "Pango"):
+for n in ("Adw", "Gdk", "Gio", "GLib", "Gtk", "Pango", "PangoCairo"):
     m = mock.MagicMock(name=n)
     setattr(rep, n, m)
 # Lớp cơ sở phải là class thật để `class Trang(Adw.PreferencesPage)` định nghĩa được
 rep.Adw.PreferencesPage = type("PreferencesPage", (), {"__init__": lambda self, **k: None})
 rep.Adw.ApplicationWindow = type("ApplicationWindow", (), {"__init__": lambda self, **k: None})
 rep.Adw.Application = type("Application", (), {"__init__": lambda self, **k: None})
+rep.Gtk.DrawingArea = type("DrawingArea", (), {"__init__": lambda self, **k: None})
+import shutil, subprocess, tempfile, math
+os.environ["AXLE_BRAIN_JS"] = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "mcp/brain.js")
+os.environ["AXLE_NODE"] = shutil.which("node") or "/usr/bin/node"
 gi.repository = rep
 sys.modules["gi"] = gi; sys.modules["gi.repository"] = rep
 g = runpy.run_path(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "core/desktop/axle-gui.py"), run_name="axle_gui")
@@ -80,6 +84,22 @@ ok(md_lite("**dở dang") == [("dở dang", {"dam"})] and md_lite("") == [], "md
 ok("đăng nhập Claude" in goi_y_loi("Error: Not logged in. Please run /login"), "lỗi chưa đăng nhập → chỉ cách đăng nhập")
 ok("chưa có Claude Code" in goi_y_loi("Chưa cài Claude Code trên máy này (npm …)"), "chưa cài → nói chưa cài")
 ok(goi_y_loi("lỗi lạ") == "", "lỗi khác → không đoán bừa")
+
+xep_do_thi, do_thi_brain = g["xep_do_thi"], g["do_thi_brain"]
+nodes = [{"id": c, "ten": c, "loai": "concept", "so_link": 0} for c in "abcdef"]
+edges = [{"a": "a", "b": "b"}, {"a": "b", "b": "c"}, {"a": "a", "b": "c"}]
+vt = xep_do_thi(nodes, edges, 1200, 400)
+ok(set(vt) == set("abcdef") and all(0 <= x <= 1200 and 0 <= y <= 400 for x, y in vt.values()), "xep_do_thi: mọi nút có toạ độ trong khung")
+kc = lambda p, q: math.hypot(vt[p][0] - vt[q][0], vt[p][1] - vt[q][1])   # noqa: E731
+ok(kc("a", "b") < kc("a", "d") and kc("b", "c") < kc("b", "e") and kc("a", "c") < kc("a", "f"), "xep_do_thi: nút có cạnh nằm gần nhau hơn nút rời")
+ok(xep_do_thi([], [], 1200, 400) == {} and xep_do_thi(nodes[:1], [], 1200, 400) == {"a": (600, 200)}, "xep_do_thi: rỗng → rỗng; một nút thì ở giữa")
+ok(do_thi_brain(tempfile.mkdtemp()) is None, "do_thi_brain: thư mục không phải Bộ não → None (không nổ)")
+T = tempfile.mkdtemp(prefix="axle-smoke-brain-")
+subprocess.run(["bash", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "core/desktop/brain-init.sh"), T], check=True, capture_output=True)
+with open(os.path.join(T, "wiki/entities/abc.md"), "w", encoding="utf-8") as f: f.write("---\ntitle: Công ty ABC\ntype: entity\n---\nKhách sỉ, ký [[hop-dong-abc]].")
+with open(os.path.join(T, "wiki/sources/hop-dong-abc.md"), "w", encoding="utf-8") as f: f.write("---\ntitle: Hợp đồng ABC\ntype: source\n---\nPhạt 0,5%/ngày. [[abc]]")
+gd = do_thi_brain(T)
+ok(gd and {n["id"] for n in gd["nodes"]} == {"abc", "hop-dong-abc"} and len(gd["edges"]) == 1, "do_thi_brain: chạy doThi của brain.js trên Bộ não thật (2 trang, 1 cạnh)")
 
 if fail: print(f"✗ {fail} mục hỏng"); sys.exit(1)
 print("✓ phần thuần của cửa sổ Axle đạt")

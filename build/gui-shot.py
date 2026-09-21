@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tự chụp cửa sổ Axle (Bàn) thành PNG để NHÌN thấy bố cục — không cần Xvfb hay máy ảo, chỉ cần một màn hình
 (WSLg, GNOME…): mở cửa sổ với dữ liệu giả, chờ vẽ xong, vẽ lại cây widget ra texture, lưu PNG, tự đóng.
-    python3 build/gui-shot.py out/ban.png [--ban] [--trang ban|may|dt|tn|ag|ql]
+    python3 build/gui-shot.py out/ban.png [--ban] [--trang ban|may|dt|tn|ag|ql|nao]
 Dữ liệu giả: ban.json có 2 việc chờ + 2 agent, audit.jsonl có vài lần gọi công cụ, `axle` là script trả lời sẵn —
 để bắt lỗi kiểu 20/9 (phụ đề có < > vỡ Pango, ô QR chừa chỗ trống, thẻ ngang cắt chữ) trước khi phát hành.
 """
@@ -51,8 +51,29 @@ esac
 """)
 os.chmod(axle, stat.S_IRWXU)
 
+# Bộ não giả cho trang Tri thức: 8 trang nối nhau, một link tới trang chưa có, một trang mồ côi — đủ để nhìn đồ thị
+import shutil
+B = os.path.join(T, "Brain")
+subprocess.run(["bash", os.path.join(ROOT, "core/desktop/brain-init.sh"), B], check=True, capture_output=True)
+TRANG = {
+    "sources/hop-dong-omron-hrvn-2026-09.md": ("Hợp đồng dịch vụ Omron – HRVN", "source", "Phí giới thiệu 1 tháng lương, bảo hành 60 ngày. Bên A [[omron-healthcare]], bên B [[tmdv-hrvn]]. Thuộc [[hiro]]."),
+    "entities/omron-healthcare.md": ("Omron Healthcare Manufacturing Vietnam", "entity", "Nhà máy VSIP II Bình Dương, 1.200 công nhân. Ký [[hop-dong-omron-hrvn-2026-09]]. Đầu mối [[nguoi-lien-he-lan]]."),
+    "entities/tmdv-hrvn.md": ("TMDV HRVN", "entity", "Công ty cung ứng lao động của Bi. Hợp đồng [[hop-dong-omron-hrvn-2026-09]], dự án [[hiro]]."),
+    "projects/hiro.md": ("HIRO", "project", "Nền tảng cung ứng lao động: đối chiếu công, hoa hồng. Khách [[omron-healthcare]], [[tmdv-hrvn]]. Quyết định giá [[gia-dich-vu-2026]]."),
+    "decisions/gia-dich-vu-2026.md": ("Giá dịch vụ 2026", "decision", "Chốt phí 1 tháng lương, không thu phí công nhân. Áp cho [[hiro]]. Rút từ [[bai-hoc-bao-hanh]]."),
+    "learnings/bai-hoc-bao-hanh.md": ("Bài học bảo hành 60 ngày", "learning", "Công nhân nghỉ trong 60 ngày phải bù người. Ghi trong [[hop-dong-omron-hrvn-2026-09]]."),
+    "concepts/quy-trinh-ingest.md": ("Quy trình ingest", "concept", "Tệp vào raw → tóm tắt → trang sources → nối entity → index → log. Không ai trỏ tới trang này."),
+    "concepts/phi-gioi-thieu.md": ("Phí giới thiệu", "concept", "Một tháng lương cơ bản của người được nhận. Xem [[gia-dich-vu-2026]], [[hiro]]."),
+}
+for p, (ten, loai, than) in TRANG.items():
+    with open(os.path.join(B, "wiki", p), "w", encoding="utf-8") as f:
+        f.write(f"---\ntitle: {ten}\ntype: {loai}\n---\n{than}\n")
+with open(os.path.join(B, "wiki/index.md"), "a", encoding="utf-8") as f:
+    f.write("\n## Tài liệu (sources)\n- [[hop-dong-omron-hrvn-2026-09]] — hợp đồng dịch vụ 9/2026\n")
+
 env = dict(os.environ, AXLE_BIN=axle, AXLE_BAN_FILE=os.path.join(T, "ban.json"), AXLE_AUDIT_FILE=os.path.join(T, "audit.jsonl"),
-           AXLE_GUI_SHOT=os.path.abspath(out), AXLE_GUI_TRANG=trang, LC_ALL="C.UTF-8")
+           AXLE_GUI_SHOT=os.path.abspath(out), AXLE_GUI_TRANG=trang, LC_ALL="C.UTF-8",
+           AXLE_BRAIN_DIR=B, AXLE_BRAIN_JS=os.path.join(ROOT, "mcp/brain.js"), AXLE_NODE=shutil.which("node") or "/usr/bin/node")
 # Chạy GUI thật trong tiến trình con có "móc chụp": sau 2,5 giây vẽ cửa sổ ra PNG rồi thoát.
 code = f"""
 import sys, runpy

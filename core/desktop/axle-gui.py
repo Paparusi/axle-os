@@ -15,6 +15,7 @@ Nguyên tắc:
 """
 import datetime
 import json
+import math
 import os
 import pwd
 import re
@@ -29,12 +30,93 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Pango", "1.0")
-from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
+gi.require_version("PangoCairo", "1.0")
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango, PangoCairo  # noqa: E402
+try:   # vẽ đồ thị bằng cairo cần cầu nối python3-gi-cairo; thiếu thì Bàn vẫn chạy, chỉ thẻ liên kết báo cách cài
+    gi.require_foreign("cairo")
+    CO_CAIRO = True
+except (ImportError, ValueError):
+    CO_CAIRO = False
 
 AXLE = os.environ.get("AXLE_BIN", "/usr/local/bin/axle")
 BAN_FILE = os.environ.get("AXLE_BAN_FILE", "/run/axle/ban.json")
 AUDIT = os.environ.get("AXLE_AUDIT_FILE", os.path.expanduser("~/.local/state/axle/audit.jsonl"))
 BRAIN_DIR = os.environ.get("AXLE_BRAIN_DIR", os.path.expanduser("~/Axle/Brain"))
+BRAIN_JS = os.environ.get("AXLE_BRAIN_JS", "/opt/axle/mcp/brain.js")   # đồ thị liên kết lấy CÙNG một nguồn với app (doThi)
+NODE = os.environ.get("AXLE_NODE", "/usr/bin/node")
+MAU_LOAI = {"source": (0x60, 0xA5, 0xFA), "entity": (0x34, 0xD3, 0x99), "project": (0xF5, 0x9E, 0x0B), "decision": (0xA7, 0x8B, 0xFA),
+            "learning": (0xFB, 0xBF, 0x24), "concept": (0x2D, 0xD4, 0xBF), "thieu": (0xF8, 0x71, 0x71)}
+TEN_LOAI = {"source": "Nguồn", "entity": "Thực thể", "project": "Dự án", "decision": "Quyết định", "learning": "Bài học",
+            "concept": "Khái niệm", "thieu": "Thiếu trang"}
+KHUNG_DO_THI = (1000, 500)   # xếp một lần trong khung 2:1 (~ thẻ 680×340 trên Bàn), lúc vẽ co đều cho vừa widget
+
+
+def do_thi_brain(brain_dir=None):
+    """Đồ thị liên kết wiki {nodes, edges, bo_bot?} — chạy đúng hàm doThi của mcp/brain.js (một nguồn cho cả app lẫn Bàn);
+    None khi máy chưa có Bộ não / node / brain.js."""
+    d = brain_dir or BRAIN_DIR
+    if not os.path.isdir(os.path.join(d, "wiki")) or not os.path.exists(BRAIN_JS):
+        return None
+    try:
+        r = subprocess.run([NODE, "-e", "import(process.argv[1]).then((b) => process.stdout.write(JSON.stringify(b.doThi(process.argv[2]))))",
+                            BRAIN_JS, d], capture_output=True, text=True, timeout=20)
+        g = json.loads(r.stdout) if r.returncode == 0 and r.stdout else None
+        return g if isinstance(g, dict) and isinstance(g.get("nodes"), list) else None
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+
+
+def xep_do_thi(nodes, edges, W, H, vong=200):
+    """Xếp đồ thị bằng lực (Fruchterman–Reingold gọn, cùng cách với app): nút đẩy nhau k²/d, cạnh kéo d²/k, kéo nhẹ về tâm,
+    nhiệt giảm dần; cuối cùng co cho vừa khung W×H. Trả {id: (x, y)}. Thuần Python, chạy ở luồng nền."""
+    ids = [n["id"] for n in nodes]
+    if not ids or W < 10 or H < 10:
+        return {}
+    if len(ids) == 1:
+        return {ids[0]: (W / 2, H / 2)}
+    pos = {}
+    for i, a in enumerate(ids):
+        t = i / len(ids) * 2 * math.pi
+        pos[a] = [W / 2 + math.cos(t) * W * 0.35, H / 2 + math.sin(t) * H * 0.35]
+    k = math.sqrt(W * H / len(ids)) * 0.6
+    vong = 60 if len(ids) > 150 else vong
+    ke = [(e["a"], e["b"]) for e in edges if e["a"] in pos and e["b"] in pos and e["a"] != e["b"]]
+    for it in range(vong):
+        disp = {a: [0.0, 0.0] for a in ids}
+        for i, a in enumerate(ids):
+            xa, ya = pos[a]
+            da = disp[a]
+            for b in ids[i + 1:]:
+                dx, dy = xa - pos[b][0], ya - pos[b][1]
+                d = max(math.hypot(dx, dy), 1.0)
+                f = k * k / d / d
+                fx, fy = dx * f, dy * f
+                da[0] += fx; da[1] += fy
+                disp[b][0] -= fx; disp[b][1] -= fy
+        for a, b in ke:
+            dx, dy = pos[a][0] - pos[b][0], pos[a][1] - pos[b][1]
+            d = max(math.hypot(dx, dy), 1.0)
+            f = d / k
+            fx, fy = dx * f, dy * f
+            disp[a][0] -= fx; disp[a][1] -= fy
+            disp[b][0] += fx; disp[b][1] += fy
+        temp = max(2.0, W / 10 * (1 - it / vong))
+        for a in ids:
+            dx, dy = disp[a]
+            ln = max(math.hypot(dx, dy), 0.01)
+            s = min(ln, temp)
+            x = pos[a][0] + dx / ln * s
+            y = pos[a][1] + dy / ln * s
+            x += (W / 2 - x) * 0.05
+            y += (H / 2 - y) * 0.05
+            pos[a] = [min(W - 20.0, max(20.0, x)), min(H - 20.0, max(20.0, y))]   # giữ trong khung: nút rời không bay xa làm cụm bị ép nhỏ
+    xs = [p[0] for p in pos.values()]
+    ys = [p[1] for p in pos.values()]
+    pad = 28
+    s = min((W - 2 * pad) / max(max(xs) - min(xs), 1.0), (H - 2 * pad - 12) / max(max(ys) - min(ys), 1.0))
+    ox = (W - (max(xs) - min(xs)) * s) / 2
+    oy = (H - 12 - (max(ys) - min(ys)) * s) / 2
+    return {a: (ox + (p[0] - min(xs)) * s, oy + (p[1] - min(ys)) * s) for a, p in pos.items()}
 THU = ["Thứ hai", "Thứ ba", "Thứ tư", "Thứ năm", "Thứ sáu", "Thứ bảy", "Chủ nhật"]
 # Nút duyệt tại máy, theo chữ cái bộ duyệt gửi (a lần này · h 1 giờ · l luôn · r từ chối)
 NUT = {"a": ("Lần này", ["suggested-action"]), "h": ("1 giờ", []), "l": ("Luôn", []), "r": ("Từ chối", ["destructive-action"])}
@@ -228,6 +310,107 @@ def goi_y_loi(chu):
 class Trang(Adw.PreferencesPage):
     def __init__(self, tieu_de, icon):
         super().__init__(title=tieu_de, icon_name=icon)
+
+
+class DoThiBrain(Gtk.DrawingArea):
+    """Đồ thị liên kết wiki trên Bàn: chấm = trang (màu theo loại, to theo số liên kết), nét = [[link]], chấm đỏ đứt nét =
+    trang được nhắc mà chưa có. Bấm một chấm → chọn (phần không dính mờ đi) và báo cho trang Tri thức; bấm chỗ trống → bỏ chọn.
+    Toạ độ xếp sẵn trong khung KHUNG_DO_THI (luồng nền), lúc vẽ co đều cho vừa widget nên đổi cỡ cửa sổ không phải xếp lại."""
+
+    def __init__(self, khi_chon):
+        super().__init__(content_height=340, hexpand=True)
+        self.khi_chon = khi_chon
+        self.do_thi = {"nodes": [], "edges": []}
+        self.vi_tri = {}
+        self.chon = None
+        self.set_draw_func(self.ve)
+        bam = Gtk.GestureClick()
+        bam.connect("released", self.bam)
+        self.add_controller(bam)
+
+    def dat(self, do_thi, vi_tri):
+        self.do_thi = do_thi or {"nodes": [], "edges": []}
+        self.vi_tri = vi_tri or {}
+        self.chon = None
+        self.queue_draw()
+
+    def nut(self, id_):
+        return next((n for n in self.do_thi["nodes"] if n["id"] == id_), None)
+
+    def ten(self, id_):
+        n = self.nut(id_)
+        return n["ten"] if n else id_
+
+    def hang_xom(self, id_):
+        return {e["b"] if e["a"] == id_ else e["a"] for e in self.do_thi.get("edges", []) if id_ in (e["a"], e["b"])}
+
+    def diem(self, W, H):
+        """Toạ độ widget của từng nút: co đều khung xếp cho vừa W×H rồi căn giữa."""
+        kw, kh = KHUNG_DO_THI
+        s = min((W - 16) / kw, (H - 16) / kh)
+        ox, oy = (W - kw * s) / 2, (H - kh * s) / 2
+        return {a: (ox + x * s, oy + y * s) for a, (x, y) in self.vi_tri.items()}
+
+    def bam(self, _g, _n, x, y):
+        P = self.diem(self.get_width(), self.get_height())
+        gan = min(((math.hypot(px - x, py - y), a) for a, (px, py) in P.items()), default=(99, None))
+        self.chon = gan[1] if gan[0] < 22 else None
+        self.queue_draw()
+        self.khi_chon(self.nut(self.chon) if self.chon else None)
+
+    def ve(self, _w, cr, W, H):
+        if not self.vi_tri:
+            return
+        P = self.diem(W, H)
+        mc = self.get_color()
+        ke = ({self.chon} | self.hang_xom(self.chon)) if self.chon else None
+        for e in self.do_thi.get("edges", []):
+            if e["a"] not in P or e["b"] not in P:
+                continue
+            noi = self.chon is None or self.chon in (e["a"], e["b"])
+            cr.set_source_rgba(mc.red, mc.green, mc.blue, 0.45 if noi else 0.1)
+            cr.set_line_width(1.4 if noi else 0.7)
+            cr.move_to(*P[e["a"]])
+            cr.line_to(*P[e["b"]])
+            cr.stroke()
+        layout = self.create_pango_layout("")
+        fd = self.get_pango_context().get_font_description()
+        if fd:
+            fd = fd.copy()
+            fd.set_size(9 * Pango.SCALE)
+            layout.set_font_description(fd)
+        layout.set_width(150 * Pango.SCALE)
+        layout.set_ellipsize(Pango.EllipsizeMode.END)
+        layout.set_alignment(Pango.Alignment.CENTER)
+        nhieu = len(self.do_thi["nodes"]) > 30
+        for n in self.do_thi["nodes"]:
+            if n["id"] not in P:
+                continue
+            x, y = P[n["id"]]
+            r = 5 + min(n.get("so_link", 0), 8)
+            sang = ke is None or n["id"] in ke
+            c = MAU_LOAI.get(n.get("loai"), (0x9A, 0xA4, 0xB5))
+            cr.set_source_rgba(c[0] / 255, c[1] / 255, c[2] / 255, 1 if sang else 0.25)
+            cr.new_path()   # sau show_layout cairo còn "điểm hiện tại" → arc sẽ kéo một vạch lạ từ nhãn trước tới chấm này
+            cr.arc(x, y, r, 0, 2 * math.pi)
+            if n.get("loai") == "thieu":
+                cr.set_dash([3, 2])
+                cr.set_line_width(1.5)
+                cr.stroke()
+                cr.set_dash([])
+            else:
+                cr.fill()
+            if self.chon == n["id"]:
+                cr.set_source_rgba(mc.red, mc.green, mc.blue, 1)
+                cr.set_line_width(1.5)
+                cr.new_path()
+                cr.arc(x, y, r + 3, 0, 2 * math.pi)
+                cr.stroke()
+            if sang and (not nhieu or self.chon is not None or n.get("so_link", 0) >= 2):
+                layout.set_text(n["ten"], -1)
+                cr.set_source_rgba(mc.red, mc.green, mc.blue, 0.95)
+                cr.move_to(x - 75, y + r + 3)
+                PangoCairo.show_layout(cr, layout)
 
 
 class CuaSo(Adw.ApplicationWindow):
@@ -436,6 +619,28 @@ class CuaSo(Adw.ApplicationWindow):
         self.nao_tom_tat = Gtk.Label(xalign=0, wrap=True, css_classes=["dim-label"],
                                      label="Gửi tài liệu qua Hỏi Axle (điện thoại) hay hỏi Bàn — tệp vào raw/, Claude tóm tắt thành trang wiki và tra lại được sau này.")
         cot.append(self.nao_tom_tat)
+        the0, noi0 = self.the("Liên kết giữa các trang")
+        self.nao_do_thi = DoThiBrain(self.chon_trang_nao) if CO_CAIRO else None
+        if self.nao_do_thi:
+            noi0.append(self.nao_do_thi)
+        chu_thich = Gtk.Box(spacing=12)
+        for loai in ("source", "entity", "project", "decision", "learning", "concept", "thieu"):
+            c = MAU_LOAI[loai]
+            chu_thich.append(Gtk.Label(use_markup=True, css_classes=["dim-label", "caption"],
+                                       label=f'<span foreground="#{c[0]:02X}{c[1]:02X}{c[2]:02X}">●</span> {TEN_LOAI[loai]}'))
+        noi0.append(chu_thich)
+        self.nao_chon = Gtk.Label(label="Chấm một trang để xem nó nối với ai.", xalign=0, wrap=True, css_classes=["dim-label"])
+        noi0.append(self.nao_chon)
+        hang_nut = Gtk.Box(spacing=8)
+        self.nao_nut_mo = Gtk.Button(label="Mở trang", visible=False)
+        self.nao_nut_mo.connect("clicked", self.mo_trang_nao)
+        self.nao_nut_hoi = Gtk.Button(label="Hỏi Bàn về trang này", visible=False)
+        self.nao_nut_hoi.connect("clicked", self.hoi_trang_nao)
+        hang_nut.append(self.nao_nut_mo)
+        hang_nut.append(self.nao_nut_hoi)
+        noi0.append(hang_nut)
+        self.nao_trang_chon = None
+        cot.append(the0)
         the1, noi1 = self.the("Danh mục (wiki/index.md)")
         self.nao_index = Gtk.TextView(editable=False, cursor_visible=False, wrap_mode=Gtk.WrapMode.WORD_CHAR,
                                       top_margin=6, bottom_margin=6, left_margin=8, right_margin=8)
@@ -468,7 +673,63 @@ class CuaSo(Adw.ApplicationWindow):
             self.nao_log.append(self.dong_mo("Chưa có gì."))
         for d in reversed(dong):
             self.nao_log.append(Gtk.Label(label=d[2:], xalign=0, wrap=True, css_classes=["dim-label", "caption"]))
+        self.nao_chon.set_label("Đang vẽ liên kết…")
+        threading.Thread(target=self.nap_do_thi_nao, daemon=True).start()
         return False
+
+    def nap_do_thi_nao(self):
+        """Luồng nền: hỏi brain.js rồi xếp — vài trăm trang cũng không làm Bàn khựng."""
+        if not self.nao_do_thi:
+            GLib.idle_add(self.nao_chon.set_label, "Bàn thiếu cầu nối vẽ (python3-gi-cairo) — chạy: sudo apt install python3-gi-cairo rồi mở lại Bàn.")
+            return
+        g = do_thi_brain()
+        vt = xep_do_thi(g["nodes"], g.get("edges", []), *KHUNG_DO_THI) if g else {}
+        GLib.idle_add(self.dat_do_thi_nao, g, vt)
+
+    def dat_do_thi_nao(self, g, vt):
+        self.nao_do_thi.dat(g, vt)
+        self.chon_trang_nao(None)
+        if g is None:
+            self.nao_chon.set_label("Chưa vẽ được liên kết — máy cần node và /opt/axle/mcp/brain.js (bản Axle đầy đủ).")
+        elif not g["nodes"]:
+            self.nao_chon.set_label("Chưa có trang nào để nối — gửi tài liệu đầu tiên qua Hỏi Axle là có.")
+        else:
+            an = f" · ẩn {g['bo_bot']} trang ít liên kết" if g.get("bo_bot") else ""
+            self.nao_chon.set_label(f"{len(g['nodes'])} trang · {len(g.get('edges', []))} liên kết{an}. Chấm một trang để xem nó nối với ai.")
+        return False
+
+    def chon_trang_nao(self, n):
+        """Bàn gọi khi chủ chấm một chấm trên đồ thị (None = bỏ chọn)."""
+        self.nao_trang_chon = n
+        self.nao_nut_mo.set_visible(bool(n) and n["loai"] != "thieu")
+        self.nao_nut_hoi.set_visible(bool(n))
+        if not n:
+            return
+        self.nao_nut_hoi.set_label("Tạo trang này" if n["loai"] == "thieu" else "Hỏi Bàn về trang này")
+        hx = [self.nao_do_thi.ten(h) for h in sorted(self.nao_do_thi.hang_xom(n["id"]))]
+        chu = f"{n['ten']} · {TEN_LOAI.get(n['loai'], n['loai'])} · {n.get('so_link', 0)} liên kết"
+        if n.get("mo_ta"):
+            chu += f"\n{n['mo_ta']}"
+        if hx:
+            chu += "\nNối với: " + " · ".join(hx)
+        self.nao_chon.set_label(chu)
+
+    def mo_trang_nao(self, *_):
+        n = self.nao_trang_chon
+        if n and n.get("duong"):
+            subprocess.Popen(["xdg-open", os.path.join(BRAIN_DIR, n["duong"])])
+
+    def hoi_trang_nao(self, *_):
+        n = self.nao_trang_chon
+        if not n:
+            return
+        if n["loai"] == "thieu":
+            cau = f"Trong Bộ não, trang [[{n['id']}]] đang được nhắc mà chưa có — tạo trang đó từ những gì đã biết."
+        else:
+            cau = f"Trong Bộ não, trang [[{n['id']}]] nói gì? Tóm tắt và các liên kết của nó."
+        self.o_lenh.set_text(cau)
+        self.tabs.set_visible_child_name("ban")
+        self.o_lenh.grab_focus()
 
     def chao_hoi(self):
         u = pwd.getpwuid(os.getuid())

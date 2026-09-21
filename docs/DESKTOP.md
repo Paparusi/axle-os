@@ -376,6 +376,16 @@ mỏng, thiếu YAML, tài liệu chưa có trang; bỏ link trong dấu `, nh�
 
 **Đồ thị liên kết (22/9, 0.1.139 + app):** Bi hỏi "trên app có thể thấy Brain liên kết như thế nào không?" → `brain.doThi()`
 đọc mọi trang wiki (bỏ index/log), nút = trang (tên + loại từ YAML, số link), cạnh = mỗi cặp [[link]] gộp hai chiều,
-link tới trang chưa có thành nút loại `thieu` (vẽ đứt nét đỏ; bấm là điền sẵn câu "tạo trang đó"); tối đa 400 nút.
+link tới trang chưa có thành nút loại `thieu` (vẽ đứt nét đỏ; bấm là điền sẵn câu "tạo trang đó"); gói ≤40KB JSON
+(hộp trạm 64KB đã mã hoá) — wiki lớn thì giữ trang nhiều liên kết nhất, `bo_bot` = số trang bị ẩn (0.1.140).
 App: `query brain-graph` → tấm **Liên kết trong Bộ não** trong 📚: xếp lực (đẩy–kéo, 200 vòng ngay trên điện thoại),
 màu theo loại, chạm chấm → thấy nó nối với ai + nút "Hỏi về trang này". Thử: test-brain 32 ca (5 ca đồ thị).
+**Trên Bàn (22/9, 0.1.142):** trang Tri thức có thẻ **Liên kết giữa các trang** — `Gtk.DrawingArea` vẽ bằng cairo, dữ liệu
+lấy đúng hàm `doThi` của brain.js qua node (`do_thi_brain`, cũng là `axle brain dothi`), xếp lực thuần Python ở luồng nền
+(`xep_do_thi`, khung 1000×500 rồi co đều khi vẽ nên đổi cỡ cửa sổ không xếp lại); bấm chấm → "Mở trang" (xdg-open) /
+"Hỏi Bàn về trang này" (điền sẵn vào ô Bảo Axle làm). Cần gói `python3-gi-cairo` (provision-desktop cài cả lúc làm mới;
+thiếu thì thẻ báo cách cài, Bàn vẫn chạy). Bài học vẽ-ra-mới-thấy: (1) sau `PangoCairo.show_layout` cairo còn điểm hiện
+tại → `arc` kéo một vạch lạ từ nhãn tới chấm, phải `new_path()`; (2) nút rời bay xa vì chỉ có lực đẩy → cụm bị ép thành
+một nhúm, phải kẹp toạ độ trong khung (sửa cả bản Swift). Thử: `build/gui-logic-smoke.py` (+5 ca) và
+`build/gui-shot.py out/tri-thuc.png --trang nao` (Bộ não giả 8 trang; WSL thiếu python3-gi-cairo thì chồng
+`_gi_cairo.so` + `cairo/` lấy từ .deb qua PYTHONPATH, không cần sudo).

@@ -871,7 +871,7 @@ app_cmd() {   # sudo axle app setup|pair|confirm|devices|remove|terminal
   esac
 }
 
-brain_cmd() {   # axle brain [ds|tim <từ khoá>|mo|duong] — Bộ não Axle của tài khoản này (~/Axle/Brain), không cần root
+brain_cmd() {   # axle brain [ds|tim <từ khoá>|mo|duong|dothi] — Bộ não Axle của tài khoản này (~/Axle/Brain), không cần root
   local B="${AXLE_BRAIN_DIR:-$HOME/Axle/Brain}"
   [ -f "$B/QUY-UOC.md" ] || bash /opt/axle/core/desktop/brain-init.sh "$B" >/dev/null
   case "${1:-ds}" in
@@ -880,11 +880,13 @@ brain_cmd() {   # axle brain [ds|tim <từ khoá>|mo|duong] — Bộ não Axle c
             AXLE_BRAIN_DIR="$B" /usr/bin/node -e 'import("/opt/axle/mcp/brain.js").then((b) => { for (const x of b.tim(process.argv[1])) console.log(`${x.duong}  (${x.diem})\n  ${x.trich.join("\n  ")}`); })' "${*:2}" ;;
     mo)     xdg-open "$B" >/dev/null 2>&1 & echo "Đã mở $B" ;;
     duong)  echo "$B" ;;
+    dothi)  # đồ thị liên kết wiki (JSON: nodes[{id,ten,loai,duong,mo_ta,so_link}], edges[{a,b}]) — cùng hàm app và Bàn dùng
+            AXLE_BRAIN_DIR="$B" /usr/bin/node -e 'import("/opt/axle/mcp/brain.js").then((b) => console.log(JSON.stringify(b.doThi())))' ;;
     lint)   # dọn đêm (timer axle-brain-lint 21:30): Claude làm LINT theo QUY-UOC — link hỏng, trang mồ côi, trang mỏng, thiếu trang
             if [ "$(find "$B/wiki" -name '*.md' ! -name index.md ! -name log.md | wc -l)" = 0 ]; then echo "Bộ não chưa có trang nào — chưa có gì để dọn"; exit 0; fi
             [ -r "$HOME/.config/axle/claude.env" ] || { echo "Máy chưa có token Claude (~/.config/axle/claude.env) — bỏ qua dọn đêm"; exit 0; }
             exec timeout 1500 /usr/local/bin/axle claude "Làm LINT Bộ não Axle theo QUY-UOC.md. Bước 1: gọi brain_kiem (kiểm định máy móc: link hỏng, trang mồ côi, trang mỏng, thiếu YAML đầu trang, tài liệu chưa có trang) — tin kết quả đó, đừng tự nhìn rồi đoán. Bước 2: sửa từng mục nó liệt kê bằng brain_ghi / brain_index_them (không đụng raw/; tài liệu chưa có trang thì đọc bản đã đổi trong raw/ rồi tạo trang sources). Bước 3: brain_kiem lại, rồi brain_log một dòng tóm tắt. Cuối cùng trả lời 3 dòng: đã sửa gì, còn gì cần chủ quyết." --dong ;;
-    *)      echo "axle brain ds | tim <từ khoá> | mo | duong" >&2; exit 2 ;;
+    *)      echo "axle brain ds | tim <từ khoá> | mo | duong | dothi | lint" >&2; exit 2 ;;
   esac
 }
 
