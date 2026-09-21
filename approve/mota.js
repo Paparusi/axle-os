@@ -42,7 +42,7 @@ export function tenTepAnToan(ten, i = 1) {
   let t = String(ten ?? '').split(/[\\/]/).pop().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D');
   t = t.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[.-]+|[.-]+$/g, '').replace(/-{2,}/g, '-');
   const m = /^(.*?)(\.[A-Za-z0-9]{1,8})?$/.exec(t);
-  let goc = (m?.[1] || '').slice(0, 50);
+  let goc = (m?.[1] || '').replace(/[.-]+$/g, '').slice(0, 50).replace(/[.-]+$/g, '');   // không để '-' dính trước đuôi
   const duoi = (m?.[2] || '').toLowerCase();
   if (!goc) goc = `tep-${i}`;
   return goc + duoi;
