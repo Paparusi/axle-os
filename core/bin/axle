@@ -722,9 +722,12 @@ claude_cmd() {
   [ -r "$HOME/.config/axle/claude.env" ] && { set -a; . "$HOME/.config/axle/claude.env"; set +a; }
   # Không --bare: cần OAuth của gói thuê bao. Không --dangerously-skip-permissions: chính cái cổng là điểm.
   # Dặn thêm (Bi 21/9: "dùng Claude có cần tay gì đâu"): có lệnh/API thì dùng lệnh; chỉ động cửa sổ khi không còn đường.
+  # Công cụ CHỈ ĐỌC của Axle cho dùng thẳng (danh sách sinh từ readOnlyHint, mcp/tools-readonly.mjs) — 21/9 Bi hỏi
+  # "tóm tắt hoạt động", Claude gọi pm2_list/audit_recent (chỉ đọc) mà phải xin phép → chờ 10 phút rồi chết.
+  local ro; ro="$(/usr/bin/node /opt/axle/mcp/tools-readonly.mjs 2>/dev/null)" || ro=""
   local opts=(--mcp-config "$CLAUDE_MCP_CFG"
     --permission-prompt-tool mcp__axle__duyet_quyen
-    --allowedTools "Read,Grep,Glob,LS,WebFetch,WebSearch,mcp__axle__system_status,mcp__axle__service_status,mcp__axle__file_list,mcp__axle__file_read,mcp__axle__file_search,mcp__axle__tay_windows,mcp__axle__tay_snapshot,mcp__axle__tay_read"
+    --allowedTools "Read,Grep,Glob,LS,WebFetch,WebSearch${ro:+,$ro}"
     --append-system-prompt "Bạn đang chạy trên máy Axle của chủ. Việc ĐỌC thì cứ làm. Việc ghi tệp, chạy lệnh, xoá sẽ hiện lên điện thoại chủ để duyệt — nói ngắn gọn trước khi xin, đừng xin dồn dập, và bị từ chối thì đừng thử lại bằng cách khác. Có lệnh hay API thì dùng lệnh; chỉ động tới cửa sổ (tay_*) khi việc chỉ tồn tại dưới dạng cửa sổ: tài liệu đang mở chưa lưu, hộp thoại, ứng dụng không có lệnh.")
   # --dong (Bàn dùng): sự kiện JSON từng dòng → bộ lọc in chữ trả lời NGAY khi có + mỗi lần dùng công cụ một dòng "→".
   # </dev/null: claude chờ stdin 3 giây nếu thấy ống dẫn (đo 21/9) — Bàn/cron không có gì để đưa vào.

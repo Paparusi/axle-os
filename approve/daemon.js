@@ -455,6 +455,12 @@ const app = createAppChannel({
     app.sendTo(d.id, { type: 'state', what: 'so', data: banChoApp(layBan()) });   // mở app là có sổ ngay; app cũ bỏ qua, vô hại
   },
   async onTask(d, task) {
+    // Dừng câu hỏi đang trả lời (nút Dừng ở thẻ Hỏi Axle): ký như việc nhanh, tác động chỉ tới câu của chính điện thoại đó
+    if (task === 'hoi-dung') {
+      const co = dungHoi(d.id);
+      log({ app: 'dừng câu hỏi', device: d.name, co });
+      return app.sendTo(d.id, { type: 'task-result', task, ok: true, text: co ? 'Đã dừng' : 'Không có câu nào đang trả lời' });
+    }
     const v = TASKS[task];
     if (!v) return log({ warn: `app: ${d.name} xin việc lạ ${task}` });
     log({ app: 'việc nhanh', task, ten: v.ten, device: d.name });
@@ -497,14 +503,15 @@ const app = createAppChannel({
   async onHoi(d, { cau, tiep }) {
     const h = hoiCfg();
     if (!h.enabled) return app.sendTo(d.id, { type: 'hoi-result', ok: false, text: 'Hỏi Axle đang tắt trên máy. Bật: sudo axle app hoi on' });
-    if (dangHoi.has(d.id)) return app.sendTo(d.id, { type: 'hoi-result', ok: false, text: 'Đang trả lời câu trước — chờ xong đã' });
-    dangHoi.add(d.id);
+    if (dangHoi.has(d.id)) return app.sendTo(d.id, { type: 'hoi-result', ok: false, text: 'Đang trả lời câu trước — bấm Dừng hoặc chờ xong' });
     const owner = ownerUser();
-    const giay = Math.min(Math.max(Number(h.timeoutSec ?? 600), 30), 1800);
+    // 30 phút: Claude có thể phải chờ chủ duyệt (10 phút/yêu cầu) rồi làm tiếp. Không qua bash -l: bị giết thì bash in
+    // "Session terminated, killing shell…" lên app (thấy 21/9); axle tự tìm claude ở ~/.local/bin, không cần profile.
+    const giay = Math.min(Math.max(Number(h.timeoutSec ?? 1800), 30), 3600);
     log({ app: 'hỏi Axle', device: d.name, cau: cap(cau, 300), tiep });
-    const script = `axle claude "$AXLE_CAU" --dong${tiep ? ' --tiep' : ''}`;
-    const p = spawn('timeout', ['-k', '5', String(giay), 'runuser', '-u', owner, '--', 'bash', '-lc', script],
-      { cwd: `/home/${owner}`, env: { ...process.env, AXLE_CAU: cau }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const p = spawn('timeout', ['-k', '5', String(giay), 'runuser', '-u', owner, '--', AXLE, 'claude', cau, '--dong', ...(tiep ? ['--tiep'] : [])],
+      { cwd: `/home/${owner}`, env: { ...process.env, HOME: `/home/${owner}` }, stdio: ['ignore', 'pipe', 'pipe'] });
+    dangHoi.set(d.id, p);
     let buf = ''; let dau = ''; let tong = 0; let timer = null; let cat = false;
     const day = () => { if (!buf) return; const t = buf; buf = ''; app.sendTo(d.id, { type: 'hoi-chunk', text: t }); };
     const them = (chunk) => {
@@ -519,25 +526,35 @@ const app = createAppChannel({
     p.stdout.on('data', (b) => them(b.toString()));
     p.stderr.on('data', (b) => them(b.toString()));
     p.on('error', (e) => { buf += `✗ không chạy được: ${e.message}\n`; });
-    p.on('close', (code) => {
+    p.on('close', (code, signal) => {
       clearTimeout(timer); timer = null; day();
+      const bi_dung = dangHoi.get(d.id)?.daDung === true;
       dangHoi.delete(d.id);
-      app.sendTo(d.id, { type: 'hoi-result', ok: code === 0, code, text: code === 0 ? '' : goiYLoiClaude(dau, code) });
-      log({ app: 'hỏi xong', code, byte: tong });
+      const ma = code ?? (signal ? 143 : -1);
+      app.sendTo(d.id, { type: 'hoi-result', ok: ma === 0, code: ma, text: ma === 0 ? '' : (bi_dung ? 'Đã dừng theo yêu cầu.' : goiYLoiClaude(dau, ma)) });
+      log({ app: 'hỏi xong', code: ma, byte: tong, ...(bi_dung ? { dung: true } : {}) });
     });
   },
 });
 // Hỏi Axle từ app: MẶC ĐỊNH BẬT (không có tệp = bật) — khác gõ lệnh, vì Claude trên máy chỉ đọc tự do, còn ghi/chạy
 // đều phải qua điện thoại duyệt. Tắt: sudo axle app hoi off. Một điện thoại hỏi một câu một lúc.
 const HOI_CFG = process.env.AXLE_APP_HOI || '/etc/axle/app-hoi.json';
-const hoiCfg = () => { try { return { enabled: true, timeoutSec: 600, ...JSON.parse(readFileSync(HOI_CFG, 'utf8')) }; } catch { return { enabled: true, timeoutSec: 600 }; } };
-const dangHoi = new Set();
+const hoiCfg = () => { try { return { enabled: true, timeoutSec: 1800, ...JSON.parse(readFileSync(HOI_CFG, 'utf8')) }; } catch { return { enabled: true, timeoutSec: 1800 }; } };
+const dangHoi = new Map();   // id điện thoại → tiến trình đang trả lời (để Dừng)
+function dungHoi(deviceId) {
+  const p = dangHoi.get(deviceId);
+  if (!p) return false;
+  p.daDung = true;
+  try { p.kill('SIGTERM'); } catch { /* đã chết */ }
+  return true;
+}
 function goiYLoiClaude(chu, code) {
   if (/Chưa cài Claude Code/.test(chu)) return 'Máy chưa có Claude Code (npm i -g @anthropic-ai/claude-code).';
   if (/not logged in|log ?in|đăng nhập|unauthori|authenticat|api key/i.test(chu)) {
     return 'Máy chưa đăng nhập Claude — ngồi vào máy, mở Terminal, gõ  claude  và đăng nhập một lần.';
   }
-  if (code === 124 || code === 137) return 'Quá thời gian — Axle đã dừng việc này.';
+  if (code === 124 || code === 137) return 'Quá 30 phút — Axle đã dừng việc này.';
+  if (code === 143 || code === 130) return 'Việc bị dừng.';
   return `Không làm được (mã ${code}).`;
 }
 app.start();

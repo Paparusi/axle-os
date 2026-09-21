@@ -54,6 +54,7 @@ info = "axle-box-v1")`; nội dung = ChaCha20-Poly1305(k, nonce 12 byte ngẫu n
 | app → máy | `hoi` | `cau`, `tiep`, `ts`, **`dsig`** — hỏi Axle (chat, D11): máy chạy `axle claude --dong` bằng tài khoản chủ; ký băm câu hỏi (`hoiString`), mỗi mốc giờ một lần; mặc định BẬT (`sudo axle app hoi off` để tắt) |
 | máy → app | `hoi-chunk` | `text` — chữ chảy về (gộp 0,7 giây một lần, ≤3000 ký tự/khúc, tổng ≤60.000) |
 | máy → app | `hoi-result` | `ok`, `code`, `text` (gợi ý khi hỏng: chưa đăng nhập Claude, quá giờ…) |
+| app → máy | `task` = `hoi-dung` | dừng câu đang trả lời của chính điện thoại đó (ký như việc nhanh); máy trả `task-result` + `hoi-result` "Đã dừng theo yêu cầu" |
 
 `hash` = sha256 của JSON chuẩn hoá `{ id, action, params, client, nonce }` — **đúng việc đã chốt lúc xin**.
 `taskString` = `axle-task-v1|<id máy>|<tên việc>|<ts>`. Mỗi `(việc, ts)` máy chỉ làm **một lần** (chặn phát lại

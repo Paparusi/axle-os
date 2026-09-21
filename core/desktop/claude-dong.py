@@ -41,7 +41,10 @@ def chay(vao=sys.stdin, ra=sys.stdout):
                 if c.get("type") == "text" and c.get("text"):
                     ra.write(c["text"].rstrip() + "\n")
                 elif c.get("type") == "tool_use":
-                    ten = str(c.get("name", "?")).replace("mcp__axle__", "axle:")
+                    ten = str(c.get("name", "?"))
+                    if ten == "ToolSearch":            # cơ chế nội bộ của Claude Code (nạp mô tả công cụ) — không phải việc
+                        continue
+                    ten = ten.replace("mcp__axle__", "")
                     ra.write(f"→ {ten} {tom_tat(c.get('input'))}".rstrip() + "\n")
             ra.flush()
         elif t == "result":
