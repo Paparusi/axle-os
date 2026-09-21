@@ -115,7 +115,7 @@ vm 'test -f /etc/xdg/autostart/vn.axleos.Ban.desktop && grep -q -- "--ban" /etc/
 ok $? "Bàn Axle tự mở sau khi đăng nhập (autostart hệ thống)"
 [ "$(vm 'dconf read /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/axle-ban/binding')" = "'<Super>b'" ]
 ok $? "Super+B gọi Bàn Axle (phím tắt mặc định, đọc đúng như GNOME đọc)"
-vm 'test -r /run/axle/ban.json && python3 -c "import json; j=json.load(open(\"/run/axle/ban.json\")); assert isinstance(j[\"pending\"], list) and \"homNay\" in j and \"agents\" in j"'
+vm 'test -r /run/axle/ban.json && python3 -c "import json; j=json.load(open(\"/run/axle/ban.json\")); assert isinstance(j[\"pending\"], list) and \"homNay\" in j and \"agents\" in j and isinstance(j[\"so\"], list)"'
 ok $? "bộ duyệt công bố /run/axle/ban.json, chủ máy đọc được không cần sudo"
 vm 'axle duyet --json | grep -q "^\["'; ok $? "axle duyet --json (Bàn đọc việc đang chờ) trả danh sách"
 vm '[ "$(stat -c %a /run/axle/ban.json)" = 640 ] && [ "$(stat -c %U /run/axle/ban.json)" = root ]'; ok $? "ban.json là root, quyền 0640 (tài khoản agent hộp cát không đọc được)"

@@ -26,18 +26,18 @@ def ok(c, m):
     print(f"  {'✓' if c else '✗'} {m}")
     if not c: fail += 1
 
-doc_ban, tom_tat_viec, doc_audit, goi_y_loi, tuoi, loi_chao = (g[k] for k in ("doc_ban", "tom_tat_viec", "doc_audit", "goi_y_loi", "tuoi", "loi_chao"))
+doc_ban, tom_tat_viec, doc_audit, goi_y_loi, tuoi, loi_chao, mo_ta_so = (g[k] for k in ("doc_ban", "tom_tat_viec", "doc_audit", "goi_y_loi", "tuoi", "loi_chao", "mo_ta_so"))
 
 ok(doc_ban("") is None and doc_ban("{oops") is None and doc_ban("[]") is None, "ban.json rỗng / hỏng / sai kiểu → None (Bàn nói 'chưa đọc được', không giả vờ trống)")
-p, hn, ag = doc_ban(json.dumps({"pending": [], "homNay": {"chu_duyet": 1}, "agents": []}))
-ok(p == [] and hn == {"chu_duyet": 1} and ag == [], "ban.json trống hợp lệ → không việc, có số hôm nay")
+p, hn, ag, so = doc_ban(json.dumps({"pending": [], "homNay": {"chu_duyet": 1}, "agents": []}))
+ok(p == [] and hn == {"chu_duyet": 1} and ag == [] and so == [], "ban.json trống hợp lệ → không việc, có số hôm nay, sổ rỗng")
 raw = {"pending": [
     {"id": "a1b2c3d4", "tier": 2, "client": "ssh:claude", "buttons": "ahlr", "ageSec": 42,
      "text": "🔐 m · cần duyệt #a1b2c3d4\nAgent: ssh:claude\nViệc: Claude dùng Bash: `npm test` <b>x</b>\nBậc 2\nHết hạn sau 10 phút"},
     {"id": "ZZZ", "text": "giả"},                                   # id lạ → bỏ
     {"id": "e5f60718", "tier": "3", "client": "http:cog (user ag-cog)", "buttons": "axr", "text": ""},   # nút lạ 'x' bị lọc
 ], "agents": [{"ten": "cog", "vai": "phu"}, {"vai": "phu"}, "rác"]}
-p, hn, ag = doc_ban(json.dumps(raw, ensure_ascii=False))
+p, hn, ag, so = doc_ban(json.dumps(raw, ensure_ascii=False))
 ok([r["id"] for r in p] == ["a1b2c3d4", "e5f60718"], "bỏ việc có id lạ, giữ đúng thứ tự")
 ok(p[1]["tier"] == 3 and p[1]["buttons"] == "ar", "bậc dạng chuỗi → số; chữ nút lạ bị lọc, còn a/r")
 ok(ag == [{"ten": "cog", "vai": "phu"}], "agent thiếu tên / không phải dict → bỏ")
@@ -58,6 +58,16 @@ n, gan = doc_audit(lines, hom)
 ok(n == 2 if now.astimezone(datetime.timezone.utc).date() == now.date() else n >= 1, f"đếm hôm nay = {n} (bỏ http_auth, bỏ hôm qua, bỏ dòng hỏng)")
 ok(len(gan) == 3 and gan[0].endswith("ssh:claude · file_read") and gan[-1].endswith("cog · web_snapshot"), "vài dòng gần nhất: giờ · ai · công cụ")
 ok(doc_audit([], hom) == (0, []), "audit rỗng → 0, []")
+
+s1 = mo_ta_so({"id": "1", "luc": now.isoformat(), "agent": "ssh:claude", "viec": "Claude Bash `npm test`", "tu_duyet": False, "quyet_dinh": "h", "via": "qua app iPhone", "ket_qua": "done", "exitCode": 0})
+ok(s1[0] == "✅" and s1[1] == "Claude Bash `npm test`" and "1 giờ · qua app iPhone · xong" in s1[2], f"sổ: chủ cho 1 giờ qua app, chạy xong → {s1}")
+s2 = mo_ta_so({"id": "2", "luc": now.isoformat(), "agent": "cog", "viec": "lệnh `sudo x` (root)", "tu_duyet": False, "quyet_dinh": "r", "via": "tại máy", "ket_qua": "rejected"})
+ok(s2[0] == "❌" and "từ chối · tại máy" in s2[2] and "xong" not in s2[2], "sổ: từ chối tại máy")
+s3 = mo_ta_so({"id": "3", "luc": now.isoformat(), "agent": "ssh:claude", "viec": "Claude Edit a.js", "tu_duyet": "phiên 1 giờ #3", "ket_qua": "done", "exitCode": 0})
+ok(s3[0] == "⚙" and "tự duyệt (phiên 1 giờ #3)" in s3[2], "sổ: tự duyệt theo phiên")
+s4 = mo_ta_so({"id": "4", "luc": "rác", "agent": "x", "action": "run_command", "ket_qua": "expired"})
+ok(s4 == ("⌛", "run_command", "? · x · hết hạn, không chạy"), f"sổ: hết hạn, thiếu mô tả và giờ hỏng → vẫn ra dòng đọc được ({s4})")
+ok(mo_ta_so({"id": "5", "luc": now.isoformat(), "agent": "a", "viec": "v", "ket_qua": "failed", "exitCode": 2, "quyet_dinh": "a"})[2].endswith("lần này · lỗi (mã 2)"), "sổ: cho phép lần này, chạy lỗi mã 2")
 
 ok("đăng nhập Claude" in goi_y_loi("Error: Not logged in. Please run /login"), "lỗi chưa đăng nhập → chỉ cách đăng nhập")
 ok("chưa có Claude Code" in goi_y_loi("Chưa cài Claude Code trên máy này (npm …)"), "chưa cài → nói chưa cài")

@@ -258,3 +258,23 @@ Bàn, `cuaso` thấy "Bàn Axle", `chup` ra nút "Làm"/"Chế độ tay"/ô nh�
 
 Chưa làm: Chromium qua AT-SPI (đã có `web` tốt hơn), gõ phím tổ hợp (không có đường trợ năng — cố ý), tay cho
 agent phụ.
+
+## Sổ + nhãn cho phản xạ (nhịp D9)
+
+Hàng thứ tư và thứ năm của mô hình: **máy có ký ức** và **máy có phản xạ**. Ubuntu không bao giờ kể nó đã làm
+gì; Axle thì mọi việc agent xin và chủ quyết đều có dòng ghi — và đó cũng chính là dữ liệu để máy học tay chủ.
+
+**Sổ** (mục thứ hai trong cửa sổ Axle, nút "Xem sổ" trên Bàn): tóm tắt hôm nay (một nguồn, cùng số với Bàn),
+"Việc đã hỏi bạn" (~40 việc gần nhất: ai xin · việc gì · chủ quyết ra sao — lần này / 1 giờ / luôn / từ chối,
+qua app hay tại máy · kết quả), "Công cụ trợ lý chính đã gọi" (30 lần gần nhất), và chỉ sang mục Quay lại cho ảnh
+hệ thống. Nguồn: bộ duyệt công bố thêm `so` vào `/run/axle/ban.json` (gộp đuôi nhật ký `approvals.jsonl` theo id,
+`approve/mota.js`), **không đưa `params`** (lệnh đầy đủ) ra tệp — Sổ chỉ cần một dòng mô tả.
+
+**Chữ quyết định giờ được ghi**: `applyDecision` ghi `{id, decision: a|h|l|r, via}` — trước đây nhật ký chỉ có
+trạng thái (running/rejected), không biết chủ đã bấm "1 giờ" hay "luôn".
+
+**Nhãn cho phản xạ**: `sudo axle phanxa xuat [--tu 2026-09-01] > nhan.jsonl` — mỗi việc chủ đã quyết thành một mẫu
+`{state, questions, gold}` đúng khuôn laya/typed-decisions (`quyet_dinh`: cho_phep/tu_choi; `nho`: lan_nay/mot_gio/
+luon/khong khi có chữ quyết định). Bỏ việc tự duyệt (không phải quyết định mới) và hết hạn (chủ không quyết).
+Hôm nay chỉ xuất; chưa có model nào đọc — quyết định laya đã chốt: đủ ≥1.000 nhãn mới cân nhắc fine-tune
+(`reference-laya`). Không byte nào rời máy.

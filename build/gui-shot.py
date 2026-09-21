@@ -29,7 +29,11 @@ with open(os.path.join(T, "ban.json"), "w", encoding="utf-8") as f:
          "text": "🔐 axle-thu · cần duyệt #e5f60718\nAgent: http:cog (user ag-cog)\nViệc: chạy `sudo systemctl restart nginx` ⚠️ BẰNG QUYỀN ROOT\n⚠️ Bậc 3 · việc hệ trọng, luôn phải hỏi\nHết hạn sau 10 phút"}],
         "homNay": {"chu_duyet": 7, "tu_duyet": 12, "tu_choi": 1, "het_han": 0},
         "agents": [{"ten": "claude", "vai": "chinh", "user": None, "tam_dung": False},
-                   {"ten": "cog", "vai": "phu", "user": "ag-cog", "tam_dung": True}]}, f, ensure_ascii=False)
+                   {"ten": "cog", "vai": "phu", "user": "ag-cog", "tam_dung": True}],
+        "so": [{"id": "11aa22bb", "luc": gio(600), "agent": "ssh:claude", "action": "claude_tool", "viec": "Claude Bash `npm test`", "tu_duyet": False, "quyet_dinh": "h", "via": "qua app iPhone của Bi", "ket_qua": "done", "exitCode": 0},
+               {"id": "33cc44dd", "luc": gio(2400), "agent": "http:cog (user ag-cog)", "action": "run_command", "viec": "lệnh `sudo systemctl restart nginx` (root)", "tu_duyet": False, "quyet_dinh": "r", "via": "tại máy", "ket_qua": "rejected", "exitCode": None},
+               {"id": "55ee66ff", "luc": gio(5000), "agent": "ssh:claude", "action": "claude_tool", "viec": "Claude Edit ~/work/web/app.js", "tu_duyet": "phiên 1 giờ #3 (tới 15:02)", "quyet_dinh": None, "via": None, "ket_qua": "done", "exitCode": 0},
+               {"id": "7788aabb", "luc": gio(9000), "agent": "ssh:claude", "action": "run_command", "viec": "lệnh `rm -rf node_modules`", "tu_duyet": False, "quyet_dinh": None, "via": None, "ket_qua": "expired", "exitCode": None}]}, f, ensure_ascii=False)
 with open(os.path.join(T, "audit.jsonl"), "w", encoding="utf-8") as f:
     for i, tool in enumerate(["file_read", "web_snapshot", "web_click", "file_search", "system_status", "http_auth"]):
         f.write(json.dumps({"ts": gio(3600 - i * 300), "client": "ssh:claude", "tool": tool}) + "\n")

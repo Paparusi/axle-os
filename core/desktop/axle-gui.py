@@ -100,7 +100,33 @@ def doc_ban(chu):
                      "text": str(r.get("text") or ""), "buttons": nut, "ageSec": int(r.get("ageSec") or 0)})
     hn = j.get("homNay") if isinstance(j.get("homNay"), dict) else {}
     ag = [a for a in (j.get("agents") or []) if isinstance(a, dict) and a.get("ten")]
-    return pend, hn, ag
+    so = [x for x in (j.get("so") or []) if isinstance(x, dict) and x.get("id")]
+    return pend, hn, ag, so
+
+
+def mo_ta_so(x):
+    """Một dòng Sổ (từ ban.json) → (dấu, tiêu đề, phụ đề): ai xin, việc gì, chủ quyết ra sao, kết quả."""
+    kq = x.get("ket_qua") or "pending"
+    qd = x.get("quyet_dinh")
+    if x.get("tu_duyet"):
+        dau, loi = "⚙", "tự duyệt" + (f" ({x['tu_duyet']})" if isinstance(x.get("tu_duyet"), str) else "")
+    elif kq == "rejected" or qd == "r":
+        dau, loi = "❌", "từ chối"
+    elif kq == "expired":
+        dau, loi = "⌛", "hết hạn, không chạy"
+    elif kq == "pending":
+        dau, loi = "⏳", "đang chờ"
+    else:
+        dau, loi = "✅", {"a": "lần này", "h": "1 giờ", "l": "luôn việc này"}.get(qd, "cho phép")
+    if x.get("via") and kq != "pending" and not x.get("tu_duyet"):
+        loi += f" · {x['via']}"
+    kq_chu = {"done": "xong", "failed": f"lỗi (mã {x.get('exitCode')})", "running": "đang chạy"}.get(kq, "")
+    try:
+        gio = datetime.datetime.fromisoformat(str(x.get("luc")).replace("Z", "+00:00")).astimezone().strftime("%d/%m %H:%M")
+    except ValueError:
+        gio = "?"
+    phu = " · ".join(p for p in (gio, str(x.get("agent") or "?"), loi, kq_chu) if p)
+    return dau, str(x.get("viec") or x.get("action") or "?"), phu
 
 
 def tom_tat_viec(r):
@@ -182,6 +208,7 @@ class CuaSo(Adw.ApplicationWindow):
         # Thanh bên chứ không phải thẻ ngang: tới mục thứ năm là thẻ ngang cắt cụt chữ ("Điện t…", "Quay …").
         # Đây cũng là cách Cài đặt của GNOME làm, và thêm mục sau này không vỡ bố cục. Bàn đứng đầu: nó là mặt tiền.
         muc = [("ban", "Bàn", "go-home-symbolic", self.trang_ban),
+               ("so", "Sổ", "view-list-symbolic", self.trang_so),
                ("may", "Máy", "computer-symbolic", self.trang_tong_quan),
                ("dt", "Điện thoại", "phone-symbolic", self.trang_dien_thoai),
                ("tn", "Tính năng", "preferences-system-symbolic", self.trang_tinh_nang),
@@ -204,6 +231,7 @@ class CuaSo(Adw.ApplicationWindow):
             hop.append(Gtk.Label(label=ten, xalign=0))
             ds.append(Gtk.ListBoxRow(child=hop))
         ds.select_row(ds.get_row_at_index(0))
+        self.ds, self.muc_ma = ds, [m[0] for m in muc]
 
         ben = Adw.ToolbarView()
         ben.add_top_bar(Adw.HeaderBar(title_widget=Adw.WindowTitle(title="Axle")))
@@ -306,6 +334,45 @@ class CuaSo(Adw.ApplicationWindow):
         cot.append(luoi)
         return cuon
 
+    def chon_muc(self, ma):
+        """Chuyển sang mục trong thanh bên (nút "Xem sổ" trên Bàn)."""
+        if ma in self.muc_ma:
+            self.ds.select_row(self.ds.get_row_at_index(self.muc_ma.index(ma)))
+
+    # ---------- Sổ ----------
+    def trang_so(self):
+        """Sổ: mọi việc máy đã hỏi chủ và chủ đã quyết, công cụ agent đã gọi — thứ Ubuntu không bao giờ kể.
+        Đây là lý do người ta DÁM để agent làm việc trên máy: cái gì cũng có dòng ghi, và quay lại được."""
+        cuon = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
+        cot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18,
+                      margin_top=20, margin_bottom=24, margin_start=28, margin_end=28)
+        cuon.set_child(Adw.Clamp(child=cot, maximum_size=1100, tightening_threshold=900))
+        cot.append(Gtk.Label(label="Sổ của máy", xalign=0, css_classes=["title-2"]))
+        self.so_tom_tat = Gtk.Label(xalign=0, wrap=True, css_classes=["dim-label"], label="")
+        cot.append(self.so_tom_tat)
+        the1, self.so_viec = self.the("Việc đã hỏi bạn")
+        cot.append(the1)
+        the2, self.so_goi = self.the("Công cụ trợ lý chính đã gọi")
+        cot.append(the2)
+        the3, noi3 = self.the("Ảnh hệ thống")
+        noi3.append(Gtk.Label(label="Mỗi lần cài đặt hay việc hệ trọng, máy tự chụp một ảnh — xem đã đổi gì và quay về ở mục “Quay lại”.",
+                              xalign=0, wrap=True, css_classes=["dim-label"]))
+        cot.append(the3)
+        return cuon
+
+    def ve_so(self, so):
+        self.don(self.so_viec)
+        if not so:
+            self.so_viec.append(self.dong_mo("Chưa có việc nào được hỏi.", "Agent xin gì, bạn quyết gì — đều ghi ở đây."))
+            return
+        ds = Gtk.ListBox(css_classes=["boxed-list"], selection_mode=Gtk.SelectionMode.NONE)
+        for x in so[:40]:
+            dau, tieu_de, phu = mo_ta_so(x)
+            row = Adw.ActionRow(title=tieu_de, subtitle=phu, use_markup=False)
+            row.add_prefix(Gtk.Label(label=dau))
+            ds.append(row)
+        self.so_viec.append(ds)
+
     def chao_hoi(self):
         u = pwd.getpwuid(os.getuid())
         ten = (u.pw_gecos or "").split(",")[0].strip() or u.pw_name
@@ -337,8 +404,10 @@ class CuaSo(Adw.ApplicationWindow):
                                              "Bộ duyệt chưa chạy, hoặc máy đang chạy bản Axle cũ (sudo axle update)."))
             self.noi_dang.append(self.dong_mo("Chưa đọc được danh sách agent."))
             return True
-        pend, hn, ag = b
+        pend, hn, ag, so = b
         self.hom_nay_duyet = hn
+        if hasattr(self, "so_viec"):
+            self.ve_so(so)
 
         if not pend:
             self.noi_can.append(self.dong_mo("Không có việc nào chờ bạn.",
@@ -391,11 +460,23 @@ class CuaSo(Adw.ApplicationWindow):
                 f"{hn.get('tu_choi', 0)} từ chối · {hn.get('het_han', 0)} hết hạn")))
         else:
             self.noi_nay.append(self.dong_mo("Chưa có số duyệt hôm nay."))
-        n = getattr(self, "so_goi_hom_nay", None)
-        if n is None:
-            n, _ = doc_audit(doc_duoi(AUDIT), datetime.date.today().isoformat())
+        n, gan = doc_audit(doc_duoi(AUDIT), datetime.date.today().isoformat(), toi_da=30)
+        self.so_goi_hom_nay = n
         self.noi_nay.append(Gtk.Label(label=f"Trợ lý chính gọi công cụ {n} lần", xalign=0))
         self.noi_nay.append(Gtk.Label(label=f"Máy chạy liên tục {self.chay_lau()}", xalign=0, css_classes=["dim-label"]))
+        nut = Gtk.Button(label="Xem sổ", css_classes=["flat"], halign=Gtk.Align.START)
+        nut.connect("clicked", lambda *_: self.chon_muc("so"))
+        self.noi_nay.append(nut)
+        if hasattr(self, "so_goi"):        # trang Sổ dùng cùng số và cùng danh sách — một nguồn, không hai con số
+            duyet = (f"Hôm nay: {hn.get('chu_duyet', 0)} bạn duyệt · {hn.get('tu_duyet', 0)} tự duyệt theo luật · "
+                     f"{hn.get('tu_choi', 0)} từ chối · {hn.get('het_han', 0)} hết hạn · trợ lý chính gọi công cụ {n} lần") if hn \
+                else f"Hôm nay: trợ lý chính gọi công cụ {n} lần"
+            self.so_tom_tat.set_label(duyet)
+            self.don(self.so_goi)
+            if not gan:
+                self.so_goi.append(self.dong_mo("Chưa có."))
+            for d in gan:
+                self.so_goi.append(Gtk.Label(label=d, xalign=0, css_classes=["dim-label", "caption", "monospace"], ellipsize=3))
         return True
 
     def duyet_tai_may(self, _nut, ma, c):

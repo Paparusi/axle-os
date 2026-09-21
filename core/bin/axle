@@ -60,6 +60,7 @@ sudo axle app devices | remove <id>
                          điện thoại đã ghép / gỡ một điện thoại
 sudo axle duyet [<id> a|h|l|r] · axle duyet --json   duyệt tại máy · việc đang chờ (Bàn Axle đọc)
 axle tay cuaso|chup|bam N|go N "chữ"|doc N|mo <app>   tay cho mọi ứng dụng: bảng phần tử qua trợ năng, không tiêm phím
+sudo axle phanxa xuat [--tu ngày]   xuất nhãn (chủ đã quyết gì) cho lớp phản xạ
                          xem và duyệt yêu cầu ngay tại máy (dùng được cả khi mọi kênh khác hỏng)
 axle claude "câu hỏi" [--tiep]
                          Claude Code chạy TRÊN máy này: đọc/tìm thì làm ngay, còn ghi tệp/chạy lệnh
@@ -836,6 +837,14 @@ app_cmd() {   # sudo axle app setup|pair|confirm|devices|remove|terminal
   esac
 }
 
+phanxa_cmd() {   # sudo axle phanxa xuat [--tu YYYY-MM-DD] — nhãn từ nhật ký duyệt cho lớp phản xạ (D9)
+  case "${1:-}" in
+    xuat) [ "$(id -u)" = 0 ] || { echo "Cần sudo: sudo axle phanxa xuat" >&2; exit 1; }
+          shift; exec /usr/bin/node /opt/axle/approve/nhan.mjs "$@" ;;
+    *) echo "sudo axle phanxa xuat [--tu YYYY-MM-DD]   → JSONL {state, questions, gold} ra stdout" >&2; exit 2 ;;
+  esac
+}
+
 duyet_cmd() {   # sudo axle duyet [<id> a|h|l|r] — duyệt ngay tại máy (mức tin cậy cao nhất: mật khẩu sudo)
   # XEM thì không cần mật khẩu: bộ duyệt tự công bố việc đang chờ + số hôm nay ra tệp root:chủ 0640
   case "${1:-}" in
@@ -883,6 +892,7 @@ case "${1:-help}" in
   approve)   shift; approve_cmd "$@" ;;
   app)       shift; app_cmd "$@" ;;
   duyet)     shift; duyet_cmd "$@" ;;
+  phanxa)    shift; phanxa_cmd "$@" ;;
   cmdlog)    shift; exec sudo -n /usr/local/lib/axle/axle-cmdlog "$@" ;;
   version)   cat /etc/axle/version ;;
   desktop)   shift; desktop_cmd "$@" ;;

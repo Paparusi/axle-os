@@ -11,12 +11,13 @@ import { createServer, request as httpRequest } from 'node:http';
 import { connect as netConnect } from 'node:net';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { appendFileSync, chownSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, chmodSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chownSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, statSync, unlinkSync, chmodSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { hostname } from 'node:os';
 import { addRule, addSession, autoLabel, canRemember, canSession, describeRule, findAuto, keyboard, loadRules, prune,
   saveRules, tierLine, tierOf, writeDurable } from './rules.js';
 import { buildDigest } from './digest.js';
+import { gopNhatKy } from './mota.js';
 import { createAppChannel } from './app-channel.js';
 import { machineState } from './machine-state.js';
 import { requestHash } from '../app/proto.js';
@@ -405,6 +406,8 @@ async function createRequest({ action, params, client }, who) {
 
 // Áp một quyết định (Telegram / app / tại máy). d: a lần này · h 1 giờ · l luôn · r từ chối. Bậc 3 bỏ qua h/l.
 function applyDecision(r, d, via) {
+  // Ghi CHỮ quyết định (a/h/l/r) + qua đâu: Sổ trên Bàn đọc, và là nhãn cho lớp phản xạ (approve/nhan.mjs)
+  log({ id: r.id, decision: d, via: String(via || '').replace(/^\s*·\s*/, '') || 'Telegram' });
   if (d === 'r') { decide(r, false); return 'Đã từ chối'; }
   let note = via;
   if (d === 'h' && canSession(r)) {
@@ -715,6 +718,21 @@ function homNay() {
   } catch { /* chưa có nhật ký */ }
   return { chu_duyet: Math.max(0, n.running - n.auto), tu_duyet: n.auto, tu_choi: n.rejected, het_han: n.expired };
 }
+// Sổ: ~40 việc gần nhất máy đã hỏi chủ (đọc đuôi nhật ký, không phải cả tệp — nhật ký lớn dần theo tháng)
+function docDuoiLog(toiDa = 262144) {
+  try {
+    const fd = openSync(LOG, 'r');
+    const { size } = fstatSync(fd);
+    const len = Math.min(size, toiDa);
+    const buf = Buffer.alloc(len);
+    readSync(fd, buf, 0, len, size - len);
+    closeSync(fd);
+    const dong = buf.toString('utf8').split('\n');
+    return size > toiDa ? dong.slice(1) : dong;
+  } catch { return []; }
+}
+const soGanDay = (toiDa = 40) => gopNhatKy(docDuoiLog()).slice(0, toiDa).map(({ params, ...x }) => x);   // không đưa params (lệnh đầy đủ) ra tệp
+
 function publishBan() {
   const c = cfg();
   const pending = [...requests.values()].filter((r) => r.state === 'pending').map((r) => ({
@@ -722,7 +740,7 @@ function publishBan() {
     buttons: keyboard(r).flat().map((b) => b.callback_data.slice(-1)).join(''),
     ageSec: Math.round((Date.now() - r.created) / 1000), expires: new Date(r.created + c.expireSec * 1000).toISOString() }));
   const agents = agentList().map((a) => ({ ten: a.name, vai: a.role, user: a.user, tam_dung: a.suspended }));
-  const data = JSON.stringify({ ts: new Date().toISOString(), host: hostname(), pending, homNay: homNay(), agents });
+  const data = JSON.stringify({ ts: new Date().toISOString(), host: hostname(), pending, homNay: homNay(), agents, so: soGanDay() });
   try {
     mkdirSync(path.dirname(BAN_FILE), { recursive: true, mode: 0o755 });
     const tmp = `${BAN_FILE}.tmp`;
