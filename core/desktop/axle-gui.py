@@ -34,6 +34,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 AXLE = os.environ.get("AXLE_BIN", "/usr/local/bin/axle")
 BAN_FILE = os.environ.get("AXLE_BAN_FILE", "/run/axle/ban.json")
 AUDIT = os.environ.get("AXLE_AUDIT_FILE", os.path.expanduser("~/.local/state/axle/audit.jsonl"))
+BRAIN_DIR = os.environ.get("AXLE_BRAIN_DIR", os.path.expanduser("~/Axle/Brain"))
 THU = ["Thứ hai", "Thứ ba", "Thứ tư", "Thứ năm", "Thứ sáu", "Thứ bảy", "Chủ nhật"]
 # Nút duyệt tại máy, theo chữ cái bộ duyệt gửi (a lần này · h 1 giờ · l luôn · r từ chối)
 NUT = {"a": ("Lần này", ["suggested-action"]), "h": ("1 giờ", []), "l": ("Luôn", []), "r": ("Từ chối", ["destructive-action"])}
@@ -250,6 +251,7 @@ class CuaSo(Adw.ApplicationWindow):
         # Đây cũng là cách Cài đặt của GNOME làm, và thêm mục sau này không vỡ bố cục. Bàn đứng đầu: nó là mặt tiền.
         muc = [("ban", "Bàn", "go-home-symbolic", self.trang_ban),
                ("so", "Sổ", "view-list-symbolic", self.trang_so),
+               ("nao", "Tri thức", "accessories-dictionary-symbolic", self.trang_nao),
                ("may", "Máy", "computer-symbolic", self.trang_tong_quan),
                ("dt", "Điện thoại", "phone-symbolic", self.trang_dien_thoai),
                ("tn", "Tính năng", "preferences-system-symbolic", self.trang_tinh_nang),
@@ -413,6 +415,60 @@ class CuaSo(Adw.ApplicationWindow):
             row.add_prefix(Gtk.Label(label=dau))
             ds.append(row)
         self.so_viec.append(ds)
+
+    # ---------- Tri thức (Bộ não Axle) ----------
+    def trang_nao(self):
+        """Bộ não Axle: tài liệu chủ gửi lên (raw/, bất biến) và wiki Claude tự bảo trì (~/Axle/Brain). Ở đây chỉ NHÌN:
+        danh mục index.md, mấy dòng nhật ký gần nhất, mở thư mục để tự sửa tay."""
+        cuon = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
+        cot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18,
+                      margin_top=20, margin_bottom=24, margin_start=28, margin_end=28)
+        cuon.set_child(Adw.Clamp(child=cot, maximum_size=1100, tightening_threshold=900))
+        dau = Gtk.Box(spacing=12)
+        dau.append(Gtk.Label(label="Bộ não Axle", xalign=0, css_classes=["title-2"], hexpand=True))
+        nut_mo = Gtk.Button(label="Mở thư mục", tooltip_text="Sửa tay trang wiki hay xem tệp gốc. Mọi lần ghi đều có trong git.")
+        nut_mo.connect("clicked", lambda *_: subprocess.Popen(["xdg-open", BRAIN_DIR]))
+        nut_lai = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Đọc lại")
+        nut_lai.connect("clicked", lambda *_: self.nap_nao())
+        dau.append(nut_mo)
+        dau.append(nut_lai)
+        cot.append(dau)
+        self.nao_tom_tat = Gtk.Label(xalign=0, wrap=True, css_classes=["dim-label"],
+                                     label="Gửi tài liệu qua Hỏi Axle (điện thoại) hay hỏi Bàn — tệp vào raw/, Claude tóm tắt thành trang wiki và tra lại được sau này.")
+        cot.append(self.nao_tom_tat)
+        the1, noi1 = self.the("Danh mục (wiki/index.md)")
+        self.nao_index = Gtk.TextView(editable=False, cursor_visible=False, wrap_mode=Gtk.WrapMode.WORD_CHAR,
+                                      top_margin=6, bottom_margin=6, left_margin=8, right_margin=8)
+        noi1.append(Gtk.ScrolledWindow(child=self.nao_index, min_content_height=200, max_content_height=480,
+                                       propagate_natural_height=True, css_classes=["ban-ket-qua"]))
+        cot.append(the1)
+        the2, self.nao_log = self.the("Nhật ký gần đây (wiki/log.md)")
+        cot.append(the2)
+        GLib.idle_add(self.nap_nao)
+        return cuon
+
+    def nap_nao(self, *_):
+        index = doc(os.path.join(BRAIN_DIR, "wiki/index.md"), "")
+        if not index:
+            self.nao_tom_tat.set_label("Chưa có Bộ não trên máy này — gửi tài liệu đầu tiên qua Hỏi Axle, hay chạy: axle brain")
+        else:
+            n_tep = sum(1 for _r, _d, fs in os.walk(os.path.join(BRAIN_DIR, "raw")) for f in fs if not f.startswith(".") and ".doi" not in _r)
+            n_trang = sum(1 for _r, _d, fs in os.walk(os.path.join(BRAIN_DIR, "wiki")) for f in fs if f.endswith(".md"))
+            self.nao_tom_tat.set_label(f"{BRAIN_DIR} · {n_tep} tài liệu · {n_trang} trang wiki · git giữ lịch sử mọi lần ghi")
+        buf = self.nao_index.get_buffer()
+        buf.set_text("")
+        self.ket_qua, cu = self.nao_index, self.ket_qua   # mượn bộ dựng Markdown gọn của Bàn cho ô này
+        try:
+            self.them_ket_qua(index or "(chưa có)\n")
+        finally:
+            self.ket_qua = cu
+        self.don(self.nao_log)
+        dong = [d for d in doc(os.path.join(BRAIN_DIR, "wiki/log.md"), "").splitlines() if d.startswith("- ")][-8:]
+        if not dong:
+            self.nao_log.append(self.dong_mo("Chưa có gì."))
+        for d in reversed(dong):
+            self.nao_log.append(Gtk.Label(label=d[2:], xalign=0, wrap=True, css_classes=["dim-label", "caption"]))
+        return False
 
     def chao_hoi(self):
         u = pwd.getpwuid(os.getuid())

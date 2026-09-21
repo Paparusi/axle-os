@@ -333,3 +333,30 @@ Node ⇄ Swift thêm hộp byte hai chiều. Chưa có: chụp thẳng bằng ca
 tệp cạnh nút ảnh, từ Files/iCloud/Zalo đã lưu). Máy giữ tên gốc (đã làm an toàn: bỏ dấu, chỉ [A-Za-z0-9._-]) và đổi
 sẵn bằng LibreOffice dưới tài khoản chủ: Excel → mỗi sheet một CSV, Word → txt, PowerPoint → PDF, PDF → txt
 (pdftotext) rồi nhắc Claude đọc bản đã đổi. Trạm chở tới 16MB thân, vẫn mù nội dung.
+
+## Bộ não Axle (nhịp D13)
+
+Bi (21/9): *"không thể tạo 1 wiki - brain cho Axle sao?"* — theo đúng khuôn brain của Bi (`~/brain/CLAUDE.md`):
+**raw/ bất biến → wiki/ Claude tự bảo trì → index.md luôn đọc đầu → INGEST / QUERY / LINT / log**, git giữ lịch sử.
+
+```
+~/Axle/Brain/                      (nhà chủ, 0700; core/desktop/brain-init.sh dựng, chạy nhiều lần vô hại)
+├── QUY-UOC.md                     quy ước — Claude đọc trước khi tra/ghi (brain_index trả về cùng index.md)
+├── raw/YYYY-MM/<ts>-<tên>         tệp chủ gửi qua Hỏi Axle (vĩnh viễn, không dọn; trùng sha256 → dùng lại)
+│   └── <tệp>.doi/                 bản đã đổi: CSV từng sheet / văn bản / PDF→txt (doi-tep.sh)
+├── raw/.index.jsonl               máy ghi: sha, đường, tên, lúc, thiết bị, câu hỏi
+└── wiki/ index.md log.md sources/ entities/ projects/ decisions/ learnings/ concepts/
+```
+
+**Công cụ cho Claude** (`mcp/brain.js`, chỉ ngữ cảnh chủ): `brain_index` (quy ước + danh mục), `brain_tim` (từ khoá
+qua wiki + tệp đã đổi, xếp hạng, trích dòng), `brain_doc`, `brain_tai_lieu`, và `brain_ghi` — ghi/nối trang **chỉ trong
+wiki/*.md**, mỗi lần ghi một commit git. Vì khoanh vùng + quay lại được nên `axle claude` cho `brain_ghi` dùng thẳng,
+không hỏi (mọi tool `brain_*` đọc cũng nằm trong danh sách chỉ đọc tự sinh). System prompt dặn: hỏi về tài liệu/khách/
+dự án → `brain_index` trước, trả lời kèm tên trang/tệp; có tệp mới → INGEST sau khi trả lời.
+
+**Nhìn:** Bàn có trang **Tri thức** (danh mục, nhật ký, mở thư mục); `axle brain ds | tim <từ> | mo`.
+
+Thử: `node mcp/test-brain.mjs` (15 ca: dựng, chặn đường dẫn lạ, không ghi raw/, chỉ .md, tìm wiki + CSV, git commit,
+index tài liệu). **Không phải NotebookLM:** không embedding, không app riêng — trang Markdown người đọc được, Claude
+vừa viết vừa đọc; cần tìm ngữ nghĩa thì thêm sau. Notion: có thể soi gương sang một database Notion khi Bi đưa token
+(chưa làm).

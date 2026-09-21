@@ -61,6 +61,7 @@ sudo axle app devices | remove <id>
 sudo axle duyet [<id> a|h|l|r] · axle duyet --json   duyệt tại máy · việc đang chờ (Bàn Axle đọc)
 axle tay cuaso|chup|bam N|go N "chữ"|doc N|mo <app>   tay cho mọi ứng dụng: bảng phần tử qua trợ năng, không tiêm phím
 sudo axle phanxa xuat [--tu ngày]   xuất nhãn (chủ đã quyết gì) cho lớp phản xạ
+axle brain ds|tim <từ>|mo           Bộ não Axle (~/Axle/Brain): tài liệu gửi lên + wiki Claude tự bảo trì
                          xem và duyệt yêu cầu ngay tại máy (dùng được cả khi mọi kênh khác hỏng)
 axle claude "câu hỏi" [--tiep] [--dong]
                          Claude Code chạy TRÊN máy này: đọc/tìm thì làm ngay, còn ghi tệp/chạy lệnh
@@ -734,8 +735,8 @@ claude_cmd() {
   local ro; ro="$(/usr/bin/node /opt/axle/mcp/tools-readonly.mjs 2>/dev/null)" || ro=""
   local opts=(--mcp-config "$CLAUDE_MCP_CFG"
     --permission-prompt-tool mcp__axle__duyet_quyen
-    --allowedTools "Read,Grep,Glob,LS,WebFetch,WebSearch${ro:+,$ro}"
-    --append-system-prompt "Bạn đang chạy trên máy Axle của chủ. Việc ĐỌC thì cứ làm. Việc ghi tệp, chạy lệnh, xoá sẽ hiện lên điện thoại chủ để duyệt — nói ngắn gọn trước khi xin, đừng xin dồn dập, và bị từ chối thì đừng thử lại bằng cách khác. Có lệnh hay API thì dùng lệnh; chỉ động tới cửa sổ (tay_*) khi việc chỉ tồn tại dưới dạng cửa sổ: tài liệu đang mở chưa lưu, hộp thoại, ứng dụng không có lệnh. Trả lời bằng tiếng Việt, ngắn gọn, gạch đầu dòng khi liệt kê, đừng lặp lại câu hỏi; chủ đọc trên điện thoại.")
+    --allowedTools "Read,Grep,Glob,LS,WebFetch,WebSearch${ro:+,$ro},mcp__axle__brain_ghi"
+    --append-system-prompt "Bạn đang chạy trên máy Axle của chủ. Việc ĐỌC thì cứ làm. Việc ghi tệp, chạy lệnh, xoá sẽ hiện lên điện thoại chủ để duyệt — nói ngắn gọn trước khi xin, đừng xin dồn dập, và bị từ chối thì đừng thử lại bằng cách khác. Có lệnh hay API thì dùng lệnh; chỉ động tới cửa sổ (tay_*) khi việc chỉ tồn tại dưới dạng cửa sổ: tài liệu đang mở chưa lưu, hộp thoại, ứng dụng không có lệnh. Trả lời bằng tiếng Việt, ngắn gọn, gạch đầu dòng khi liệt kê, đừng lặp lại câu hỏi; chủ đọc trên điện thoại. BỘ NÃO AXLE (~/Axle/Brain): câu hỏi về tài liệu, khách hàng, dự án, quyết định cũ → gọi brain_index trước rồi brain_tim/brain_doc, trả lời kèm tên trang/tệp; có tài liệu mới trong raw/ → sau khi trả lời hãy INGEST theo QUY-UOC.md bằng brain_ghi (trang wiki/sources, trang thực thể liên quan, dòng index.md và log.md).")
   # --dong (Bàn dùng): sự kiện JSON từng dòng → bộ lọc in chữ trả lời NGAY khi có + mỗi lần dùng công cụ một dòng "→".
   # </dev/null: claude chờ stdin 3 giây nếu thấy ống dẫn (đo 21/9) — Bàn/cron không có gì để đưa vào.
   if [ -n "$dong" ]; then
@@ -870,6 +871,19 @@ app_cmd() {   # sudo axle app setup|pair|confirm|devices|remove|terminal
   esac
 }
 
+brain_cmd() {   # axle brain [ds|tim <từ khoá>|mo|duong] — Bộ não Axle của tài khoản này (~/Axle/Brain), không cần root
+  local B="${AXLE_BRAIN_DIR:-$HOME/Axle/Brain}"
+  [ -f "$B/QUY-UOC.md" ] || bash /opt/axle/core/desktop/brain-init.sh "$B" >/dev/null
+  case "${1:-ds}" in
+    ds|"")  echo "Bộ não Axle: $B · $(find "$B/raw" -type f ! -name '.*' ! -path '*.doi/*' 2>/dev/null | wc -l) tài liệu · $(find "$B/wiki" -name '*.md' | wc -l) trang wiki"; echo; cat "$B/wiki/index.md" ;;
+    tim)    [ -n "${2:-}" ] || { echo 'axle brain tim <từ khoá>' >&2; exit 2; }
+            AXLE_BRAIN_DIR="$B" /usr/bin/node -e 'import("/opt/axle/mcp/brain.js").then((b) => { for (const x of b.tim(process.argv[1])) console.log(`${x.duong}  (${x.diem})\n  ${x.trich.join("\n  ")}`); })' "${*:2}" ;;
+    mo)     xdg-open "$B" >/dev/null 2>&1 & echo "Đã mở $B" ;;
+    duong)  echo "$B" ;;
+    *)      echo "axle brain ds | tim <từ khoá> | mo | duong" >&2; exit 2 ;;
+  esac
+}
+
 phanxa_cmd() {   # sudo axle phanxa xuat [--tu YYYY-MM-DD] — nhãn từ nhật ký duyệt cho lớp phản xạ (D9)
   case "${1:-}" in
     xuat) [ "$(id -u)" = 0 ] || { echo "Cần sudo: sudo axle phanxa xuat" >&2; exit 1; }
@@ -935,6 +949,7 @@ case "${1:-help}" in
   claude)    shift; claude_cmd "$@" ;;
   webapp)    shift; exec bash /opt/axle/core/desktop/webapp.sh "$@" ;;
   tay)       shift; exec /usr/bin/python3 /opt/axle/core/desktop/tay.py "$@" ;;   # tay cho mọi ứng dụng (AT-SPI)
+  brain)     shift; brain_cmd "$@" ;;
   update)    [ "$(id -u)" = 0 ] || { echo "Cần sudo: sudo axle update" >&2; exit 1; }
              shift; exec bash /opt/axle/core/install.sh --update "$@" ;;
   help|-h|--help) usage ;;
