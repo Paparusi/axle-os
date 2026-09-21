@@ -50,6 +50,17 @@ export function seal(recipXPubB64, plaintext) {
   const ct = Buffer.concat([c.update(Buffer.from(plaintext)), c.final()]);
   return b64u(Buffer.concat([ephRaw, nonce, c.getAuthTag(), ct]));
 }
+// Mở hộp ra BYTE (ảnh đính kèm): open() trả chuỗi utf8 nên làm hỏng dữ liệu nhị phân
+export function openBytes(myXPrivPem, myXPubB64, boxB64) {
+  const b = unb64u(boxB64);
+  if (b.length < 60) throw new Error('hộp quá ngắn');
+  const ephRaw = b.subarray(0, 32); const nonce = b.subarray(32, 44); const tag = b.subarray(44, 60); const ct = b.subarray(60);
+  const key = boxKey(crypto.diffieHellman({ privateKey: crypto.createPrivateKey(myXPrivPem), publicKey: pubFrom('x25519', ephRaw) }),
+    ephRaw, unb64u(myXPubB64));
+  const d = crypto.createDecipheriv('chacha20-poly1305', key, nonce, { authTagLength: 16 });
+  d.setAuthTag(tag);
+  return Buffer.concat([d.update(ct), d.final()]);
+}
 export function open(myXPrivPem, myXPubB64, boxB64) {
   const b = unb64u(boxB64);
   if (b.length < 60) throw new Error('hộp quá ngắn');

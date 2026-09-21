@@ -11,7 +11,7 @@ import { createServer, request as httpRequest } from 'node:http';
 import { connect as netConnect } from 'node:net';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { appendFileSync, chownSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, statSync, unlinkSync, chmodSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chownSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, statSync, unlinkSync, chmodSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { hostname } from 'node:os';
 import { addRule, addSession, autoLabel, canRemember, canSession, describeRule, findAuto, keyboard, loadRules, prune,
@@ -500,16 +500,42 @@ const app = createAppChannel({
   // Hỏi Axle từ app (chat, D11): chạy Claude Code trên máy bằng tài khoản chủ (`axle claude --dong`), cổng xin phép
   // là chính điện thoại này: đọc thì làm ngay, ghi/chạy/xoá đi qua duyet_quyen → rung điện thoại. Chữ chảy về app
   // từng khúc (hoi-chunk, gộp 0,7 giây một lần để không dội trạm), kết thúc bằng hoi-result.
-  async onHoi(d, { cau, tiep, phien }) {
+  async onHoi(d, { cau, tiep, phien, anh }) {
     const h = hoiCfg();
     if (!h.enabled) return app.sendTo(d.id, { type: 'hoi-result', ok: false, text: 'Hỏi Axle đang tắt trên máy. Bật: sudo axle app hoi on' });
     if (dangHoi.has(d.id)) return app.sendTo(d.id, { type: 'hoi-result', ok: false, text: 'Đang trả lời câu trước — bấm Dừng hoặc chờ xong' });
     const owner = ownerUser();
+    // Ảnh đính kèm (D12): lấy từ trạm, ghi vào ~/.cache/axle-hoi của chủ (0600) rồi nhắc Claude đọc bằng Read.
+    let cauDay = cau;
+    if (anh?.length) {
+      const dir = `/home/${owner}/.cache/axle-hoi`;
+      const { uid, gid } = ownerIds();
+      try {
+        mkdirSync(dir, { recursive: true, mode: 0o700 });
+        if (uid != null) chownSync(dir, uid, gid);
+        for (const f of readdirSync(dir)) { const p = path.join(dir, f); if (Date.now() - statSync(p).mtimeMs > 86_400_000) unlinkSync(p); }   // ảnh cũ hơn 1 ngày
+      } catch (e) { log({ warn: `thư mục ảnh: ${e.message}` }); }
+      const tep = [];
+      for (const [i, id] of anh.entries()) {
+        try {
+          const bytes = await app.layBlob(id);
+          if (bytes.length > 4 * 1024 * 1024) throw new Error('ảnh quá 4MB');
+          const f = path.join(dir, `${Date.now()}-${i + 1}.jpg`);
+          writeFileSync(f, bytes, { mode: 0o600 });
+          if (uid != null) chownSync(f, uid, gid);
+          tep.push(f);
+        } catch (e) {
+          log({ warn: `ảnh đính kèm: ${e.message}` });
+          return app.sendTo(d.id, { type: 'hoi-result', ok: false, text: `Không lấy được ảnh từ trạm (${e.message}) — gửi lại nhé.` });
+        }
+      }
+      cauDay = `${cau}\n\n(Đính kèm ${tep.length} ảnh — xem bằng công cụ Read: ${tep.join(' ; ')})`;
+    }
     // 30 phút: Claude có thể phải chờ chủ duyệt (10 phút/yêu cầu) rồi làm tiếp. Không qua bash -l: bị giết thì bash in
     // "Session terminated, killing shell…" lên app (thấy 21/9); axle tự tìm claude ở ~/.local/bin, không cần profile.
     const giay = Math.min(Math.max(Number(h.timeoutSec ?? 1800), 30), 3600);
-    log({ app: 'hỏi Axle', device: d.name, cau: cap(cau, 300), tiep, ...(phien ? { phien } : {}) });
-    const p = spawn('timeout', ['-k', '5', String(giay), 'runuser', '-u', owner, '--', AXLE, 'claude', cau, '--dong', ...(tiep ? ['--tiep'] : []), ...(phien ? ['--phien', phien] : [])],
+    log({ app: 'hỏi Axle', device: d.name, cau: cap(cau, 300), tiep, ...(phien ? { phien } : {}), ...(anh?.length ? { anh: anh.length } : {}) });
+    const p = spawn('timeout', ['-k', '5', String(giay), 'runuser', '-u', owner, '--', AXLE, 'claude', cauDay, '--dong', ...(tiep ? ['--tiep'] : []), ...(phien ? ['--phien', phien] : [])],
       { cwd: `/home/${owner}`, env: { ...process.env, HOME: `/home/${owner}` }, stdio: ['ignore', 'pipe', 'pipe'] });
     dangHoi.set(d.id, p);
     let buf = ''; let dau = ''; let tong = 0; let timer = null; let cat = false;
@@ -778,13 +804,14 @@ makeServer(null).listen(SOCKET, () => { chmodSync(SOCKET, 0o660); console.log(`a
 // Bộ duyệt tự ghi ra MỘT tệp root:<chủ> 0640 mỗi khi trạng thái đổi (và mỗi phút cho tuổi việc / số hôm nay).
 // CHỈ ĐỌC: đường duyệt vẫn là socket quản trị root 0600 (`sudo axle duyet`) hoặc điện thoại — không có gì mới để lạm dụng.
 const BAN_FILE = process.env.AXLE_BAN_FILE || '/run/axle/ban.json';
-function ownerGid() {
+function ownerIds() {
   try {
     const u = ownerUser();
     const line = readFileSync('/etc/passwd', 'utf8').split('\n').find((l) => l.startsWith(`${u}:`));
-    return line ? Number(line.split(':')[3]) : null;
-  } catch { return null; }
+    return line ? { uid: Number(line.split(':')[2]), gid: Number(line.split(':')[3]) } : { uid: null, gid: null };
+  } catch { return { uid: null, gid: null }; }
 }
+const ownerGid = () => ownerIds().gid;
 // Cùng cách đếm với tin tóm tắt tối (digest.js): "running" gồm cả tự duyệt → chủ duyệt = running − auto
 function homNay() {
   const dau = new Date(); dau.setHours(0, 0, 0, 0);

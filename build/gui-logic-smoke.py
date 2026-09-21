@@ -54,9 +54,9 @@ lines = [json.dumps({"ts": now.isoformat(), "client": "ssh:claude", "tool": "fil
          json.dumps({"ts": now.isoformat(), "client": "ssh:claude", "tool": "http_auth"}),      # bỏ như tin tóm tắt
          json.dumps({"ts": (now - datetime.timedelta(days=1)).isoformat(), "client": "ssh:claude", "tool": "web_click"}),
          json.dumps({"ts": "rác", "tool": "x"}), "không phải json", json.dumps({"tool": "thieu-ts"}),
-         json.dumps({"ts": now.strftime("%Y-%m-%dT%H:%M:%S.000Z"), "client": "cog", "tool": "web_snapshot"})]   # UTC 'Z'
+         json.dumps({"ts": now.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"), "client": "cog", "tool": "web_snapshot"})]   # cùng thời điểm, viết dạng UTC 'Z'
 n, gan = doc_audit(lines, hom)
-ok(n == 2 if now.astimezone(datetime.timezone.utc).date() == now.date() else n >= 1, f"đếm hôm nay = {n} (bỏ http_auth, bỏ hôm qua, bỏ dòng hỏng)")
+ok(n == 2, f"đếm hôm nay = {n} (bỏ http_auth, bỏ hôm qua, bỏ dòng hỏng; dòng 'Z' là cùng thời điểm)")
 ok(len(gan) == 3 and gan[0].endswith("ssh:claude · file_read") and gan[-1].endswith("cog · web_snapshot"), "vài dòng gần nhất: giờ · ai · công cụ")
 ok(doc_audit([], hom) == (0, []), "audit rỗng → 0, []")
 

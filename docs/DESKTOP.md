@@ -319,3 +319,12 @@ Thử: vector Node ⇄ Swift thêm hộp `hoi` (6 hộp) + chuỗi `hoiString`; 
 đây `--tiep` = `--continue` "cuộc gần nhất trong thư mục", hai bên hỏi chen nhau là lẫn mạch); Claude được dặn trả lời
 tiếng Việt ngắn, gạch đầu dòng; app dựng Markdown gọn (đậm, mã, tiêu đề, đầu dòng), nhớ cuộc chat khi tắt app, có gợi
 ý câu hỏi; Bàn dựng đậm/mã/mờ bằng tag TextView (`md_lite`, thử trong gui-logic-smoke).
+
+## Gửi ảnh cho Axle từ điện thoại (nhịp D12)
+
+Chụp hoá đơn / giấy tờ / màn hình lỗi → chọn ở nút ảnh trong thẻ Hỏi Axle → app nén (cạnh dài ≤1600px, JPEG ≤ ~900KB),
+**niêm phong cho máy** bằng đúng hộp X25519+ChaCha20 của giao thức rồi đưa lên trạm (`POST /v1/blob`, ≤3MB, giữ 1 giờ,
+trong bộ nhớ); tin `hoi` chỉ mang id tệp. Máy lấy tệp (chỉ người nhận lấy được, một lần là trạm xoá), mở hộp ra byte
+(`openBytes`), ghi vào `~/.cache/axle-hoi/` của chủ (0600, dọn sau 1 ngày) và nhắc Claude đọc bằng công cụ Read (đọc
+được ảnh). Trạm không bao giờ thấy ảnh. Thử: `build/relay-blob-smoke.mjs` (trạm thật ở cổng rỗi, 10 mục), vector
+Node ⇄ Swift thêm hộp byte hai chiều. Chưa có: chụp thẳng bằng camera trong app (chọn từ thư viện trước).

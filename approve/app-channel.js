@@ -2,7 +2,7 @@
 // nhận quyết định và TỰ KIỂM chữ ký P-256 (khoá trong chip điện thoại) — trạm chuyển tiếp chỉ chở hộp đã mã hoá.
 import { existsSync, readFileSync } from 'node:fs';
 import crypto from 'node:crypto';
-import { b64u, commandString, decisionString, hoiString, idOf, newKeys, openMsg, p256Verify, qrEncode, relayHeaders, requestHash,
+import { b64u, commandString, decisionString, hoiString, idOf, newKeys, openBytes, openMsg, p256Verify, qrEncode, relayHeaders, requestHash,
   sas, sealMsg, shellString, sha256, taskString } from '../app/proto.js';
 import { writeDurable } from './rules.js';
 
@@ -148,7 +148,9 @@ export function createAppChannel({ log, hostname, onDecision, onCommand, onHello
       daLam.add(khoa);
       if (daLam.size > 200) daLam.delete(daLam.values().next().value);
       const phien = typeof msg.phien === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(msg.phien) ? msg.phien : null;
-      onHoi?.(d, { cau: c.trim(), tiep: msg.tiep === true, phien });
+      // Ảnh đính kèm: id tệp trên trạm (điện thoại đã niêm phong cho máy) — tối đa 4, máy lấy một lần rồi trạm xoá
+      const anh = Array.isArray(msg.anh) ? msg.anh.filter((x) => typeof x === 'string' && /^[A-Za-z0-9_-]{22}$/.test(x)).slice(0, 4) : [];
+      onHoi?.(d, { cau: c.trim(), tiep: msg.tiep === true, phien, anh });
       return;
     }
     if (msg.type === 'stop' || msg.type === 'start') {
@@ -185,5 +187,7 @@ export function createAppChannel({ log, hostname, onDecision, onCommand, onHello
     devices: () => devices.map(({ id, name, pairedAt }) => ({ id, name, pairedAt })),
     machineId: () => me.id,
     startPair, waitPair, confirmPair, removeDevice, broadcast, sendTo, verifyDecision,
+    // Lấy tệp đính kèm từ trạm (chỉ máy — người nhận — lấy được, một lần) rồi mở hộp ra byte
+    layBlob: async (id) => openBytes(me.xPriv, me.xPub, (await call('GET', `/v1/blob/${id}`)).blob),
   };
 }

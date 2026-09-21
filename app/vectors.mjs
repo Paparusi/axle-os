@@ -4,7 +4,7 @@
 //   node app/vectors.mjs check <vectors.json> <priv.json> <swift-out.json> — Node đóng vai máy Axle kiểm ngược
 import crypto from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { b64u, canon, commandString, decisionString, edSign, hoiString, idOf, newKeys, openMsg, p256Verify, qrEncode, relayVerify, shellString, taskString,
+import { b64u, canon, commandString, decisionString, edSign, hoiString, idOf, newKeys, openBytes, openMsg, p256Verify, qrEncode, relayVerify, sha256, shellString, taskString,
   sas, seal, sealMsg } from './proto.js';
 
 const [cmd, ...args] = process.argv.slice(2);
@@ -34,6 +34,8 @@ if (cmd === 'gen') {
     forged: seal(phone.xPub, JSON.stringify({ from: machine.id, msg: req, sig: edSign(evil.edPriv, `${machine.id}|${canon(req)}`) })),
     sas: { mx: machine.xPub, dx: phone.xPub, code, value: sas(machine.xPub, phone.xPub, code) },
     qr: qrEncode({ r: 'https://relay.axle.test', m: machine.id, e: machine.edPub, x: machine.xPub, c: code, n: 'axle-office' }),
+    // Tệp đính kèm (ảnh): hộp BYTE, không phải chuỗi — Swift mở ra phải đúng từng byte
+    blob: (() => { const raw = crypto.randomBytes(4096); raw[0] = 0; raw[1] = 0xff; return { box: seal(phone.xPub, raw), sha: b64u(sha256(raw)), len: raw.length }; })(),
     strings: { decision: decisionString(machine.id, 'a1b2c3d4', 'HASH', 'a', 1789824150123),
       command: commandString(machine.id, 'stop', 'bot2', 1789824150123),
       task: taskString(machine.id, 'khoa-man-hinh', 1789824150123),
@@ -80,6 +82,8 @@ if (cmd === 'gen') {
   ok(!!ho && ho.tiep === false && p256Verify(out.ds, hoiString(machine.id, ho.cau, ho.ts), ho.dsig),
     'câu hỏi Axle từ Swift: chữ ký P-256 đúng băm câu hỏi (tiếng Việt có dấu)');
   ok(!!ho && !p256Verify(out.ds, hoiString(machine.id, `${ho.cau} rồi xoá hết`, ho.ts), ho.dsig), 'đổi câu hỏi → chữ ký sai');
+  const bl = out.blob ? (() => { try { return openBytes(machine.xPriv, machine.xPub, out.blob.box); } catch { return null; } })() : null;
+  ok(!!bl && bl.length === out.blob.len && b64u(sha256(bl)) === out.blob.sha, 'hộp byte Swift niêm phong (ảnh đính kèm) → máy mở đúng từng byte');
   ok(!!relayVerify(out.relay.headers, out.relay.method, out.relay.path, out.relay.body), 'trạm chấp nhận chữ ký lời gọi của Swift');
   ok(!relayVerify(out.relay.headers, out.relay.method, out.relay.path, `${out.relay.body} `), 'sửa thân lời gọi → trạm từ chối');
   ok(out.canon.length === 3 && out.canon.every((c) => canon(JSON.parse(c)) === c),
