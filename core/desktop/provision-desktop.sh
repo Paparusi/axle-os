@@ -73,9 +73,9 @@ step "Trình duyệt"
 BROWSER_APP=""
 if [ -f /var/lib/snapd/desktop/applications/firefox_firefox.desktop ]; then
   BROWSER_APP=firefox_firefox.desktop; echo "  Firefox (snap) đã có"
-elif [ -n "$LAM_MOI" ]; then
-  echo "  (làm mới: không tải trình duyệt)"
-elif snap install firefox >/dev/null 2>&1 || snap install firefox >/dev/null 2>&1; then
+# Máy VP 22/9 cài xong không có trình duyệt nào (snap lỗi lúc cài) và làm mới cũng không cài lại → cả LÀM MỚI
+# cũng thử, nhưng có hạn giờ để một lần `axle update` không treo vì cửa hàng snap.
+elif timeout 300 snap install firefox >/dev/null 2>&1 || timeout 300 snap install firefox >/dev/null 2>&1; then
   BROWSER_APP=firefox_firefox.desktop; echo "  Firefox (snap)"
 else
   echo "  cửa hàng snap đang lỗi — CHƯA có trình duyệt. Cài sau: sudo snap install firefox"
@@ -146,8 +146,8 @@ echo "  PDF, ảnh, máy quét, nén, máy in, soạn thảo nhanh"
 
 # Chromium: mở web app thành CỬA SỔ RIÊNG (--app=) chứ không phải tab lẫn trong trình duyệt, và cũng là
 # thứ agent điều khiển được. Để NGOÀI đường găng: kho snap lỗi 408 một cái là hỏng cả lần cài (bài học D4).
-if ! command -v chromium >/dev/null 2>&1 && [ -z "$LAM_MOI" ]; then
-  snap install chromium >/dev/null 2>&1 && echo "  chromium (cho web app dạng cửa sổ riêng)" \
+if ! command -v chromium >/dev/null 2>&1 && [ ! -x /snap/bin/chromium ]; then
+  timeout 300 snap install chromium >/dev/null 2>&1 && echo "  chromium (cho web app dạng cửa sổ riêng)" \
     || echo "  ! chưa cài được chromium — chạy lại sau: sudo snap install chromium"
 fi
 
@@ -263,6 +263,13 @@ command='/usr/local/bin/axle-gui --ban'
 binding='<Super>b'
 EOF
 rm -f /etc/dconf/db/gdm.d/00-axle
+# Máy VP 22/9: với profile Axle, màn đăng nhập chỉ còn nền + đồng hồ, không có hộp đăng nhập (máy nhà cùng cấu hình
+# thì có). Chưa rõ vì sao → có lối thoát: `sudo touch /etc/axle/no-gdm-branding` (hoặc còn bản lưu
+# /root/gdm-profile.bak do người dùng tự gỡ) thì KHÔNG đè profile của GDM nữa, màn đăng nhập về nguyên bản Ubuntu.
+if [ -e /etc/axle/no-gdm-branding ] || [ -e /root/gdm-profile.bak ]; then
+  echo "  màn đăng nhập: giữ nguyên bản Ubuntu (có /etc/axle/no-gdm-branding hoặc /root/gdm-profile.bak)"
+  rm -f /etc/dconf/profile/gdm
+else
 cat > /etc/dconf/db/gdm.d/99-axle <<'EOF'
 [org/gnome/login-screen]
 logo='/usr/share/axle/logo.png'
@@ -298,6 +305,9 @@ EOF
     [ -f "$f" ] && printf 'file-db:%s\n' "$f"
   done
 } > /etc/dconf/profile/gdm
+# logo phải là tệp thật: khoá logo trỏ vào tệp không có thì hộp đăng nhập của gnome-shell có thể không dựng được
+[ -s /usr/share/axle/logo.png ] || sed -i '/^logo=/d' /etc/dconf/db/gdm.d/99-axle
+fi
 grep -q '^system-db:axle' /etc/dconf/profile/user 2>/dev/null || printf '%s\n' 'user-db:user' 'system-db:axle' > /etc/dconf/profile/user
 dconf update
 

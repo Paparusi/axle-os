@@ -42,6 +42,7 @@ AXLE = os.environ.get("AXLE_BIN", "/usr/local/bin/axle")
 BAN_FILE = os.environ.get("AXLE_BAN_FILE", "/run/axle/ban.json")
 AUDIT = os.environ.get("AXLE_AUDIT_FILE", os.path.expanduser("~/.local/state/axle/audit.jsonl"))
 BRAIN_DIR = os.environ.get("AXLE_BRAIN_DIR", os.path.expanduser("~/Axle/Brain"))
+APP_JSON = os.environ.get("AXLE_APP_JSON", "/etc/axle/app.json")   # {"relay": …} — bản cài công khai chưa có, phải đặt tay
 BRAIN_JS = os.environ.get("AXLE_BRAIN_JS", "/opt/axle/mcp/brain.js")   # đồ thị liên kết lấy CÙNG một nguồn với app (doThi)
 NODE = os.environ.get("AXLE_NODE", "/usr/bin/node")
 MAU_LOAI = {"source": (0x60, 0xA5, 0xFA), "entity": (0x34, 0xD3, 0x99), "project": (0xF5, 0x9E, 0x0B), "decision": (0xA7, 0x8B, 0xFA),
@@ -1008,6 +1009,21 @@ class CuaSo(Adw.ApplicationWindow):
     # ---------- Điện thoại ----------
     def trang_dien_thoai(self):
         t = Trang("Điện thoại", "phone-symbolic")
+        # Máy VP 22/9: bản cài công khai không có địa chỉ trạm → bấm Ghép chỉ thấy "hết 10 phút", không hiểu vì sao.
+        # Chưa có trạm thì hiện ô đặt trạm ngay đây, và lỗi thật của lệnh ghép phải được in ra chứ không nuốt.
+        self.tram_g = Adw.PreferencesGroup(
+            title="Trạm chuyển tiếp", visible=not os.path.exists(APP_JSON),
+            description="Điện thoại và máy nói chuyện qua một trạm chuyển tiếp (Axle Cloud). Bản cài công khai chưa có "
+                        "địa chỉ trạm — dán vào đây một lần rồi mới ghép được.")
+        hang_tram = Gtk.Box(spacing=8, margin_top=8, margin_bottom=8)
+        self.o_tram = Gtk.Entry(hexpand=True, placeholder_text="https://tram-cua-ban.example.com")
+        self.o_tram.connect("activate", self.dat_tram)
+        nut_tram = Gtk.Button(label="Đặt trạm", css_classes=["suggested-action"])
+        nut_tram.connect("clicked", self.dat_tram)
+        hang_tram.append(self.o_tram)
+        hang_tram.append(nut_tram)
+        self.tram_g.add(hang_tram)
+        t.add(self.tram_g)
         g = Adw.PreferencesGroup(
             title="Ghép điện thoại",
             description="Điện thoại đã ghép là nơi duyệt mọi việc hệ trọng bằng Face ID, và xem được tình "
@@ -1029,7 +1045,19 @@ class CuaSo(Adw.ApplicationWindow):
         t.add(g)
         return t
 
+    def dat_tram(self, *_):
+        url = self.o_tram.get_text().strip().rstrip("/")
+        if not re.match(r"^https?://[A-Za-z0-9.:-]+(/.*)?$", url):
+            self.bao("Địa chỉ trạm phải dạng https://…")
+            return
+        self.chay_nen(("app", "setup", "--relay", url), True, "Đã đặt trạm — giờ bấm “Ghép điện thoại”",
+                      sau=lambda: self.tram_g.set_visible(False))
+
     def ghep(self, *_):
+        if not os.path.exists(APP_JSON):
+            self.qr_chu.set_label("Chưa có địa chỉ trạm chuyển tiếp — điền ở ô “Trạm chuyển tiếp” phía trên trước.")
+            self.tram_g.set_visible(True)
+            return
         self.nut_ghep.set_sensitive(False)
         self.qr_chu.set_label("Đang mở phiên ghép…")
         self.pending = None
@@ -1042,9 +1070,13 @@ class CuaSo(Adw.ApplicationWindow):
             except OSError as e:
                 GLib.idle_add(self.ghep_loi, str(e))
                 return
+            co_qr, cuoi = False, ""
             for dong in p.stdout:
                 d = dong.strip()
+                if d and not d.startswith("axle1:") and "█" not in d and "▀" not in d and "▄" not in d:
+                    cuoi = d                      # dòng chữ cuối cùng = lỗi thật nếu không ra được mã
                 if d.startswith("axle1:"):        # chuỗi ghép cặp thô, in ra ngay sau hình QR dạng chữ
+                    co_qr = True
                     GLib.idle_add(self.ve_qr, d)
                 m = re.search(r"Mã đối chiếu:\s*(\d{3})\s*(\d{3})", d)
                 if m:
@@ -1054,7 +1086,10 @@ class CuaSo(Adw.ApplicationWindow):
                     self.pending = m2.group(1)
             p.wait()
             if not self.pending:
-                GLib.idle_add(self.ghep_loi, "Không có điện thoại nào quét mã (hết 10 phút)")
+                if co_qr:
+                    GLib.idle_add(self.ghep_loi, "Không có điện thoại nào quét mã (hết 10 phút)")
+                else:
+                    GLib.idle_add(self.ghep_loi, "Không mở được phiên ghép: " + (cuoi or f"lệnh thoát mã {p.returncode}"))
 
         threading.Thread(target=worker, daemon=True).start()
 
