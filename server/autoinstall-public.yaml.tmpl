@@ -9,6 +9,22 @@ autoinstall:
   timezone: Asia/Ho_Chi_Minh
   keyboard:
     layout: us
+  # Mạng: LUÔN xin DHCP cả IPv4 lẫn IPv6 trên mọi card dây. Không ghi mục này thì trình cài chỉ ghi lại thứ nó thấy
+  # lúc cài — máy VP 22/9 cài lúc chưa có DHCP nên file mạng không có dhcp4, khởi động lên chỉ có IPv6 (router tự phát),
+  # github.com không có IPv6 → bước Node hỏng. `optional: true` để card không cắm dây không giữ máy chờ lúc khởi động.
+  network:
+    version: 2
+    ethernets:
+      day-en:
+        match: {name: "en*"}
+        dhcp4: true
+        dhcp6: true
+        optional: true
+      day-eth:
+        match: {name: "eth*"}
+        dhcp4: true
+        dhcp6: true
+        optional: true
   __IDENTITY__
   ssh:
     install-server: true

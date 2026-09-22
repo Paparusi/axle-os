@@ -7,6 +7,17 @@ D=/opt/axle-installer
 ISSUE=/etc/issue.d/50-axle.issue
 mkdir -p /etc/issue.d
 echo "Axle: thiết lập lần đầu — cài Axle từ gói trong ISO…"
+# Máy không có IPv4 (chỉ IPv6 do router tự phát) thì github.com không tới được → cài hỏng. Gặp trên máy VP 22/9:
+# file mạng của trình cài thiếu dhcp4 vì lúc cài chưa có DHCP. Card dây đang UP mà không có IPv4 thì bật DHCPv4.
+if ! ip -4 -o addr show scope global 2>/dev/null | grep -Eqv ' (docker|tailscale|br-|veth)'; then
+  for nic in $(ip -o link show up 2>/dev/null | awk -F': ' '$2 ~ /^(en|eth)/ {print $2}'); do
+    if ! grep -rqs 'dhcp4: *true' /etc/netplan/; then
+      echo "→ $nic không có IPv4 và cấu hình mạng không xin DHCP — bật dhcp4"
+      netplan set "ethernets.$nic.dhcp4=true" && netplan apply || true
+    fi
+  done
+  for _ in $(seq 1 20); do ip -4 -o addr show scope global | grep -Eqv ' (docker|tailscale|br-|veth)' && break; sleep 1; done
+fi
 if ! bash "$D/install.sh" --from "$D"; then
   printf '%s\n' 'Axle chưa thiết lập xong (thiếu mạng?) — sẽ tự thử lại lần khởi động sau. Chi tiết: journalctl -u axle-firstboot' '' > "$ISSUE"
   exit 1

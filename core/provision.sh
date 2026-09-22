@@ -56,6 +56,23 @@ echo "  $(hostname)"
 # Màn đăng nhập tại chỗ: tên Axle + máy + IP. Ghi rõ nền Ubuntu (không mạo danh, không giấu nguồn).
 printf '%s\n' 'Axle Server — dựa trên Ubuntu 26.04 LTS · \n · \l' 'IP: \4' '' > /etc/issue
 
+step "Mạng"
+# Node (nvm) và `axle update` lấy từ github.com — chỗ đó KHÔNG có IPv6. Máy chỉ có IPv6 thì báo rõ ngay đây,
+# đừng để hỏng sâu trong bước Node với một dòng lỗi git khó hiểu (máy VP 22/9).
+# (bỏ qua docker/tailscale/veth: đó là IPv4 nội bộ, không ra được Internet)
+if ! ip -4 -o addr show scope global 2>/dev/null | grep -Eqv ' (docker|tailscale|br-|veth)'; then
+  nic="$(ip -o link show up 2>/dev/null | awk -F': ' '$2 ~ /^(en|eth)/ {print $2; exit}')"
+  if [ -s "/home/$AXLE_USER/.nvm/nvm.sh" ]; then
+    echo "  cảnh báo: không có IPv4 ngoài (chỉ IPv6) — github.com không tới được; vẫn chạy tiếp vì Node đã có sẵn"
+  else
+    echo "✗ Máy không có địa chỉ IPv4 (chỉ IPv6) — github.com không tới được nên không cài tiếp được." >&2
+    echo "  Thử: sudo netplan set ethernets.${nic:-<card>}.dhcp4=true && sudo netplan apply && ip -4 -br a" >&2
+    exit 1
+  fi
+else
+  echo "  IPv4: $(ip -4 -o addr show scope global | grep -Ev ' (docker|tailscale|br-|veth)' | awk '{print $4}' | head -1)"
+fi
+
 step "Công cụ cơ bản"
 aptg update -q
 aptg install -yq curl ca-certificates gnupg git jq htop tmux unzip rsync \

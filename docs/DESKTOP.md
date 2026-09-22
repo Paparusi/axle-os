@@ -389,3 +389,7 @@ tại → `arc` kéo một vạch lạ từ nhãn tới chấm, phải `new_path
 một nhúm, phải kẹp toạ độ trong khung (sửa cả bản Swift). Thử: `build/gui-logic-smoke.py` (+5 ca) và
 `build/gui-shot.py out/tri-thuc.png --trang nao` (Bộ não giả 8 trang; WSL thiếu python3-gi-cairo thì chồng
 `_gi_cairo.so` + `cairo/` lấy từ .deb qua PYTHONPATH, không cần sudo).
+**Ô trống trên iPhone (22/9 22:51, ảnh Bi):** bản đầu xếp trong `.onAppear` của GeometryReader — trong sheet lúc đó
+kích thước có thể là 0×0 → không xếp, ô trống mãi. Sửa: xếp trong khung chuẩn 1000×900 bằng `.task(id: graph)` (không
+cần kích thước thật), lúc vẽ co đều theo `size` của Canvas; chưa xếp xong thì tạm vẽ vòng tròn — ô không bao giờ trống
+khi đã có trang. Bàn (Python) vốn đã làm kiểu khung chuẩn nên không dính.
