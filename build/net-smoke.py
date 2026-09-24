@@ -28,13 +28,13 @@ def ok(c, m):
 def may(**doi):
     """Máy khoẻ (Desktop, NetworkManager) rồi đè từng dữ kiện để tạo ca hỏng."""
     sk = {"card": [{"ten": "enp34s0", "wifi": False, "tin_hieu": True, "trang_thai": "up"}],
-          "mac": {"enp34s0": "34:5a:60:35:44:0b"},
+          "mac": {"enp34s0": "02:00:00:00:00:0b"},
           "ipv4": {"enp34s0": ["192.168.1.216/24"]}, "ipv6": {"enp34s0": ["2001:ee0:51f6:8f00::5/64"]},
           "gw": "192.168.1.1", "gw_dev": "enp34s0", "gw_ping": True, "gw_lang_gieng": "REACHABLE",
           "internet": True, "dns": True, "quan_ly": "nm",
           "ket_noi": {"enp34s0": {"trang_thai": "connected", "ten": "netplan-enp34s0"}},
           "xin_ipv4": {"enp34s0": "dhcp"},
-          "ts": {"trang_thai": "Running", "online": True, "ip": "100.66.109.71"},
+          "ts": {"trang_thai": "Running", "online": True, "ip": "100.1.2.3"},
           "tram": {"url": "https://tram.example.com", "ok": True}}
     sk.update(doi)
     return sk
@@ -45,12 +45,12 @@ def trang_thai(kq):
 
 
 kq = km.ket_luan(may())
-ok(kq["muc"] == "ok" and kq["tieu_de"] == "Mạng ổn" and "192.168.1.216/24" in kq["giai_thich"] and "100.66.109.71" in kq["giai_thich"],
+ok(kq["muc"] == "ok" and kq["tieu_de"] == "Mạng ổn" and "192.168.1.216/24" in kq["giai_thich"] and "100.1.2.3" in kq["giai_thich"],
    f"máy khoẻ → Mạng ổn ({kq['giai_thich']})")
 ok(all(v == "ok" for v in trang_thai(kq).values()) and not kq["lenh"], "máy khoẻ: mọi bước ✓, không đưa lệnh sửa")
 
 kq = km.ket_luan(may(card=[{"ten": "enp34s0", "wifi": False, "tin_hieu": False, "trang_thai": "down"}], ipv4={}, ipv6={}, gw=None,
-                     gw_dev=None, internet=False, dns=False, ts={"trang_thai": "Running", "online": False, "ip": "100.66.109.71"},
+                     gw_dev=None, internet=False, dns=False, ts={"trang_thai": "Running", "online": False, "ip": "100.1.2.3"},
                      tram={"url": "https://tram.example.com", "ok": False}))
 ok(kq["muc"] == "loi" and kq["tieu_de"] == "Chưa có dây mạng hay Wi-Fi", "rút dây → Chưa có dây mạng hay Wi-Fi")
 ok(set(list(trang_thai(kq).values())[1:]) == {"bo_qua"}, "rút dây: các bước sau ghi · (chưa xét), không ghi ✗")
@@ -83,7 +83,7 @@ kq = km.ket_luan(may(gw_ping=False, gw_lang_gieng="STALE"))
 ok(kq["muc"] == "ok", "router chặn ping nhưng có trong bảng láng giềng → vẫn tính là có router")
 
 kq = km.ket_luan(may(internet=False, dns=False))
-ok(kq["tieu_de"] == "Router có, nhưng không ra được Internet" and "34:5a:60:35:44:0b" in kq["giai_thich"],
+ok(kq["tieu_de"] == "Router có, nhưng không ra được Internet" and "02:00:00:00:00:0b" in kq["giai_thich"],
    "router đáp mà không ra Internet → nói router mất mạng/chặn theo MAC, kèm MAC")
 
 kq = km.ket_luan(may(dns=False))

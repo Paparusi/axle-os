@@ -57,11 +57,11 @@ import importlib.util
 _spec = importlib.util.spec_from_file_location("kiem_mang", os.path.join(ROOT, "core/lib/kiem-mang.py"))
 _km = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_km)
-_sk = {"card": [{"ten": "enp34s0", "wifi": False, "tin_hieu": True, "trang_thai": "up"}], "mac": {"enp34s0": "34:5a:60:35:44:0b"},
+_sk = {"card": [{"ten": "enp34s0", "wifi": False, "tin_hieu": True, "trang_thai": "up"}], "mac": {"enp34s0": "02:00:00:00:00:0b"},
        "ipv4": {"enp34s0": ["192.168.1.216/24"]}, "ipv6": {}, "gw": "192.168.1.1", "gw_dev": "enp34s0", "gw_ping": True,
        "gw_lang_gieng": "REACHABLE", "internet": True, "dns": True, "quan_ly": "nm",
        "ket_noi": {"enp34s0": {"trang_thai": "connected", "ten": "netplan-enp34s0"}}, "xin_ipv4": {"enp34s0": "dhcp"},
-       "ts": {"trang_thai": "Running", "online": True, "ip": "100.66.109.71"}, "tram": {"url": "https://tram.example.com", "ok": True}}
+       "ts": {"trang_thai": "Running", "online": True, "ip": "100.1.2.3"}, "tram": {"url": "https://tram.example.com", "ok": True}}
 if os.environ.get("AXLE_SHOT_MANG", "loi") != "ok":
     _sk.update(ipv4={}, gw=None, gw_dev=None, internet=False, dns=False, ts={"trang_thai": "Running", "online": False, "ip": None},
                tram={"url": "https://tram.example.com", "ok": False},
