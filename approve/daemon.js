@@ -457,12 +457,16 @@ const app = createAppChannel({
     app.sendTo(d.id, { type: 'state', what: 'so', data: banChoApp(layBan()) });   // mở app là có sổ ngay; app cũ bỏ qua, vô hại
     app.sendTo(d.id, { type: 'state', what: 'may-bao', data: mayBao.su_kien.slice(0, 20) });   // sự cố lỡ đẩy (máy mất mạng) vẫn thấy
     app.sendTo(d.id, { type: 'state', what: 'brain-moc', data: mocChoApp() });   // mốc có ngày → app hẹn thông báo ngay trên iPhone
+    app.sendTo(d.id, { type: 'state', what: 'hoi', data: { dang_chay: dangHoi.has(d.id) } });   // app đang quay mà máy không chạy → thôi quay
   },
   async onTask(d, task) {
     // Dừng câu hỏi đang trả lời (nút Dừng ở thẻ Hỏi Axle): ký như việc nhanh, tác động chỉ tới câu của chính điện thoại đó
     if (task === 'hoi-dung') {
       const co = dungHoi(d.id);
       log({ app: 'dừng câu hỏi', device: d.name, co });
+      // Không có câu nào chạy (vd bộ duyệt vừa khởi động lại, câu cũ đã mất) → gửi hẳn một hoi-result để app thôi quay
+      // "đang làm" — app cũ chỉ thôi quay khi nhận hoi-result (24/9 Bi bấm Dừng mà vẫn kẹt).
+      if (!co) app.sendTo(d.id, { type: 'hoi-result', ok: false, code: -3, text: 'Không có câu nào đang chạy trên máy (máy vừa khởi động lại bộ duyệt?). Gõ "tiếp tục" để Claude làm tiếp — nó vẫn nhớ cuộc này.' });
       return app.sendTo(d.id, { type: 'task-result', task, ok: true, text: co ? 'Đã dừng' : 'Không có câu nào đang trả lời' });
     }
     const v = TASKS[task];
@@ -576,6 +580,7 @@ const app = createAppChannel({
     const p = spawn('timeout', ['-k', '5', String(giay), 'runuser', '-u', owner, '--', AXLE, 'claude', cauDay, '--dong', ...(tiep ? ['--tiep'] : []), ...(phien ? ['--phien', phien] : [])],
       { cwd: `/home/${owner}`, env: { ...process.env, HOME: `/home/${owner}` }, stdio: ['ignore', 'pipe', 'pipe'] });
     dangHoi.set(d.id, p);
+    publishBan();   // ban.json dang_hoi: `axle update` chờ câu này xong rồi mới khởi động lại bộ duyệt
     let buf = ''; let dau = ''; let tong = 0; let timer = null; let cat = false;
     const day = () => { if (!buf) return; const t = buf; buf = ''; app.sendTo(d.id, { type: 'hoi-chunk', text: t }); };
     const them = (chunk) => {
@@ -593,7 +598,10 @@ const app = createAppChannel({
     p.on('close', (code, signal) => {
       clearTimeout(timer); timer = null; day();
       const bi_dung = dangHoi.get(d.id)?.daDung === true;
+      const biNgat = p.biNgat === true;   // bộ duyệt đang tắt: đã báo "bị ngắt" cho app rồi
       dangHoi.delete(d.id);
+      publishBan();
+      if (biNgat) return;
       const ma = code ?? (signal ? 143 : -1);
       app.sendTo(d.id, { type: 'hoi-result', ok: ma === 0, code: ma, text: ma === 0 ? '' : (bi_dung ? 'Đã dừng theo yêu cầu.' : goiYLoiClaude(dau, ma)) });
       log({ app: 'hỏi xong', code: ma, byte: tong, ...(bi_dung ? { dung: true } : {}) });
@@ -605,6 +613,24 @@ const app = createAppChannel({
 const HOI_CFG = process.env.AXLE_APP_HOI || '/etc/axle/app-hoi.json';
 const hoiCfg = () => { try { return { enabled: true, timeoutSec: 1800, ...JSON.parse(readFileSync(HOI_CFG, 'utf8')) }; } catch { return { enabled: true, timeoutSec: 1800 }; } };
 const dangHoi = new Map();   // id điện thoại → tiến trình đang trả lời (để Dừng)
+// Bộ duyệt bị tắt (systemd khi cập nhật / khởi động lại): câu trả lời chạy bên trong nó sẽ chết theo → báo app trước
+// ("bị ngắt, gõ tiếp tục") rồi mới thoát, kẻo app quay "đang làm" mãi (24/9, máy văn phòng, hai lần cập nhật giữa lúc chat).
+let dangTat = false;
+async function tatNhe(sig) {
+  if (dangTat) return;
+  dangTat = true;
+  log({ tat: sig, dang_hoi: dangHoi.size });
+  const gui = [];
+  for (const [id, p] of dangHoi) {
+    p.biNgat = true;
+    gui.push(app.sendTo(id, { type: 'hoi-result', ok: false, code: -2, text: 'Máy vừa khởi động lại (cập nhật Axle) nên câu trả lời bị ngắt giữa chừng. Gõ "tiếp tục" để Claude làm tiếp — nó vẫn nhớ cuộc này.' }));
+  }
+  await Promise.race([Promise.allSettled(gui), new Promise((r) => { setTimeout(r, 4000); })]);
+  process.exit(0);
+}
+process.on('SIGTERM', () => { tatNhe('SIGTERM'); });
+process.on('SIGINT', () => { tatNhe('SIGINT'); });
+
 function dungHoi(deviceId) {
   const p = dangHoi.get(deviceId);
   if (!p) return false;
@@ -950,7 +976,7 @@ function layBan() {
     buttons: keyboard(r).flat().map((b) => b.callback_data.slice(-1)).join(''),
     ageSec: Math.round((Date.now() - r.created) / 1000), expires: new Date(r.created + c.expireSec * 1000).toISOString() }));
   const agents = agentList().map((a) => ({ ten: a.name, vai: a.role, user: a.user, tam_dung: a.suspended }));
-  return { ts: new Date().toISOString(), host: hostname(), pending, homNay: homNay(), agents, so: soGanDay(), may_bao: mayBao.su_kien.slice(0, 10) };
+  return { ts: new Date().toISOString(), host: hostname(), pending, homNay: homNay(), agents, so: soGanDay(), may_bao: mayBao.su_kien.slice(0, 10), dang_hoi: dangHoi.size };
 }
 let banHen = null;
 function publishBan() {   // đổi trạng thái dồn dập (một việc: pending → running → done) → ghi một lần

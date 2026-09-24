@@ -380,6 +380,13 @@ link tới trang chưa có thành nút loại `thieu` (vẽ đứt nét đỏ; b
 (hộp trạm 64KB đã mã hoá) — wiki lớn thì giữ trang nhiều liên kết nhất, `bo_bot` = số trang bị ẩn (0.1.140).
 App: `query brain-graph` → tấm **Liên kết trong Bộ não** trong 📚: xếp lực (đẩy–kéo, 200 vòng ngay trên điện thoại),
 màu theo loại, chạm chấm → thấy nó nối với ai + nút "Hỏi về trang này". Thử: test-brain 32 ca (5 ca đồ thị).
+**Chat kẹt "đang làm" (24/9, 0.1.158):** Bi chụp app quay mãi — câu trả lời chạy BÊN TRONG bộ duyệt (con của
+axle-approve), mà hai lần `axle update` lúc 11:28/11:36 khởi động lại bộ duyệt → systemd giết cả nhóm, app không bao giờ
+nhận hoi-result; bấm ■ thì máy nói "không có câu nào" mà app cũ không thôi quay. Sửa: bộ duyệt bắt SIGTERM → gửi
+hoi-result "bị ngắt, gõ tiếp tục" cho mọi câu đang chạy rồi mới thoát (≤4 giây); Dừng mà không có câu → gửi hẳn hoi-result
+(app cũ cũng thôi quay); ban.json `dang_hoi` → `install.sh --update` CHỜ câu hỏi dở xong (≤15 phút, --force khỏi chờ);
+hello gửi `state hoi {dang_chay}` → app mới thôi quay nếu máy không còn chạy câu đó. Gõ "tiếp tục" là Claude làm tiếp
+(--resume cùng phiên).
 **Đỡ phải duyệt (24/9, 0.1.157):** Bi: "mỗi lần chat với Axle, t phải duyệt từng cái mệt quá". Sổ máy thật: 13 lần duyệt
 trong một giờ làm sổ chi phí, phần lớn `ls`/`which`/`cat`/`wc`/Python đọc CSV; bấm "Luôn" 9 lần vẫn bị hỏi (Luôn với Bash =
 đúng câu lệnh đó, Claude mỗi lần viết khác); một lần là AskUserQuestion bị đẩy lên như việc xin duyệt. Sửa (phía máy, app

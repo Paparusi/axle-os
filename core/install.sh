@@ -74,6 +74,18 @@ mkdir -p /opt/axle.new
 tar -xzf "$T/$FILE" -C /opt/axle.new --strip-components=1 --no-same-owner
 [ -f /opt/axle.new/core/provision.sh ] || die "Gói thiếu core/provision.sh"
 
+# Đang có câu hỏi dở trên điện thoại (Hỏi Axle) thì CHỜ trả lời xong rồi mới thay: provision khởi động lại bộ duyệt, mà
+# câu trả lời chạy bên trong bộ duyệt → bị cắt ngang, app quay "đang làm" mãi (24/9, lỗi do chính việc cập nhật). --force: khỏi chờ.
+if [ "$MODE" = update ] && [ "$FORCE" = 0 ] && [ -r /run/axle/ban.json ]; then
+  n=0
+  while [ "$(python3 -c 'import json, sys; print(int(json.load(open(sys.argv[1])).get("dang_hoi") or 0))' /run/axle/ban.json 2>/dev/null || echo 0)" != 0 ]; do
+    [ "$n" = 0 ] && echo "→ Đang có câu hỏi dở trên điện thoại — chờ Claude trả lời xong rồi mới cập nhật (tối đa 15 phút; --force để khỏi chờ)"
+    n=$((n + 1))
+    [ "$n" -le 180 ] || { echo "  chờ quá 15 phút — cập nhật luôn"; break; }
+    sleep 5
+  done
+fi
+
 # Chụp hệ thống trước khi thay (quay lại được bằng axle undo); bản cũ giữ ở /opt/axle.prev
 if command -v snapper >/dev/null && snapper -c root list >/dev/null 2>&1; then
   snapper -c root create -t single -c number -d "trước khi cài Axle ${CUR:-mới} → $VER" >/dev/null || true
