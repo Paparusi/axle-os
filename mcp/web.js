@@ -17,10 +17,18 @@
 // xác thực, nên đừng mở web app chứa thứ nhạy cảm trên máy có người lạ dùng chung.
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import path from 'node:path';
 import { z } from 'zod';
 
 const LOI = '/opt/axle/core/web/domtable.mjs';
-const HO_SO = (ten) => `${process.env.HOME || ''}/.local/share/axle-web/${ten}`;
+// Hồ sơ web app: Chromium bản snap ghi ở ~/snap/<snap>/common/axle-web/<tên> (bị giam, không ghi được thư mục ẩn trong
+// nhà); bản .deb ở ~/.local/share/axle-web/<tên> (core/desktop/webapp.sh ho_so). Chỗ nào có DevToolsActivePort (app
+// đang mở) thì lấy chỗ đó.
+export const HO_SO = (ten) => {
+  const nha = process.env.HOME || '';
+  const cho = [path.join(nha, 'snap/chromium/common/axle-web', ten), path.join(nha, '.local/share/axle-web', ten)];
+  return cho.find((d) => existsSync(path.join(d, 'DevToolsActivePort'))) || cho.find((d) => existsSync(d)) || cho[0];
+};
 const TEN = z.string().regex(/^[a-z][a-z0-9-]{1,20}$/).describe('Tên web app (như trong axle webapp)');
 const VAI_TRO = z.enum(['button', 'link', 'textbox', 'combobox', 'checkbox', 'radio', 'tab', 'menuitem',
   'option', 'searchbox', 'switch', 'heading', 'listitem', 'cell'])

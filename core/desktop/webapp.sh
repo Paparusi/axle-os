@@ -24,6 +24,54 @@ trinh_duyet() {
   return 1
 }
 
+# Hồ sơ của một web app (đăng nhập riêng từng app). Chromium bản SNAP bị giam: chỉ ghi được ~/snap/<tên snap>/… và tệp
+# KHÔNG ẩn trong nhà — hồ sơ cũ ~/.local/share/axle-web/<tên> làm Chromium chết ngay lúc mở ("Failed to create …/
+# SingletonLock: Permission denied", 24/9: Zalo và Gmail trên máy văn phòng chưa từng mở được). Bản .deb thì giữ chỗ cũ.
+# mcp/web.js tìm hồ sơ ở cả hai chỗ (agent đọc DevToolsActivePort trong đó).
+ho_so() {   # ho_so <trình duyệt> <tên> → đường (còn chữ $HOME để tệp chạy tự thay theo người mở)
+  case "$1" in
+    /snap/bin/*) echo "\$HOME/snap/${1#/snap/bin/}/common/axle-web/$2" ;;
+    *) echo "\$HOME/.local/share/axle-web/$2" ;;
+  esac
+}
+
+# Viết tệp chạy của web app (dùng cho cả `them` lẫn `lam-moi`)
+viet_lenh() {   # viet_lenh <tên> <địa chỉ> <trình duyệt>
+  local ten="$1" url="$2" td="$3"
+  # Bọc thành một tệp chạy được: danh sách trắng của agent chỉ trỏ tới tệp này, không nhận URL tuỳ ý.
+  # Mỗi app một hồ sơ riêng → đăng nhập Cargo không đá đăng nhập PGX, và agent không dùng chung phiên với chủ.
+  # --remote-debugging-port=0: Chromium tự chọn cổng RỖI rồi ghi số vào <hồ sơ>/DevToolsActivePort.
+  # KHÔNG dùng cổng cố định: giao thức CDP không có xác thực, ai trên máy đoán trúng số cổng là chiếm được
+  # trình duyệt đó. Cổng ngẫu nhiên thì phải quét mới tìm ra. Che số cổng là nhờ THƯ MỤC hồ sơ 0700 (bản
+  # thân tệp DevToolsActivePort do Chromium tạo với quyền 0644) — nên thư mục đó phải đúng 0700, và cổng
+  # vẫn là loopback không xác thực: đây là rào cản, không phải khoá.
+  # Nhờ cổng này mà agent ĐỌC ĐƯỢC trang thành bảng phần tử đánh số thay vì bấm mò theo toạ độ.
+  cat > "$BINDIR/axle-web-$ten" <<EOF
+#!/bin/sh
+# Sinh bởi: axle webapp them $ten $url
+HS="$(ho_so "$td" "$ten")"
+mkdir -p "\$HS" && chmod 0700 "\$HS"
+exec "$td" --app=$url --user-data-dir="\$HS" --class=axle-web-$ten --remote-debugging-port=0 "\$@"
+EOF
+  chmod 0755 "$BINDIR/axle-web-$ten"
+}
+
+# Viết lại tệp chạy của MỌI web app đã có theo trình duyệt hiện tại (sửa hồ sơ snap, đổi trình duyệt) — giữ nguyên
+# tên, địa chỉ, mục trình đơn và danh sách trắng của agent. provision-desktop gọi mỗi lần làm mới.
+lam_moi() {
+  local td f ten url n=0
+  td="$(trinh_duyet)" || { echo "  (chưa có Chromium — web app chưa chạy được: sudo snap install chromium)"; return 0; }
+  for f in "$BINDIR"/axle-web-*; do
+    [ -f "$f" ] || continue
+    ten="${f##*/axle-web-}"
+    url="$(sed -n 's/.*--app=\([^ ]*\).*/\1/p' "$f" | head -1)"
+    [[ "$ten" =~ ^[a-z][a-z0-9-]{1,20}$ ]] && [[ "$url" =~ ^https?:// ]] || continue
+    viet_lenh "$ten" "$url" "$td"
+    n=$((n + 1))
+  done
+  echo "  web app: $n app, hồ sơ ở $(ho_so "$td" '<tên>' | sed 's/\$HOME/~/')"
+}
+
 lietke() {
   local co=0
   for f in "$BINDIR"/axle-web-*; do
@@ -49,22 +97,7 @@ them() {
   local td; td="$(trinh_duyet)" || { echo "Chưa có Chromium — cài: sudo snap install chromium" >&2; exit 1; }
   [ -n "$hien" ] || hien="$ten"
 
-  # Bọc thành một tệp chạy được: danh sách trắng của agent chỉ trỏ tới tệp này, không nhận URL tuỳ ý.
-  # Mỗi app một hồ sơ riêng → đăng nhập Cargo không đá đăng nhập PGX, và agent không dùng chung phiên với chủ.
-  # --remote-debugging-port=0: Chromium tự chọn cổng RỖI rồi ghi số vào <hồ sơ>/DevToolsActivePort.
-  # KHÔNG dùng cổng cố định: giao thức CDP không có xác thực, ai trên máy đoán trúng số cổng là chiếm được
-  # trình duyệt đó. Cổng ngẫu nhiên thì phải quét mới tìm ra. Che số cổng là nhờ THƯ MỤC hồ sơ 0700 (bản
-  # thân tệp DevToolsActivePort do Chromium tạo với quyền 0644) — nên thư mục đó phải đúng 0700, và cổng
-  # vẫn là loopback không xác thực: đây là rào cản, không phải khoá.
-  # Nhờ cổng này mà agent ĐỌC ĐƯỢC trang thành bảng phần tử đánh số thay vì bấm mò theo toạ độ.
-  cat > "$BINDIR/axle-web-$ten" <<EOF
-#!/bin/sh
-# Sinh bởi: axle webapp them $ten $url
-HS="\$HOME/.local/share/axle-web/$ten"
-mkdir -p "\$HS" && chmod 0700 "\$HS"
-exec "$td" --app=$url --user-data-dir="\$HS" --class=axle-web-$ten --remote-debugging-port=0 "\$@"
-EOF
-  chmod 0755 "$BINDIR/axle-web-$ten"
+  viet_lenh "$ten" "$url" "$td"
 
   cat > "$DESKDIR/axle-web-$ten.desktop" <<EOF
 [Desktop Entry]
@@ -102,7 +135,7 @@ bo() {
     chmod 0644 "$APPS"
   fi
   update-desktop-database "$DESKDIR" >/dev/null 2>&1 || true
-  echo "Đã bỏ $ten (hồ sơ đăng nhập vẫn còn ở ~/.local/share/axle-web/$ten — xoá tay nếu muốn)"
+  echo "Đã bỏ $ten (hồ sơ đăng nhập vẫn còn ở ~/snap/chromium/common/axle-web/$ten hay ~/.local/share/axle-web/$ten — xoá tay nếu muốn)"
 }
 
 ghim() {
@@ -120,8 +153,9 @@ ghim() {
 
 case "${1:-list}" in
   them)  can_root them; shift; them "$@" ;;
+  lam-moi) can_root lam-moi; lam_moi ;;
   bo)    can_root bo; shift; bo "$@" ;;
   ghim)  can_root ghim; shift; ghim "$@" ;;
   list)  lietke ;;
-  *)     echo "sudo axle webapp them <tên> <địa chỉ> [\"Tên hiện\"] [--icon tệp.png] | bo <tên> | ghim <tên> · axle webapp" >&2; exit 2 ;;
+  *)     echo "sudo axle webapp them <tên> <địa chỉ> [\"Tên hiện\"] [--icon tệp.png] | bo <tên> | ghim <tên> | lam-moi · axle webapp" >&2; exit 2 ;;
 esac

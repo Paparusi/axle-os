@@ -542,3 +542,18 @@ nhật, restart service là tự giết mình. Kịch bản đang chạy nằm t
 Thử: `build/tu-cap-nhat-smoke.sh` 11 ca (bộ cài + systemctl + dựng-lại giả: tắt, mới nhất, mất mạng, lên ổn, dịch vụ
 hỏng → quay về, bỏ qua bản hỏng, bản mới hơn vẫn cài, dựng lỗi, mất bản cũ, quay về cũng lỗi, cắt nhật ký; phá thử
 phần khám dịch vụ thì 3 ca đỏ), test-may-bao +8 ca, gui-logic-smoke +3 ca.
+
+## Zalo, Gmail: web app cửa sổ riêng (sửa 24/9, 0.1.165)
+
+`axle webapp them <tên> <địa chỉ>` (core/desktop/webapp.sh) biến một trang web thành app có icon, cửa sổ riêng
+(Chromium `--app=`), hồ sơ đăng nhập riêng từng app, và cùng tên đó vào danh sách trắng cho agent mở
+(`screen_open`). Lúc dựng giao diện, máy tạo sẵn Zalo (chat.zalo.me) và Gmail, rồi ghim vào dock.
+
+**Lỗi 24/9 (Bi: "zalo chưa dùng được"):** bấm Zalo là cửa sổ không lên. Nhật ký phiên có dòng
+`Failed to create …/.local/share/axle-web/zalo/SingletonLock: Permission denied`. Gốc: Chromium trên Ubuntu là bản
+SNAP bị giam, chỉ ghi được `~/snap/<snap>/…` và tệp KHÔNG ẩn trong nhà. Hồ sơ nằm trong `~/.local` (ẩn) nên Chromium
+chết ngay lúc mở. Lỗi có từ ngày tạo web app (21/9), Zalo lẫn Gmail chưa từng mở được trên máy thật. Sửa: `ho_so()`
+chọn `~/snap/chromium/common/axle-web/<tên>` khi trình duyệt là snap, giữ `~/.local/share/axle-web/<tên>` cho bản
+.deb. `webapp.sh lam-moi` viết lại tệp chạy của MỌI web app đã có (giữ tên, địa chỉ, mục trình đơn, danh sách trắng),
+provision-desktop gọi mỗi lần làm mới. `mcp/web.js` `HO_SO` tìm hồ sơ ở cả hai chỗ (ưu tiên chỗ có DevToolsActivePort).
+`~/snap` vốn đã bị chặn khỏi màn Tệp của app điện thoại (approve/tep.js), nên cookie và tin nhắn Zalo không lộ ra đó.

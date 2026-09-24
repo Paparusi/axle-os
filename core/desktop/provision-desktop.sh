@@ -169,6 +169,9 @@ if command -v chromium >/dev/null 2>&1 || [ -x /snap/bin/chromium ]; then
     fi
   done
 fi
+# Viết lại tệp chạy của mọi web app theo trình duyệt hiện có — sửa cả máy đã cài: Chromium snap không ghi được hồ sơ
+# ~/.local/share/axle-web (24/9: Zalo, Gmail bấm là tắt ngay) → hồ sơ về ~/snap/chromium/common/axle-web/<tên>
+bash "$HERE/webapp.sh" lam-moi || true
 
 # Nút "Hiện ứng dụng" ở thanh dock lấy icon theo chế độ phiên (`view-app-grid-ubuntu-symbolic` = logo Ubuntu).
 # Đổi sang lưới chấm trung tính của Yaru — không mượn nhãn hiệu Ubuntu làm nhận diện Axle.
