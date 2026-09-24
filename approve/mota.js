@@ -22,6 +22,7 @@ export function gopNhatKy(dong) {
     let e;
     try { e = JSON.parse(l); } catch { continue; }
     if (!e.id) continue;
+    if (e.state === 'auto' && e.by === 'chỉ đọc') continue;   // lệnh chỉ đọc tự duyệt: vẫn trong nhật ký gốc, Sổ khỏi đầy ls/cat
     if ((e.state === 'pending' || e.state === 'auto') && e.params) {
       m.set(e.id, { id: e.id, luc: e.ts, agent: e.client ?? '?', action: e.action, params: e.params,
         viec: moTaNgan(e.action, e.params), tu_duyet: e.state === 'auto' ? (e.by || true) : false,

@@ -32,6 +32,18 @@ ok(!('pending' in app) && app.homNay.chu_duyet === 1 && app.host === 'h', 'bản
 ok(Buffer.byteLength(JSON.stringify(app)) <= 48000 && app.so.length > 0 && app.so.length < 400, `cắt sổ cho vừa hộp: ${app.so.length} việc, ${Buffer.byteLength(JSON.stringify(app))} byte`);
 ok(banChoApp({ ts: 'x', host: 'h', so: [] }).so.length === 0, 'sổ rỗng vẫn trả được');
 
+// 24/9: lệnh chỉ đọc tự duyệt ("chỉ đọc") vẫn nằm trong nhật ký gốc nhưng Sổ không hiện (khỏi đầy ls/cat)
+{
+  const { gopNhatKy: gop } = await import('./mota.js');
+  const dong = [
+    JSON.stringify({ id: 'r1', ts: '2026-09-24T04:00:00Z', state: 'auto', by: 'chỉ đọc', action: 'claude_tool', client: 'ssh:claude', params: { tool: 'Bash', command: 'ls' } }),
+    JSON.stringify({ id: 'r1', state: 'done', exitCode: 0 }),
+    JSON.stringify({ id: 'r2', ts: '2026-09-24T04:01:00Z', state: 'auto', by: 'phiên 1 giờ #3 (tới 12:00)', action: 'claude_tool', client: 'ssh:claude', params: { tool: 'Bash', command: 'mv a b' } }),
+  ];
+  const so = gop(dong);
+  ok(so.length === 1 && so[0].id === 'r2', `Sổ bỏ lệnh chỉ đọc tự duyệt, giữ việc tự duyệt theo phiên (${so.map((x) => x.id).join(',')})`);
+}
+
 if (fail) { console.log(`✗ ${fail} mục hỏng`); process.exit(1); }
 console.log('✓ mota (Sổ + bản cho app) đạt');
 

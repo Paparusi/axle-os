@@ -380,6 +380,17 @@ link tới trang chưa có thành nút loại `thieu` (vẽ đứt nét đỏ; b
 (hộp trạm 64KB đã mã hoá) — wiki lớn thì giữ trang nhiều liên kết nhất, `bo_bot` = số trang bị ẩn (0.1.140).
 App: `query brain-graph` → tấm **Liên kết trong Bộ não** trong 📚: xếp lực (đẩy–kéo, 200 vòng ngay trên điện thoại),
 màu theo loại, chạm chấm → thấy nó nối với ai + nút "Hỏi về trang này". Thử: test-brain 32 ca (5 ca đồ thị).
+**Đỡ phải duyệt (24/9, 0.1.157):** Bi: "mỗi lần chat với Axle, t phải duyệt từng cái mệt quá". Sổ máy thật: 13 lần duyệt
+trong một giờ làm sổ chi phí, phần lớn `ls`/`which`/`cat`/`wc`/Python đọc CSV; bấm "Luôn" 9 lần vẫn bị hỏi (Luôn với Bash =
+đúng câu lệnh đó, Claude mỗi lần viết khác); một lần là AskUserQuestion bị đẩy lên như việc xin duyệt. Sửa (phía máy, app
+không phải dựng): (1) `chiDoc()` trong approve/rules.js — bộ phân tích chặt cho Bash chỉ đọc (tách | || && ; xuống dòng
+ngoài nháy; mỗi đoạn là chương trình trong danh sách ls/cat/head/tail/wc/grep/sort/du/jq…; không $( ) ` <( ) >( ); không
+ghi tệp trừ /dev/null và 2>&1; không chạy nền; không gán biến trước lệnh; không đường dẫn nhạy cảm .ssh/vault/.env/
+.config/axle; sort -o, uniq a b, hostname <tên>, date -s bị loại) → tự duyệt "chỉ đọc", không vào Sổ; (2) "1 giờ" trên một
+việc của Claude = cho Claude tự làm MỌI việc thường (bậc 2) trong 1 giờ (trước chỉ đúng một công cụ + một thư mục); bậc 3
+vẫn hỏi; tin xin duyệt nói rõ điều này; (3) Bash/Edit/Write không còn nút "Luôn" (cái bẫy); công cụ Axle (MCP) vẫn có;
+(4) `axle claude` cấm AskUserQuestion, dặn hỏi trong câu trả lời, ưu tiên Read/Grep/Glob, gom việc ghi vào ít lệnh.
+Thử: test-rules 75 ca (có đúng các lệnh máy thật sáng 24/9), test-mota +1.
 **Máy tự báo (24/9, 0.1.155, hướng số 3):** `approve/may-bao.js` — bộ duyệt khám mỗi 5 phút (90 giây sau khi chạy):
 mạng (`kiem-mang.py --json`), ổ đĩa (statfs), dịch vụ hỏng (`systemctl --failed`, bỏ `*-wait-online`), bản Axle mới (hỏi
 latest.json 6 giờ một lần). `danhGia` là hàm thuần: CHỈ khi trạng thái đổi mới thành sự cố — mất mạng / không tới trạm thì

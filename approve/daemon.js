@@ -15,7 +15,7 @@ import { appendFileSync, chownSync, closeSync, existsSync, fstatSync, lstatSync,
 import path from 'node:path';
 import { hostname } from 'node:os';
 import { addRule, addSession, autoLabel, canRemember, canSession, describeRule, findAuto, keyboard, loadRules, prune,
-  saveRules, tierLine, tierOf, writeDurable } from './rules.js';
+  saveRules, tierLine, tierOf, writeDurable, chiDoc } from './rules.js';
 import { buildDigest } from './digest.js';
 import { banChoApp, gopNhatKy, lenhCongCu, tenTepAnToan } from './mota.js';
 import { CHU_KY as MAY_BAO_CHU_KY, danhGia as mayBaoDanhGia, doDac as mayBaoDoDac, locSuKien as mayBaoLoc } from './may-bao.js';
@@ -231,7 +231,7 @@ const ACTIONS = {
       let mo = false;
       const mcp = lenhCongCu(tool, input, tayBangCuaChu());
       if (mcp) { command = mcp.command; mo = mcp.mo; }
-      return { tool, input, command, file, nguy: nguyHiem(tool, command, file), mo };
+      return { tool, input, command, file, nguy: nguyHiem(tool, command, file), mo, chiDoc: tool === 'Bash' && !mcp && chiDoc(command) };
     },
     describe(p) {
       const dong = [`Claude trên máy xin dùng công cụ ${p.tool}${p.nguy ? ' ⚠️ NGUY HIỂM' : ''}${p.mo ? ' (không rõ đích — luôn hỏi)' : ''}`];

@@ -2,7 +2,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { addRule, addSession, canRemember, findAuto, keyboard, loadRules, prune, saveRules, tierOf, SESSION_MS } from './rules.js';
+import { addRule, addSession, canRemember, chiDoc, findAuto, keyboard, loadRules, prune, saveRules, tierOf, tierLine, SESSION_MS } from './rules.js';
 
 let fail = 0;
 const ok = (c, m) => { console.log(`  ${c ? '✓' : '✗'} ${m}`); if (!c) fail++; };
@@ -46,12 +46,15 @@ ok(findAuto(ct('Bash', { command: 'npm  test' }), R, T0)?.kind === 'rule', 'lu�
 ok(!findAuto(ct('Bash', { command: 'npm publish' }), R, T0), 'luật "luôn": lệnh khác → hỏi');
 addSession(R, ct('Edit', { file: '/p/z/a.js' }), T0);
 ok(findAuto(ct('Edit', { file: '/p/z/b.js' }), R, T0)?.kind === 'session', 'phiên 1 giờ: Edit tệp khác cùng thư mục → tự duyệt');
-ok(!findAuto(ct('Write', { file: '/p/z/c.js' }), R, T0), 'phiên 1 giờ: công cụ khác (Write) → hỏi lại');
+// Từ 24/9 "1 giờ" phủ MỌI việc thường của Claude (Bi: "chat với Axle phải duyệt từng cái mệt quá")
+ok(findAuto(ct('Write', { file: '/q/c.js' }), R, T0)?.kind === 'session', 'phiên 1 giờ: Claude viết tệp khác (Write, thư mục khác) cũng tự duyệt');
 ok(!findAuto(ct('Edit', { file: '/etc/hosts', nguy: true }), R, T0), 'phiên không bao giờ áp cho việc nguy hiểm');
 // Công cụ web_*/tay_*: "luôn" nhớ theo ĐÍCH (app + nút) nằm trong command, không theo tên công cụ
 addRule(R, ct('mcp__axle__tay_click', { command: 'tay_click libreoffice "Calc": push button "Lưu"' }), T0);
-ok(findAuto(ct('mcp__axle__tay_click', { command: 'tay_click libreoffice "Calc": push button "Lưu"' }), R, T0)?.kind === 'rule', 'luật "luôn" tay_click: đúng nút Lưu trong Calc → tự duyệt');
-ok(!findAuto(ct('mcp__axle__tay_click', { command: 'tay_click libreoffice "Calc": push button "Xoá hết"' }), R, T0), 'luật "luôn" tay_click: nút khác → hỏi (không phải mọi cú bấm)');
+// (xét lúc phiên 1 giờ ở trên đã hết hạn — phiên đó phủ mọi việc thường của Claude)
+const T1 = T0 + SESSION_MS + 1;
+ok(findAuto(ct('mcp__axle__tay_click', { command: 'tay_click libreoffice "Calc": push button "Lưu"' }), R, T1)?.kind === 'rule', 'luật "luôn" tay_click: đúng nút Lưu trong Calc → tự duyệt');
+ok(!findAuto(ct('mcp__axle__tay_click', { command: 'tay_click libreoffice "Calc": push button "Xoá hết"' }), R, T1), 'luật "luôn" tay_click: nút khác → hỏi (không phải mọi cú bấm)');
 ok(tierOf(ct('mcp__axle__tay_click', { command: 'tay_click #99 (không rõ phần tử)', mo: true })) === 3, 'tay_click không rõ đích → bậc 3, luôn hỏi');
 ok(!canRemember(ct('mcp__axle__tay_click', { command: 'tay_click #99 (không rõ phần tử)', mo: true })), 'không rõ đích thì không có nút "luôn"');
 
@@ -67,6 +70,38 @@ saveRules(R2, f);           // lần 2 → có .bak
 writeFileSync(f, '');       // giả mất điện: file rỗng
 ok(loadRules(f).rules.length === 1, 'file luật rỗng (mất điện) → đọc bản sao lưu');
 rmSync(D, { recursive: true, force: true });
+
+// ---- 24/9: "chat với Axle phải duyệt từng cái mệt quá" ----
+// Lệnh chỉ đọc: tự duyệt. Có đúng mấy lệnh Claude chạy sáng 24/9 (lấy từ Sổ máy thật)
+for (const c of ['ls -la ~ | head -30; echo "---"; ls -la ~/work 2>/dev/null || echo "no ~/work"', 'cat /tmp/Chi-phi-hang-thang.csv',
+  'wc -l /tmp/a.csv /tmp/b.csv', 'cd /tmp && ls -la && head -5 x.csv', 'grep -n "Tổng" /tmp/a.csv | sort | uniq -c', 'du -sh ~/Documents 2>&1',
+  'echo "a;b|c" && cat "tệp có dấu cách.txt"', 'jq .version /opt/axle/latest.json', 'wc -l < /tmp/a.csv', 'ls >/dev/null 2>&1']) {
+  ok(chiDoc(c), `chỉ đọc → tự duyệt: ${c.slice(0, 60)}`);
+}
+for (const c of ['cat > /tmp/x.csv << \'EOF\'\na\nEOF', 'cat a > b', 'echo x >> ~/.bashrc', 'ls $(rm -rf ~)', 'ls `id`', 'echo "$(whoami)"',
+  'sort -o out.txt in.txt', 'uniq a.txt b.txt', 'find . -delete', 'sudo ls', 'cat ~/.ssh/id_ed25519', 'cat /home/admin_1/brain/vault/tokens.env',
+  'python3 -c "print(1)"', 'cd /tmp && soffice --headless --convert-to csv x.xlsx', 'tail -f log &', 'LANG=C sort a', 'ls | sh',
+  'hostname may-moi', 'diff <(ls a) <(ls b)', 'cat .env', 'for f in a b; do wc -l $f; done', 'mv a b', 'echo "chưa đóng nháy', 'rm -rf /tmp/x']) {
+  ok(!chiDoc(c), `không chắc chỉ đọc → vẫn hỏi: ${c.replace(/\n/g, '⏎').slice(0, 60)}`);
+}
+const claude = (input, extra = {}) => ({ id: 'cccc0001', nonce: 'n', action: 'claude_tool', client: 'ssh:claude', who: { agent: null },
+  params: { tool: input.command ? 'Bash' : 'Edit', input, command: input.command ?? null, file: input.file_path ?? null, nguy: false, mo: false,
+    chiDoc: !!input.command && chiDoc(input.command), ...extra } });
+const RC = { next: 1, rules: [], sessions: [] };
+ok(findAuto(claude({ command: 'cat /tmp/a.csv' }), RC)?.kind === 'chi_doc', 'Bash chỉ đọc → tự duyệt (chi_doc), không cần phiên');
+ok(findAuto(claude({ command: 'mv /tmp/a /home/u/Documents/a' }), RC) === null, 'Bash có ghi → vẫn hỏi');
+// "1 giờ" trên một lệnh Bash → mọi việc thường của Claude (cả sửa tệp ở thư mục khác) tự duyệt trong 1 giờ
+addSession(RC, claude({ command: 'mv /tmp/a /home/u/Documents/a' }), T0);
+ok(findAuto(claude({ command: 'soffice --headless --convert-to xlsx /tmp/a.csv' }), RC, T0 + 60_000)?.kind === 'session', '1 giờ: lệnh Bash khác cũng tự duyệt');
+ok(findAuto(claude({ file_path: '/home/u/Documents/x.md', new_string: 'y' }), RC, T0 + 60_000)?.kind === 'session', '1 giờ: sửa tệp ở thư mục khác cũng tự duyệt');
+ok(findAuto(claude({ command: 'rm -rf ~/x' }, { nguy: true }), RC, T0 + 60_000) === null, '1 giờ: việc nguy hiểm (bậc 3) vẫn hỏi');
+ok(findAuto(claude({ command: 'mv a b' }), RC, T0 + SESSION_MS + 1) === null, 'hết 1 giờ → hỏi lại');
+// "Luôn việc này" với Bash/Edit là cái bẫy (nhớ đúng câu lệnh) → không hiện; công cụ Axle (MCP) vẫn có "Luôn"
+const nutBash = keyboard(claude({ command: 'mv a b' })).flat().map((b) => b.callback_data.slice(-1)).join('');
+ok(nutBash === 'ahr' && !canRemember(claude({ command: 'mv a b' })), `Bash: chỉ còn Lần này / 1 giờ / Từ chối (${nutBash})`);
+const mcpTool = { ...claude({}), params: { tool: 'mcp__axle__pm2_list', input: {}, command: null, file: null, nguy: false, mo: false, chiDoc: false } };
+ok(canRemember(mcpTool) && keyboard(mcpTool).flat().length === 4, 'công cụ Axle (MCP) vẫn có "Luôn"');
+ok(/1 giờ tới/.test(tierLine(claude({ command: 'mv a b' }))), 'tin xin duyệt của Claude nói rõ 1 giờ = tự làm việc thường');
 
 if (fail) { console.log(`✗ ${fail} mục hỏng`); process.exit(1); }
 console.log('✓ luật duyệt 4 bậc đạt');

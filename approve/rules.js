@@ -51,7 +51,74 @@ export function tierOf(r) {
   return 2;
 }
 export const canSession = (r) => tierOf(r) === 2;
-export const canRemember = (r) => tierOf(r) === 2 && r.action !== 'file_delete';
+// Công cụ gốc của Claude Code mà đích đổi liên tục (mỗi lần một câu lệnh, một tệp): "Luôn việc này" nhớ ĐÚNG đích nên gần
+// như không bao giờ khớp lại — 24/9 Bi bấm "Luôn" 9 lần mà vẫn bị hỏi tiếp. Với mấy công cụ này chỉ còn Lần này / 1 giờ.
+const DICH_DOI = new Set(['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+export const canRemember = (r) => tierOf(r) === 2 && r.action !== 'file_delete'
+  && !(r.action === 'claude_tool' && DICH_DOI.has(r.params?.tool));
+
+// ---- Lệnh Bash CHỈ ĐỌC của Claude: tự duyệt, khỏi hỏi (24/9: 13 lần duyệt trong một giờ, phần lớn ls/cat/wc) ----
+// Bộ phân tích CHẶT: tách theo | || && ; xuống dòng (ngoài dấu nháy); mỗi đoạn phải là một chương trình chỉ-đọc trong danh
+// sách; không lệnh con $( ) hay dấu huyền, không <( ) >( ), không ghi ra tệp (chỉ cho > /dev/null và 2>&1), không chạy nền,
+// không gán biến trước lệnh, không đụng đường dẫn nhạy cảm (khoá SSH, vault, token). Không chắc → false → vẫn hỏi như cũ.
+// (Công cụ Read/Grep/Glob của Claude vốn đã đọc được tệp không cần hỏi; đây chỉ là phần tương đương qua Bash.)
+const CHI_DOC = new Set(['ls', 'cat', 'head', 'tail', 'wc', 'which', 'file', 'stat', 'du', 'df', 'pwd', 'echo', 'printf', 'grep', 'egrep',
+  'fgrep', 'rg', 'sort', 'uniq', 'cut', 'tr', 'date', 'whoami', 'id', 'uname', 'hostname', 'free', 'uptime', 'ps', 'jq', 'tree', 'realpath',
+  'readlink', 'basename', 'dirname', 'diff', 'cmp', 'md5sum', 'sha1sum', 'sha256sum', 'nl', 'column', 'cd', 'true', 'false', 'test', 'pdfinfo']);
+const NHAY_CAM = /(^|\/)\.ssh(\/|$)|\/brain\/vault|axle-vault|\.config\/axle|\.gnupg|\.aws|\.netrc|id_(rsa|ed25519|ecdsa)|(^|\/)\.env(\.|$)|\/etc\/shadow/;
+function doanChiDoc(d) {
+  if (!d) return true;                             // "a; ; b" hay dấu ; cuối câu
+  const tu = d.match(/(?:[^\s'"]+|'[^']*'|"(?:\\.|[^"\\])*")+/g) || [];
+  const conLai = [];
+  for (let i = 0; i < tu.length; i++) {
+    const m = /^(\d?&?>{1,2}|<)(.*)$/.exec(tu[i]);
+    if (m) {                                       // chuyển hướng: chỉ cho vứt đi hoặc gộp 2>&1; đọc từ tệp bằng "<" thì được
+      const dich = m[2] || tu[++i] || '';
+      if (m[1] === '<') { if (dich.startsWith('<') || NHAY_CAM.test(dich)) return false; continue; }
+      if (dich === '/dev/null' || dich === '&1' || dich === '&2') continue;
+      return false;
+    }
+    conLai.push(tu[i]);
+  }
+  if (!conLai.length) return false;
+  const [lenh, ...doi] = conLai;
+  if (!CHI_DOC.has(lenh)) return false;           // gán biến trước lệnh, /bin/rm, python3… đều rơi ở đây
+  const tran = doi.map((x) => x.replace(/^['"]|['"]$/g, ''));
+  if (tran.some((x) => NHAY_CAM.test(x))) return false;
+  if (lenh === 'sort' && tran.some((x) => x === '-o' || x.startsWith('--output') || /^-[a-zA-Z]*o/.test(x))) return false;
+  if (lenh === 'tree' && tran.some((x) => x === '-o')) return false;
+  if (lenh === 'uniq' && tran.filter((x) => !x.startsWith('-')).length >= 2) return false;   // uniq vào ra: tệp thứ hai bị GHI
+  if (lenh === 'date' && tran.some((x) => x === '-s' || x.startsWith('--set'))) return false;
+  if (lenh === 'hostname' && tran.some((x) => !x.startsWith('-'))) return false;             // hostname <tên> = đổi tên máy
+  return true;
+}
+export function chiDoc(cmd) {
+  const s = String(cmd ?? '');
+  if (!s.trim() || s.length > 2000 || /[\x00-\x08\x0e-\x1f]/.test(s)) return false;
+  const doan = []; let cur = ''; let q = null;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i]; const n = s[i + 1];
+    if (q) {
+      if (c === q) { q = null; cur += c; continue; }
+      if (q === '"' && (c === '`' || (c === '$' && n === '('))) return false;   // "…$(…)…" vẫn chạy lệnh
+      if (q === '"' && c === '\\') { cur += c + (n ?? ''); i++; continue; }
+      cur += c; continue;
+    }
+    if (c === "'" || c === '"') { q = c; cur += c; continue; }
+    if (c === '\\') { cur += c + (n ?? ''); i++; continue; }
+    if (c === '`' || (c === '$' && n === '(') || ((c === '<' || c === '>') && n === '(')) return false;
+    if (c === '|' || c === ';' || c === '\n' || (c === '&' && n === '&')) {
+      doan.push(cur); cur = '';
+      if ((c === '|' && n === '|') || (c === '&' && n === '&')) i++;
+      continue;
+    }
+    if (c === '&' && s[i - 1] !== '>' && n !== '>') return false;   // "&" lẻ = chạy nền; chỉ cho trong 2>&1 và &>/dev/null
+    cur += c;
+  }
+  if (q) return false;
+  doan.push(cur);
+  return doan.every((d) => doanChiDoc(d.trim()));
+}
 
 const norm = (cmd) => String(cmd).trim().replace(/\s+/g, ' ');
 export function sessionScope(r) {
@@ -59,8 +126,9 @@ export function sessionScope(r) {
     case 'run_command': return { cwd: r.params.cwd };
     case 'service_restart': return { unit: r.params.unit };
     case 'file_delete': return { dir: path.dirname(r.params.path) };
-    // "1 giờ": cùng công cụ, cùng thư mục (Edit/Write theo thư mục tệp; Bash theo tên công cụ)
-    case 'claude_tool': return { tool: r.params.tool, dir: r.params.file ? path.dirname(r.params.file) : null };
+    // "1 giờ" = cho Claude TỰ LÀM mọi việc thường (bậc 2: Bash, sửa tệp ở đâu cũng được, công cụ Axle) trong 1 giờ. Trước
+    // 24/9 phiên chỉ phủ đúng một công cụ + một thư mục → đổi sang sửa tệp chỗ khác là lại hỏi. Việc nguy hiểm (bậc 3) vẫn hỏi.
+    case 'claude_tool': return { claude: true };
     default: return null;
   }
 }
@@ -78,6 +146,7 @@ const same = (a, b) => JSON.stringify(a, Object.keys(a ?? {}).sort()) === JSON.s
 // Có luật / phiên nào cho phép tự duyệt yêu cầu này không
 export function findAuto(r, R, now = Date.now()) {
   if (tierOf(r) !== 2) return null;
+  if (r.action === 'claude_tool' && r.params?.chiDoc && !r.params.nguy && !r.params.mo) return { kind: 'chi_doc' };
   const k = keyOf(r);
   const m = ruleMatch(r);
   const rule = m && R.rules.find((x) => x.key === k && x.action === r.action && same(x.match, m));
@@ -114,7 +183,9 @@ export function keyboard(r) {
 }
 export const tierLine = (r) => (tierOf(r) === 3
   ? '⚠️ Bậc 3 · việc hệ trọng, luôn phải hỏi'
-  : `Bậc 2 · có thể cho 1 giờ${canRemember(r) ? ' hoặc luôn việc này' : ''}`);
+  : r.action === 'claude_tool'
+    ? `Bậc 2 · bấm "1 giờ": Claude tự làm các việc thường trong 1 giờ tới, khỏi hỏi từng cái (việc nguy hiểm vẫn hỏi)${canRemember(r) ? ' · "Luôn": luôn cho công cụ này' : ''}`
+    : `Bậc 2 · có thể cho 1 giờ${canRemember(r) ? ' hoặc luôn việc này' : ''}`);
 
 const hhmm = (iso) => new Date(iso).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false });
 export function describeRule(x, isSession) {
@@ -125,8 +196,8 @@ export function describeRule(x, isSession) {
       : x.action === 'file_delete' ? `xoá file trong ${x.scope.dir}`
         : x.action === 'claude_tool' ? (x.match
           ? `Claude dùng ${x.match.tool}${x.match.command ? ` \`${x.match.command}\`` : x.match.file ? ` vào ${x.match.file}` : ''}`
-          : `Claude dùng ${x.scope.tool}${x.scope.dir ? ` trong ${x.scope.dir}` : ''}`)
+          : x.scope.claude ? 'Claude tự làm các việc thường' : `Claude dùng ${x.scope.tool}${x.scope.dir ? ` trong ${x.scope.dir}` : ''}`)
           : x.action;
   return `#${x.id} ${isSession ? `phiên tới ${hhmm(x.until)}` : 'luôn'} · ${who} · ${what}`;
 }
-export const autoLabel = (a) => (a.kind === 'rule' ? `luật #${a.id}` : `phiên 1 giờ #${a.id} (tới ${hhmm(a.until)})`);
+export const autoLabel = (a) => (a.kind === 'rule' ? `luật #${a.id}` : a.kind === 'chi_doc' ? 'chỉ đọc' : `phiên 1 giờ #${a.id} (tới ${hhmm(a.until)})`);
