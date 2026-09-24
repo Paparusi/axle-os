@@ -22,6 +22,7 @@ import { docTep as tepDoc, lietKe as tepLietKe } from './tep.js';
 import { CHU_KY as MAY_BAO_CHU_KY, danhGia as mayBaoDanhGia, doDac as mayBaoDoDac, locSuKien as mayBaoLoc } from './may-bao.js';
 import { choApp as brainChoApp, docMoc as brainDocMoc, doThi as brainDoThi, loiDanIngest as brainLoiDanIngest, sapToi as brainSapToi,
   themTep as brainThemTep, tim as brainTim } from '../mcp/brain.js';
+import { denHan as lichDenHan, docDaChay as lichDocDaChay, docLich as lichDoc, moTaLich } from '../mcp/lich.js';
 import { createAppChannel } from './app-channel.js';
 import { machineState } from './machine-state.js';
 import { requestHash } from '../app/proto.js';
@@ -973,6 +974,107 @@ async function khamMay() {
 }
 setTimeout(() => { khamMay(); setInterval(khamMay, MAY_BAO_CHU_KY); }, 90_000);
 
+// ---- Lịch của Axle (nhịp D17): nhắc đúng giờ + việc Claude tự làm theo lịch (mcp/lich.js) ----
+// Bộ duyệt chạy suốt nên giữ đồng hồ: 20 giây xem ~chủ/Axle/lich.json một lần. Nhắc → một dòng "máy báo" (Bàn + app, trạm
+// đẩy "Máy có chuyện cần xem") + thông báo GNOME không tự tắt. Việc → `axle claude --lich` bằng tài khoản chủ (chỉ đọc /
+// tra web / Bộ não, không cổng xin duyệt → không bao giờ rung điện thoại lúc nửa đêm), một việc một lúc, tối đa 20 phút;
+// bản đầy đủ lưu ~/Axle/Lich/<tên>/<lúc>.md (mở được từ nút Tệp của app), bản gọn gửi lên Bàn + app.
+const LICH_DA_CHAY = process.env.AXLE_LICH_DA_CHAY || '/var/lib/axle/lich-da-chay.json';
+let lichDaChay = lichDocDaChay(LICH_DA_CHAY);
+const hangViec = [];
+let dangViec = null;
+const gioVN = (d) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+function catGon(s, n) {
+  const t = String(s || '').trim();
+  if (t.length <= n) return t;
+  const c = t.slice(0, n);
+  return `${c.slice(0, Math.max(c.lastIndexOf('\n'), n * 0.6)).trimEnd()}\n…`;
+}
+function baoManHinh(tieuDe, noiDung, { khan = false } = {}) {   // thông báo GNOME trong phiên của chủ (nếu đang đăng nhập)
+  const { uid } = ownerIds();
+  if (uid == null || !existsSync(`/run/user/${uid}/bus`)) return;
+  spawn('runuser', ['-u', ownerUser(), '--', 'env', `DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${uid}/bus`, 'notify-send', '-a', 'Axle',
+    '-i', 'axle', ...(khan ? ['-u', 'critical'] : []), tieuDe, noiDung], { stdio: 'ignore' }).on('error', () => {});
+}
+function baoSuKien(s, opts) {
+  mayBao.su_kien = [s, ...mayBao.su_kien].slice(0, 30);
+  try { writeDurable(MAY_BAO_FILE, JSON.stringify(mayBao)); } catch (e) { log({ warn: `máy báo: ${e.message}` }); }
+  publishBan();
+  if (app.enabled()) app.broadcast({ type: 'thong-bao', ...s }).catch(() => {});
+  baoManHinh(s.tieu_de, s.noi_dung, opts);
+}
+function ghiDaChay() {
+  try {
+    mkdirSync(path.dirname(LICH_DA_CHAY), { recursive: true, mode: 0o755 });
+    writeDurable(LICH_DA_CHAY, JSON.stringify(lichDaChay));
+    chmodSync(LICH_DA_CHAY, 0o644);            // `axle lich ds` (tài khoản chủ) đọc "lần trước"
+  } catch (e) { log({ warn: `lịch: ${e.message}` }); }
+}
+function chayHangViec() {
+  if (dangViec || !hangViec.length) return;
+  const { muc, luc } = hangViec.shift();
+  const owner = ownerUser();
+  const home = `/home/${owner}`;
+  const cau = `${muc.noi_dung}\n\n(Việc định kỳ "${muc.ten}", ${moTaLich(muc.lich)} — Axle tự chạy lúc ${gioVN(luc)}.)`;
+  const p = spawn('timeout', ['-k', '10', '1200', 'runuser', '-u', owner, '--', AXLE, 'claude', cau, '--lich'],
+    { cwd: home, env: { ...process.env, HOME: home }, stdio: ['ignore', 'pipe', 'pipe'] });
+  dangViec = p;
+  publishBan();                 // dang_hoi tính cả việc đang chạy → `axle update` chờ nó xong
+  const bd = Date.now();
+  let ra = '';
+  const them = (b) => { if (ra.length < 60000) ra += b; };
+  p.stdout.on('data', them);
+  p.stderr.on('data', them);
+  log({ lich: 'chạy việc', ten: muc.ten });
+  p.on('error', (e) => { ra += `\n✗ ${e.message}`; });
+  p.on('close', (code) => {
+    dangViec = null;
+    publishBan();
+    const kq = ra.trim();
+    const xong = code === 0 && kq.length > 0;
+    let tep = null;
+    try {        // bản đầy đủ: ~/Axle/Lich/<tên>/<YYYY-MM-DD HH.MM>.md, của chủ
+      const { uid, gid } = ownerIds();
+      const d = new Date();
+      const ngayGio = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${gioVN(d).replace(':', '.')}`;
+      let dir = home;
+      for (const phan of ['Axle', 'Lich', tenTepAnToan(muc.ten)]) {
+        dir = path.join(dir, phan);
+        if (!existsSync(dir)) { mkdirSync(dir, { mode: 0o700 }); if (uid != null) chownSync(dir, uid, gid); }
+      }
+      tep = path.join(dir, `${ngayGio}.md`);
+      writeFileSync(tep, `# ${muc.ten}\n\n_${moTaLich(muc.lich)} · chạy lúc ${ngayGio}${xong ? '' : ` · mã ${code}`}_\n\n${kq || '(không có chữ nào)'}\n`, { mode: 0o600 });
+      if (uid != null) chownSync(tep, uid, gid);
+    } catch (e) { log({ warn: `lịch: lưu kết quả: ${e.message}` }); }
+    const rel = tep ? path.relative(home, tep) : null;
+    baoSuKien({
+      id: `viec-${muc.id}-${Date.now().toString(36)}`, loai: 'viec', luc: new Date().toISOString(),
+      tieu_de: xong ? muc.ten : `Việc định kỳ chưa xong: ${muc.ten}`,
+      noi_dung: xong ? catGon(kq, 900) : `Claude dừng với mã ${code}${kq ? `: ${catGon(kq, 300)}` : ''}${code === 124 ? ' (quá 20 phút)' : ''}`,
+      ...(rel ? { tep: rel } : {}),
+    });
+    log({ lich: 'xong việc', ten: muc.ten, code, giay: Math.round((Date.now() - bd) / 1000), tep: rel });
+    chayHangViec();
+  });
+}
+function kiemLich() {
+  let ds;
+  try { ds = lichDoc(`/home/${ownerUser()}/Axle/lich.json`).ds; } catch { return; }
+  if (!ds.length && !Object.keys(lichDaChay).length) return;
+  const { den, bo_lo: boLo, da_chay: daChay } = lichDenHan(ds, lichDaChay, new Date());
+  if (JSON.stringify(daChay) !== JSON.stringify(lichDaChay)) { lichDaChay = daChay; ghiDaChay(); }
+  for (const x of boLo) log({ lich: 'bỏ lỡ (máy tắt lâu)', ten: x.muc.ten, luc: x.luc.toISOString() });
+  for (const x of den) {
+    if (x.muc.loai === 'nhac') {
+      baoSuKien({ id: `nhac-${x.muc.id}-${Date.now().toString(36)}`, loai: 'nhac', luc: new Date().toISOString(), tieu_de: `⏰ ${x.muc.ten}`,
+        noi_dung: `${x.muc.noi_dung}${x.tre_phut >= 2 ? ` (đúng ra lúc ${gioVN(x.luc)} — máy vừa bật lại)` : ''}` }, { khan: true });
+      log({ lich: 'nhắc', ten: x.muc.ten });
+    } else if (!hangViec.some((y) => y.muc.id === x.muc.id)) hangViec.push(x);
+  }
+  chayHangViec();
+}
+setTimeout(() => { kiemLich(); setInterval(kiemLich, 20_000); }, 15_000);
+
 function layBan() {
   const c = cfg();
   const pending = [...requests.values()].filter((r) => r.state === 'pending').map((r) => ({
@@ -980,7 +1082,7 @@ function layBan() {
     buttons: keyboard(r).flat().map((b) => b.callback_data.slice(-1)).join(''),
     ageSec: Math.round((Date.now() - r.created) / 1000), expires: new Date(r.created + c.expireSec * 1000).toISOString() }));
   const agents = agentList().map((a) => ({ ten: a.name, vai: a.role, user: a.user, tam_dung: a.suspended }));
-  return { ts: new Date().toISOString(), host: hostname(), pending, homNay: homNay(), agents, so: soGanDay(), may_bao: mayBao.su_kien.slice(0, 10), dang_hoi: dangHoi.size };
+  return { ts: new Date().toISOString(), host: hostname(), pending, homNay: homNay(), agents, so: soGanDay(), may_bao: mayBao.su_kien.slice(0, 10), dang_hoi: dangHoi.size + (dangViec ? 1 : 0) };
 }
 let banHen = null;
 function publishBan() {   // đổi trạng thái dồn dập (một việc: pending → running → done) → ghi một lần

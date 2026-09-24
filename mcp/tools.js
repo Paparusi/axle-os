@@ -14,6 +14,7 @@ import * as screen from './screen.js';
 import * as web from './web.js';
 import * as tay from './tay.js';
 import * as brain from './brain.js';
+import * as lich from './lich.js';
 
 const AUDIT = process.env.AXLE_AUDIT || path.join(homedir(), '.local/state/axle/audit.jsonl');
 const SNAP = process.env.AXLE_SNAP || '/usr/local/lib/axle/axle-snap';
@@ -392,6 +393,8 @@ export function buildServer({ allow, clientName } = {}) {
   if (tay.coTay()) tay.registerTay(tool);
   // Bộ não Axle (~/Axle/Brain): tra/ghi kho tri thức của chủ — chỉ trong ngữ cảnh chủ
   if (brain.coBrain()) brain.register(tool);
+  // Lịch của Axle (~/Axle/lich.json): nhắc chủ đúng giờ + việc Claude tự làm theo lịch — chỉ trong ngữ cảnh chủ
+  if (lich.coLich()) lich.register(tool);
   // Màn hình THẬT của chủ: luôn khai báo, nhưng dịch vụ duyệt chỉ cho qua khi chủ đã cấp quyền còn hạn
   screen.registerOwnerScreen(tool, approve);
 

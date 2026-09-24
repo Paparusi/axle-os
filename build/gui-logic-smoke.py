@@ -156,5 +156,11 @@ ok(mo_ta_cap_nhat("Tự cập nhật: TẮT (bật: sudo axle update tu-dong on)
 ok(mo_ta_cap_nhat("") .startswith("Tải bản mới nhất") and mo_ta_cap_nhat("Cần sudo") .startswith("Tải bản mới nhất"),
    "mo_ta_cap_nhat: máy cũ chưa có lệnh tu-dong / lỗi → câu cũ, không hiện rác")
 
+# Lịch của Axle: phụ đề mỗi mục
+phu_lich = g["phu_lich"]
+ok(phu_lich({"mo_ta": "mỗi ngày lúc 07:30", "lan_toi": "2026-09-25 07:30", "lan_truoc": "2026-09-24 07:30"})
+   == "mỗi ngày lúc 07:30 · lần tới 25/09 07:30 · lần trước 24/09 07:30", "phu_lich: lịch · lần tới · lần trước (ngày/tháng giờ)")
+ok(phu_lich({"mo_ta": "24/09/2026 lúc 15:00", "lan_toi": None}) == "24/09/2026 lúc 15:00 · không còn lần nào", "phu_lich: một lần đã qua → nói không còn lần nào")
+
 if fail: print(f"✗ {fail} mục hỏng"); sys.exit(1)
 print("✓ phần thuần của cửa sổ Axle đạt")

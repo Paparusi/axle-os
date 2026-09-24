@@ -557,3 +557,32 @@ chọn `~/snap/chromium/common/axle-web/<tên>` khi trình duyệt là snap, gi�
 .deb. `webapp.sh lam-moi` viết lại tệp chạy của MỌI web app đã có (giữ tên, địa chỉ, mục trình đơn, danh sách trắng),
 provision-desktop gọi mỗi lần làm mới. `mcp/web.js` `HO_SO` tìm hồ sơ ở cả hai chỗ (ưu tiên chỗ có DevToolsActivePort).
 `~/snap` vốn đã bị chặn khỏi màn Tệp của app điện thoại (approve/tep.js), nên cookie và tin nhắn Zalo không lộ ra đó.
+
+## Lịch của Axle: nhắc đúng giờ + việc tự làm theo lịch (nhịp D17, 24/9, 0.1.166)
+
+Bi: "t chưa có ý tưởng app nào, m tìm hướng nâng cấp Axle đi". Trước nhịp này, bảo Axle "nhắc tao 3 giờ chiều gọi anh
+Tuấn" không làm được: mốc Bộ não chỉ có NGÀY và điện thoại chỉ nhắc lúc 8 giờ sáng. Axle cũng không tự làm gì khi chủ
+không hỏi.
+
+- **Đặt bằng lời** (Hỏi Axle trên điện thoại, ô Bảo Axle làm trên Bàn): Claude gọi `lich_them` (mcp/lich.js, dùng
+  thẳng không xin duyệt vì chỉ ghi `~/Axle/lich.json` của chủ). Hai loại: `nhac` (câu nhắc cho chủ) và `viec` (lời dặn
+  cho chính Claude lúc chạy). Lịch: một lần (`gio` "15:00" = lần tới của giờ đó, `sau_phut`, hay `luc` đầy đủ — Claude
+  khỏi phải biết hôm nay ngày mấy), mỗi ngày, các thứ trong tuần, ngày N hằng tháng (tháng thiếu ngày thì ngày cuối
+  tháng). Trả `mo_ta` + `lan_toi` theo GIỜ MÁY (không đưa ISO/UTC cho Claude). `lich_ds`, `lich_xoa`; `axle lich [ds|xoa]`.
+- **Đồng hồ ở bộ duyệt** (root, chạy suốt, không phụ thuộc Bàn): 20 giây xem một lần `denHan` (hàm thuần, thử kỹ):
+  mục bật, lần gần nhất ≤ bây giờ, sau lần đã chạy và sau lúc tạo (tạo 08:00 cho lịch 07:30 thì sáng mai mới chạy).
+  Máy tắt lúc tới giờ: nhắc một lần trễ ≤ 12 giờ, lịch lặp trễ ≤ 2 giờ thì vẫn báo ("đúng ra lúc …"), quá thì bỏ lỡ,
+  không dồn một tràng khi máy bật lại. Đã chạy tới đâu: `/var/lib/axle/lich-da-chay.json` (0644).
+- **Nhắc** → một dòng "máy báo" (Bàn + app, trạm đẩy "Máy có chuyện cần xem") + thông báo GNOME không tự tắt
+  (`notify-send -u critical` trong phiên của chủ). Bàn không bật thêm thông báo cho loại nhac/viec (khỏi trùng).
+- **Việc** → `axle claude --lich` bằng tài khoản chủ: KHÔNG có cổng xin duyệt (công cụ ngoài danh sách bị từ chối ngay,
+  không rung điện thoại lúc nửa đêm), cấm Bash/Write/Edit và công cụ lịch; chỉ đọc, tra web, Bộ não. Một việc một lúc,
+  tối đa 20 phút; `dang_hoi` tính cả việc đang chạy nên `axle update` chờ nó xong. Bản đầy đủ lưu
+  `~/Axle/Lich/<tên>/<lúc>.md` (mở được từ nút Tệp của app điện thoại), bản gọn ≤ 900 ký tự lên Bàn + app.
+- **Bàn → Lịch** (thanh bên): Nhắc việc / Việc Axle tự làm, mỗi dòng lịch bằng lời · lần tới · lần trước, nút bỏ;
+  câu mẫu bấm là điền vào ô Bảo Axle làm; "Mở kết quả" mở Axle/Lich.
+
+Chưa có: điện thoại hiện CHỮ nhắc ngay trên màn hình khoá (trạm chỉ đẩy câu chung vì không được đọc nội dung — cần app
+hẹn thông báo tại chỗ như mốc, phải dựng app), sửa lịch từ Bàn / app (hiện: bỏ rồi bảo lại).
+Thử: `mcp/test-lich.mjs` 30 ca (giờ Việt Nam: một lần qua nửa đêm, tháng 2 năm nhuận, thứ trong tuần, trễ / bỏ lỡ,
+không báo lặp, tệp lịch), gui-logic-smoke +2 ca, `gui-shot.py --trang lich`.

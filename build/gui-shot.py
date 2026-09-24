@@ -50,6 +50,7 @@ case "$1 $2" in
   "dangnhap status") echo "Duyệt đăng nhập bằng điện thoại: ĐANG BẬT" ;;
   "app terminal") echo "Gõ lệnh từ app: BẬT (admin_1, 180 giây)" ;;
   "net kiem") cat "$(dirname "$0")/mang.json" ;;
+  "lich ds") echo '{"bay_gio":"2026-09-24 18:40","ds":[{"id":"l1","loai":"nhac","ten":"Gọi anh Tuấn","noi_dung":"Gọi anh Tuấn về hợp đồng kho Bình Dương","mo_ta":"24/09/2026 lúc 15:00","lan_toi":"2026-09-25 15:00","lan_truoc":null},{"id":"l2","loai":"nhac","ten":"Nộp báo cáo tuần","noi_dung":"Nộp báo cáo tuần cho HRVN","mo_ta":"thứ Hai hằng tuần lúc 08:00","lan_toi":"2026-09-28 08:00","lan_truoc":"2026-09-21 08:00"},{"id":"l3","loai":"viec","ten":"Tin vàng buổi sáng","noi_dung":"Tóm tắt tin thị trường vàng","mo_ta":"thứ Hai tới thứ Sáu hằng tuần lúc 07:30","lan_toi":"2026-09-25 07:30","lan_truoc":"2026-09-24 07:30"}]}' ;;
   "update tu-dong") printf '%s\\n' "Tự cập nhật: BẬT · khoảng 3 giờ sáng · tắt: sudo axle update tu-dong off" "Lần gần nhất 25/09 03:14: đã lên 0.1.164 (từ 0.1.163)" ;;
   "claude "*) sleep 1; echo "Log tối qua có 2 lỗi kết nối Supabase lúc 02:13 và 02:41, worker tự nối lại sau 30 giây. Không cần sửa gì." ;;
   *) echo "thu: $*" ;;

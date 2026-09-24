@@ -204,6 +204,22 @@ def gom_dinh_kem(cu, moi, toi_da=TOI_DA_KEM, toi_da_byte=TOI_DA_KEM_BYTE):
     return ds, bo
 
 
+LOI_LICH = ("Nhắc đúng giờ và việc Axle tự làm theo lịch. Đặt bằng lời ở ô Bảo Axle làm hay Hỏi Axle trên điện thoại. "
+            "Tới giờ máy hiện thông báo và điện thoại rung. Việc tự làm chỉ được đọc, tra web và ghi Bộ não — không bao giờ xin "
+            "duyệt lúc bạn ngủ; kết quả đầy đủ nằm trong Axle/Lich.")
+VI_DU_LICH = ["Nhắc tôi 3 giờ chiều gọi anh Tuấn", "Mỗi sáng 7h30 tóm tắt tin thị trường vàng", "Thứ Hai hằng tuần 8 giờ nhắc nộp báo cáo"]
+
+
+def phu_lich(m):
+    """Phụ đề một mục lịch: lịch bằng lời · lần tới · lần trước (giờ máy "YYYY-MM-DD HH:MM" → "25/09 07:30")."""
+    ngan = lambda t: f"{t[8:10]}/{t[5:7]} {t[11:16]}" if t and len(t) >= 16 else ""   # noqa: E731
+    phan = [m.get("mo_ta") or "?"]
+    phan.append(f"lần tới {ngan(m.get('lan_toi'))}" if m.get("lan_toi") else "không còn lần nào")
+    if m.get("lan_truoc"):
+        phan.append(f"lần trước {ngan(m['lan_truoc'])}")
+    return " · ".join(phan)
+
+
 def mo_ta_cap_nhat(ra):
     """Phụ đề dòng "Cập nhật Axle" từ `axle update tu-dong status`: bật/tắt + lượt gần nhất, gọn một hai câu."""
     dong = [x.strip() for x in (ra or "").splitlines() if x.strip()]
@@ -557,6 +573,7 @@ class CuaSo(Adw.ApplicationWindow):
         muc = [("ban", "Bàn", "go-home-symbolic", self.trang_ban),
                ("so", "Sổ", "view-list-symbolic", self.trang_so),
                ("nao", "Tri thức", "accessories-dictionary-symbolic", self.trang_nao),
+               ("lich", "Lịch", "alarm-symbolic", self.trang_lich),
                ("may", "Máy", "computer-symbolic", self.trang_tong_quan),
                ("dt", "Điện thoại", "phone-symbolic", self.trang_dien_thoai),
                ("tn", "Tính năng", "preferences-system-symbolic", self.trang_tinh_nang),
@@ -570,6 +587,8 @@ class CuaSo(Adw.ApplicationWindow):
                 return
             ma, ten = muc[r.get_index()][0], muc[r.get_index()][1]
             self.tabs.set_visible_child_name(ma)
+            if ma == "lich":
+                self.nap_lich()
             self.ten_muc.set_title("Bàn Axle" if ma == "ban" else ten)
         ds.connect("row-selected", chon)
         for ma, ten, icon, dung in muc:
@@ -750,6 +769,91 @@ class CuaSo(Adw.ApplicationWindow):
             row.add_prefix(Gtk.Label(label=dau))
             ds.append(row)
         self.so_viec.append(ds)
+
+    # ---------- Lịch ----------
+    def trang_lich(self):
+        """Lịch của Axle (~/Axle/lich.json, mcp/lich.js): nhắc đúng giờ + việc Claude tự làm theo lịch. Đặt bằng lời; ở đây
+        xem, bỏ, mở kết quả. Đồng hồ nằm ở bộ duyệt (chạy suốt), không phụ thuộc Bàn có mở hay không."""
+        cuon = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
+        cot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18,
+                      margin_top=20, margin_bottom=24, margin_start=28, margin_end=28)
+        cuon.set_child(Adw.Clamp(child=cot, maximum_size=1100, tightening_threshold=900))
+        dau = Gtk.Box(spacing=12)
+        dau.append(Gtk.Label(label="Lịch của Axle", xalign=0, css_classes=["title-2"], hexpand=True))
+        nut_kq = Gtk.Button(label="Mở kết quả", tooltip_text="Bản đầy đủ của mọi việc Axle đã tự làm (Axle/Lich)")
+        nut_kq.connect("clicked", self.mo_ket_qua_lich)
+        nut_lai = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Đọc lại")
+        nut_lai.connect("clicked", lambda *_: self.nap_lich())
+        dau.append(nut_kq)
+        dau.append(nut_lai)
+        cot.append(dau)
+        cot.append(Gtk.Label(xalign=0, wrap=True, css_classes=["dim-label"], label=LOI_LICH))
+        # Câu mẫu: dòng gợi ý nhỏ canh trái (FlowBox thì mỗi nút giãn hết bề ngang — thấy khi tự chụp)
+        vd = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0, halign=Gtk.Align.START)
+        vd.append(Gtk.Label(label="Bấm một câu để điền vào ô Bảo Axle làm:", xalign=0, css_classes=["caption", "dim-label"], margin_bottom=2))
+        for x in VI_DU_LICH:
+            b = Gtk.Button(css_classes=["flat"], halign=Gtk.Align.START, tooltip_text="Điền vào ô Bảo Axle làm")
+            b.set_child(Gtk.Label(label=f"“{x}”", xalign=0))
+            b.connect("clicked", self.dien_lich, x)
+            vd.append(b)
+        cot.append(vd)
+        the1, self.lich_nhac = self.the("Nhắc việc")
+        the2, self.lich_viec = self.the("Việc Axle tự làm")
+        cot.append(the1)
+        cot.append(the2)
+        self.nap_lich()
+        GLib.timeout_add_seconds(60, lambda: (self.tabs.get_visible_child_name() == "lich" and self.nap_lich(), True)[1])
+        return cuon
+
+    @staticmethod
+    def mo_ket_qua_lich(*_):
+        d = os.path.join(os.path.dirname(BRAIN_DIR), "Lich")      # ~/Axle/Lich — bộ duyệt ghi kết quả việc định kỳ vào đây
+        os.makedirs(d, exist_ok=True)
+        subprocess.Popen(["xdg-open", d])
+
+    def dien_lich(self, _nut, cau):
+        self.o_lenh.set_text(cau)
+        self.mo_muc("ban")
+        self.o_lenh.grab_focus()
+
+    def nap_lich(self, *_):
+        def worker():
+            ma, ra = chay("lich", "ds", "--json")
+            try:
+                j = json.loads(ra) if ma == 0 else None
+            except ValueError:
+                j = None
+            GLib.idle_add(self.ve_lich, j)
+        threading.Thread(target=worker, daemon=True).start()
+        return False
+
+    def ve_lich(self, j):
+        for hop, loai, rong in ((self.lich_nhac, "nhac", "Chưa có nhắc việc nào."),
+                                (self.lich_viec, "viec", "Chưa có việc nào Axle tự làm theo lịch.")):
+            self.don(hop)
+            if j is None:
+                hop.append(self.dong_mo("Chưa đọc được lịch.", "Thử: axle lich"))
+                continue
+            ds = [m for m in (j.get("ds") or []) if m.get("loai") == loai]
+            if not ds:
+                hop.append(self.dong_mo(rong))
+                continue
+            lb = Gtk.ListBox(css_classes=["boxed-list"], selection_mode=Gtk.SelectionMode.NONE)
+            for m in ds:
+                row = Adw.ActionRow(title=m.get("ten") or "?", subtitle=phu_lich(m), use_markup=False,
+                                    tooltip_text=m.get("noi_dung") or "")
+                row.add_prefix(Gtk.Image(icon_name="alarm-symbolic" if loai == "nhac" else "system-run-symbolic"))
+                nut = Gtk.Button(icon_name="user-trash-symbolic", valign=Gtk.Align.CENTER, css_classes=["flat"], tooltip_text="Bỏ mục này")
+                nut.connect("clicked", self.bo_lich, m.get("id"), m.get("ten"))
+                row.add_suffix(nut)
+                lb.append(row)
+            hop.append(lb)
+        return False
+
+    def bo_lich(self, _nut, id_, ten):
+        ma, ra = chay("lich", "xoa", id_ or "")
+        self.bao(ra.splitlines()[-1] if ra else (f"Đã bỏ {ten}" if ma == 0 else "Không bỏ được"))
+        self.nap_lich()
 
     # ---------- Tri thức (Bộ não Axle) ----------
     def trang_nao(self):
@@ -1315,6 +1419,8 @@ class CuaSo(Adw.ApplicationWindow):
             self.may_bao_hop.append(hop)
         app = self.get_application()
         for x in moi:
+            if x.get("loai") in ("nhac", "viec"):    # bộ duyệt đã tự bật thông báo cho lịch — không nhân đôi
+                continue
             n = Gio.Notification.new(x["tieu_de"])
             n.set_body(x["noi_dung"])
             n.set_default_action_and_target_value("app.mo-muc", GLib.Variant.new_string("may"))
