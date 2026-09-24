@@ -72,8 +72,17 @@ try {
   ok(kb <= 40_000 && g2.bo_bot > 0 && g2.nodes.length + g2.bo_bot === 350 + 5, `doThi: 355 trang → gói ${kb} byte ≤ 40KB, bỏ bớt ${g2.bo_bot} trang ít link`);
   ok(g2.nodes[0].id === 'cong-ty-abc' && g2.nodes[0].so_link === 353 && g2.edges.every((e) => g2.nodes.some((n) => n.id === e.a) && g2.nodes.some((n) => n.id === e.b)), 'doThi: giữ trang nhiều link nhất, cạnh không chạm nút đã cắt');
   ok(b.doThi(b.BRAIN, { toiDaNut: 30 }).nodes.length === 30, 'doThi: toiDaNut vẫn có hiệu lực');
+  // tài liệu link thẳng tài liệu (chỉ chung một bên) → kiem báo; tài liệu → thực thể thì không
+  ok(b.kiem().nguon_noi_nguon.length === 0, 'kiem: chưa có tài liệu nào link thẳng tài liệu khác');
+  b.ghi('wiki/sources/hop-dong-thue-kho.md', '---\ntitle: Hợp đồng thuê kho\ntype: source\n---\nThuê kho của [[cong-ty-abc]], giá 20 triệu/tháng. Địa chỉ ABC ở đây khác trong [[hop-dong-abc-2026-09]]. Hạn một năm tính từ tháng chín.');
+  const nn = b.kiem().nguon_noi_nguon;
+  ok(nn.length === 1 && nn[0].trang === 'wiki/sources/hop-dong-thue-kho.md' && nn[0].link === 'hop-dong-abc-2026-09', `kiem: bắt tài liệu link thẳng tài liệu (${JSON.stringify(nn)})`);
+  b.ghi('wiki/sources/hop-dong-thue-kho.md', '---\ntitle: Hợp đồng thuê kho\ntype: source\n---\nThuê kho của [[cong-ty-abc]], giá 20 triệu/tháng. Địa chỉ ABC ở đây khác ghi ở trang [[cong-ty-abc]]. Hạn một năm tính từ tháng chín.');
+  ok(b.kiem().nguon_noi_nguon.length === 0, 'kiem: nối qua trang thực thể chung thì hết báo');
 } finally {
-  rmSync(D, { recursive: true, force: true });
+  // brain_ghi commit git ở nền → chờ nó xong, dọn có thử lại (không thì rmdir .git/objects đua với git: ENOTEMPTY)
+  await new Promise((r) => setTimeout(r, 800));
+  rmSync(D, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }
 if (fail) { console.log(`✗ ${fail} mục hỏng`); process.exit(1); }
 console.log('✓ Bộ não Axle đạt');

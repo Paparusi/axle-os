@@ -65,6 +65,13 @@ thuẫn — sửa được thì sửa.
 - Không sửa, không xoá gì trong `raw/`. Không ghi ngoài `wiki/`. Không chép bí mật (mật khẩu, token, số thẻ) vào wiki.
 - Số liệu lấy từ tài liệu thì ghi kèm nguồn; suy đoán thì ghi `confidence: low`.
 - Trả lời chủ bằng tiếng Việt; trang wiki cũng tiếng Việt, ngắn, có số.
+
+## Nối trang (app và Bàn vẽ đồ thị từ đúng các [[link]] này — link sai là chủ thấy nối sai)
+- Trang tài liệu (sources) chỉ link tới thực thể / dự án / khái niệm của CHÍNH nó.
+- Hai tài liệu chỉ chung một bên (vd cùng một công ty) thì KHÔNG link thẳng nhau. Chi tiết so sánh giữa chúng (lệch địa
+  chỉ, lệch số liệu) ghi ở trang thực thể chung; trang tài liệu trỏ về trang thực thể đó.
+- Chỉ link thẳng hai tài liệu khi cái này sửa đổi / thay thế / là phụ lục của cái kia, và ghi rõ quan hệ cạnh link
+  (vd `supersedes`). `brain_kiem` liệt kê mọi cặp tài liệu link thẳng nhau để LINT xem lại.
 EOF
 [ -f "$B/wiki/index.md" ] || cat > "$B/wiki/index.md" <<'EOF'
 # Danh mục Bộ não Axle

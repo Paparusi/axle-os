@@ -380,6 +380,12 @@ link tới trang chưa có thành nút loại `thieu` (vẽ đứt nét đỏ; b
 (hộp trạm 64KB đã mã hoá) — wiki lớn thì giữ trang nhiều liên kết nhất, `bo_bot` = số trang bị ẩn (0.1.140).
 App: `query brain-graph` → tấm **Liên kết trong Bộ não** trong 📚: xếp lực (đẩy–kéo, 200 vòng ngay trên điện thoại),
 màu theo loại, chạm chấm → thấy nó nối với ai + nút "Hỏi về trang này". Thử: test-brain 32 ca (5 ca đồ thị).
+**Link sai (24/9, 0.1.147):** Bi thấy đồ thị nối hợp đồng thuê nhà với hợp đồng Omron — hai việc không liên quan. Gốc:
+lúc ingest hợp đồng thuê nhà, Claude trích hợp đồng Omron để ghi chỗ lệch địa chỉ HRVN (19 vs 119 ngõ 156) bằng một
+[[link]] thẳng. Sửa: QUY-UOC thêm mục "Nối trang" (tài liệu chỉ link thực thể/dự án của chính nó; chung một bên thì nối
+qua trang thực thể; link thẳng chỉ khi sửa đổi/thay thế/phụ lục), lời dặn INGEST của `axle claude` và của tệp đính kèm
+nhắc luật đó, `brain_kiem` có thêm `nguon_noi_nguon` (mọi cặp tài liệu link thẳng nhau) cho LINT xem lại. Đồ thị vẫn vẽ
+đúng mọi link — nó là chỗ lộ link sai. Thử: test-brain 38 ca.
 **Trên Bàn (22/9, 0.1.142):** trang Tri thức có thẻ **Liên kết giữa các trang** — `Gtk.DrawingArea` vẽ bằng cairo, dữ liệu
 lấy đúng hàm `doThi` của brain.js qua node (`do_thi_brain`, cũng là `axle brain dothi`), xếp lực thuần Python ở luồng nền
 (`xep_do_thi`, khung 1000×500 rồi co đều khi vẽ nên đổi cỡ cửa sổ không xếp lại); bấm chấm → "Mở trang" (xdg-open) /

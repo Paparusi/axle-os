@@ -158,7 +158,24 @@ export function kiem(dir = BRAIN) {
     return !dau.some((x) => [...trang.values()].some((t) => t.noiDung.includes(x)));
   }).map((d) => d.ten).slice(0, 20);
   const linkHongUniq = [...new Map(linkHong.map((x) => [`${x.trang}|${x.link}`, x])).values()];
-  return { so_trang: trang.size, link_hong: linkHongUniq, mo_coi: moCoi, mong, thieu_dau: thieuDau, tai_lieu_chua_trang: chuaTrang };
+  // Hai trang tài liệu (sources) link thẳng nhau: thường chỉ là trích một chi tiết của bên chung. Bi 24/9: hợp đồng thuê
+  // nhà ↔ hợp đồng Omron chỉ chung HRVN (Claude trích chỗ lệch địa chỉ) mà đồ thị vẽ như hai hợp đồng liên quan.
+  // Hợp lệ chỉ khi cái này sửa đổi / thay thế / là phụ lục của cái kia — LINT xem từng cặp.
+  const dauTrang = (s) => /^---\n([\s\S]*?)\n---/.exec(s)?.[1] ?? '';
+  const laNguon = (t) => t.duong.startsWith('wiki/sources/') || /^type:\s*source\b/m.test(dauTrang(t.noiDung));
+  const nguonNoi = new Map();
+  for (const [slug, t] of trang) {
+    if (!laNguon(t)) continue;
+    for (const m of t.noiDung.replace(/`[^`\n]*`/g, '').matchAll(/\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]/g)) {
+      const den = m[1].trim();
+      const t2 = trang.get(den);
+      if (den === slug || !t2 || !laNguon(t2)) continue;
+      const k = [slug, den].sort().join('|');
+      if (!nguonNoi.has(k)) nguonNoi.set(k, { trang: t.duong, link: den });
+    }
+  }
+  return { so_trang: trang.size, link_hong: linkHongUniq, mo_coi: moCoi, mong, thieu_dau: thieuDau, tai_lieu_chua_trang: chuaTrang,
+    nguon_noi_nguon: [...nguonNoi.values()] };
 }
 
 // ĐỒ THỊ liên kết wiki (app vẽ): nút = trang (slug, tiêu đề, loại), cạnh = [[link]] (một cạnh cho mỗi cặp); link tới
@@ -272,7 +289,9 @@ export function register(tool) {
   tool('brain_kiem', {
     title: 'Mechanical lint of the Brain',
     description: 'Deterministic check: broken [[links]], orphan pages, thin pages (<3 sentences), pages missing the YAML header, '
-      + 'documents in raw/ with no page mentioning them. Run this FIRST when asked to LINT; fix what it lists; do not guess.',
+      + 'documents in raw/ with no page mentioning them, and source pages linking directly to another source page (nguon_noi_nguon: '
+      + 'allowed only when one amends/replaces/annexes the other; otherwise move the shared detail to the common entity page, '
+      + 'link that page, and remove the direct link). Run this FIRST when asked to LINT; fix what it lists; do not guess.',
     inputSchema: {},
     annotations: { readOnlyHint: true },
   }, async () => { khoiTao(); return JSON.stringify(kiem(), null, 1); });
