@@ -11,6 +11,9 @@ const DIR = process.env.AXLE_VAULT_DIR || '/var/lib/axle-vault';
 const SOCKET = process.env.AXLE_VAULT_SOCKET || '/run/axle-vault/vault.sock';
 const LOG = process.env.AXLE_VAULT_LOG || '/var/log/axle-vault/access.log';
 const MAX_BODY = 1024 * 1024;
+// Yêu cầu GỬI ĐI được to hơn câu trả lời: thư của Axle kèm tệp (base64) đi qua đây — 2 MB cũ thì hợp đồng PDF vài MB
+// không gửi nổi (24/9). Câu trả lời vẫn cắt ở 1 MB (agent không cần nuốt trang web khổng lồ).
+const MAX_YEU_CAU = 16 * 1024 * 1024;
 const DROP_HEADERS = new Set(['host', 'content-length', 'connection', 'transfer-encoding', 'keep-alive', 'upgrade']);
 const PASS_HEADERS = /^(content-type|location|retry-after|etag|last-modified|link|x-ratelimit-.*|x-request-id)$/i;
 
@@ -43,7 +46,7 @@ async function readJson(req) {
   const chunks = [];
   for await (const c of req) {
     size += c.length;
-    if (size > 2 * MAX_BODY) throw new Error('Yêu cầu quá lớn');
+    if (size > MAX_YEU_CAU) throw new Error('Yêu cầu quá lớn (tối đa 16 MB)');
     chunks.push(c);
   }
   return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');

@@ -18,7 +18,9 @@ import { addRule, addSession, autoLabel, canRemember, canSession, describeRule, 
   saveRules, tierLine, tierOf, writeDurable, chiDoc, khoaSong } from './rules.js';
 import { buildDigest } from './digest.js';
 import { banChoApp, gopNhatKy, lenhCongCu, tenTepAnToan } from './mota.js';
-import { docTep as tepDoc, lietKe as tepLietKe } from './tep.js';
+import { docTep as tepDoc, duongAn as tepDuongAn, lietKe as tepLietKe } from './tep.js';
+import { chuanThuGui, cuaMinh as thuCuaMinh, docCauHinh as thuCauHinh, luuThuDen, luuThuDi, moTaThuGui, thanhThu, timThu,
+  TOI_DA_TEP_GUI, TOI_DA_TEP_NHAN } from './thu.js';
 import { CHU_KY as MAY_BAO_CHU_KY, danhGia as mayBaoDanhGia, doDac as mayBaoDoDac, locSuKien as mayBaoLoc } from './may-bao.js';
 import { choApp as brainChoApp, docMoc as brainDocMoc, doThi as brainDoThi, loiDanIngest as brainLoiDanIngest, sapToi as brainSapToi,
   themTep as brainThemTep, tim as brainTim } from '../mcp/brain.js';
@@ -150,6 +152,50 @@ const ACTIONS = {
         ...dirsOf(who).flatMap((d) => (d.mode === 'rw'
           ? ['-p', `BindPaths=${d.path}`, '-p', `ReadWritePaths=${d.path}`] : ['-p', `BindReadOnlyPaths=${d.path}`])),
         '-p', 'RuntimeMaxSec=120', '--', 'bash', '-lc', p.command], {});
+    },
+  },
+  // Thư của Axle (nhịp D18): gửi một lá qua Resend (khoá trong vault). Bậc 3 — duyệt từng lá, chữ duyệt có đủ người
+  // nhận / tiêu đề / nội dung / tệp. Tệp phải trong nhà chủ, không chỗ ẩn / tệp khoá (approve/tep.js), tổng ≤ 10 MB.
+  thu_gui: {
+    validate(p, who) {
+      if (who.agent) throw new Error('Thư của Axle: chỉ chủ máy (Claude của chủ) được gửi');
+      const v = chuanThuGui(p, thuCauHinh());
+      const home = `/home/${ownerUser()}`;
+      let tong = 0;
+      const tep = v.tep.map((t) => {
+        const rel = t.startsWith(`${home}/`) ? t.slice(home.length + 1) : t;
+        const { abs } = tepDuongAn(home, rel);
+        const st = statSync(abs);
+        if (!st.isFile()) throw new Error(`${path.basename(abs)}: không phải tệp`);
+        tong += st.size;
+        return { duong: abs, ten: path.basename(abs), co: st.size };
+      });
+      if (tong > TOI_DA_TEP_GUI) throw new Error(`Tệp đính kèm tổng ${(tong / 1e6).toFixed(1)} MB — quá 10 MB`);
+      if (v.tra_loi && !timThu(`${home}/Axle/Thu`, v.tra_loi)) throw new Error(`Không có thư đến ${v.tra_loi} để trả lời (thu_ds)`);
+      return { ...v, tep };
+    },
+    describe(p) {
+      const home = `/home/${ownerUser()}`;
+      return moTaThuGui(p, thuCauHinh(), { tepCo: p.tep, thuGoc: p.tra_loi ? timThu(`${home}/Axle/Thu`, p.tra_loi) : null });
+    },
+    async exec(p) {
+      const cfg = thuCauHinh();
+      if (!cfg?.bat) return { exitCode: 1, output: 'Thư của Axle đang tắt trên máy này' };
+      const home = `/home/${ownerUser()}`;
+      const thuGoc = p.tra_loi ? timThu(`${home}/Axle/Thu`, p.tra_loi) : null;
+      const tep = p.tep.map((t) => ({ ten: t.ten, bytes: readFileSync(t.duong) }));
+      const r = await vaultRequest({ method: 'POST', url: 'https://api.resend.com/emails',
+        headers: { authorization: 'Bearer {{secret.RESEND_API_KEY}}', 'content-type': 'application/json' },
+        body: JSON.stringify(thanhThu(p, cfg, { tep, thuGoc })) });
+      let j = {};
+      try { j = JSON.parse(r.body || '{}'); } catch { /* không phải JSON */ }
+      if (r.status >= 300 || !j.id) return { exitCode: 1, output: `Resend trả ${r.status}: ${j.message || j.name || String(r.body || '').slice(0, 300)}` };
+      try {
+        const { uid, gid } = ownerIds();
+        luuThuDi(`${home}/Axle/Thu`, { id: j.id, p, cfg, tepCo: p.tep }, { chown: (f) => { if (uid != null) chownSync(f, uid, gid); } });
+      } catch (e) { log({ warn: `thư: lưu bản đã gửi: ${e.message}` }); }
+      log({ thu: 'đã gửi', den: p.den, tieu_de: p.tieu_de.slice(0, 120), id: j.id });
+      return { exitCode: 0, output: `Đã gửi tới ${p.den.join(', ')}${p.cc.length ? ` (cc ${p.cc.join(', ')})` : ''} · mã ${j.id}` };
     },
   },
   snapshot_undo: {
@@ -1077,6 +1123,59 @@ function kiemLich() {
   chayHangViec();
 }
 setTimeout(() => { kiemLich(); setInterval(kiemLich, 20_000); }, 15_000);
+
+// ---- Thư của Axle (nhịp D18): lấy thư đến về máy ----
+// 2 phút hỏi Resend một lần (qua vault). Danh sách là của CẢ tài khoản (có cả thư của dự án khác) → chỉ lấy thư gửi tới
+// @ten_mien. Mỗi thư: lấy thân + tệp kèm (tệp tải thẳng từ đường ký sẵn, không cần khoá) → ~chủ/Axle/Thu/Den/… → báo lặng.
+const THU_DA_LAY = process.env.AXLE_THU_DA_LAY || '/var/lib/axle/thu-da-lay.json';
+let thuDaLay = new Set((() => { try { return JSON.parse(readFileSync(THU_DA_LAY, 'utf8')); } catch { return []; } })());
+let dangLayThu = false;
+async function resendGet(duong) {
+  const r = await vaultRequest({ method: 'GET', url: `https://api.resend.com${duong}`, headers: { authorization: 'Bearer {{secret.RESEND_API_KEY}}' } });
+  if (r.status !== 200) throw new Error(`Resend ${duong} → ${r.status}: ${String(r.body || '').slice(0, 200)}`);
+  if (r.truncated) return { thieu_than: true };
+  return JSON.parse(r.body || '{}');
+}
+async function layThu() {
+  const cfg = thuCauHinh();
+  if (!cfg?.bat || dangLayThu) return;
+  dangLayThu = true;
+  try {
+    const ds = ((await resendGet('/emails/receiving?limit=50')).data || [])
+      .filter((e) => e?.id && !thuDaLay.has(e.id) && thuCuaMinh(e, cfg.ten_mien)).reverse();   // cũ trước
+    const owner = ownerUser();
+    const { uid, gid } = ownerIds();
+    const chown = (f) => { if (uid != null) chownSync(f, uid, gid); };
+    for (const e of ds) {
+      let full = e;
+      try { full = { ...e, ...(await resendGet(`/emails/receiving/${e.id}`)) }; } catch (x) { log({ warn: `thư ${e.id}: ${x.message}` }); }
+      const tep = [];
+      for (const a of full.attachments || []) {
+        if (a.size > TOI_DA_TEP_NHAN) { tep.push({ ten: a.filename, bo: `${(a.size / 1e6).toFixed(0)} MB — quá 20 MB` }); continue; }
+        try {
+          const u = (await resendGet(`/emails/receiving/${e.id}/attachments/${a.id}`)).download_url;
+          const res = await fetch(u, { signal: AbortSignal.timeout(120_000) });
+          if (!res.ok) throw new Error(`tải ${res.status}`);
+          tep.push({ ten: a.filename, bytes: Buffer.from(await res.arrayBuffer()) });
+        } catch (x) { tep.push({ ten: a.filename, bo: x.message }); }
+      }
+      const { dir, t } = luuThuDen(`/home/${owner}/Axle/Thu`, full, { tep, chown });
+      thuDaLay.add(e.id);
+      try { mkdirSync(path.dirname(THU_DA_LAY), { recursive: true, mode: 0o755 }); writeDurable(THU_DA_LAY, JSON.stringify([...thuDaLay].slice(-2000))); } catch { /* lần sau */ }
+      const tu = /^(.*?)\s*<[^>]+>$/.exec(t.tu)?.[1]?.replace(/"/g, '').trim() || t.tu;
+      baoSuKien({ id: `thu-${String(e.id).slice(0, 8)}`, loai: 'thu', luc: new Date().toISOString(), im: true,
+        tieu_de: `📧 ${tu}: ${t.tieu_de || '(không tiêu đề)'}`,
+        noi_dung: `${String(t.chu || '').replace(/\s+/g, ' ').slice(0, 200)}${t.tep.length ? ` · ${t.tep.length} tệp kèm` : ''}`,
+        tep: path.relative(`/home/${owner}`, path.join(dir, 'thu.md')) });
+      log({ thu: 'thư đến', tu: t.tu, tieu_de: String(t.tieu_de).slice(0, 120), tep: t.tep.length });
+    }
+  } catch (e) {
+    log({ warn: `lấy thư: ${e.message}` });
+  } finally {
+    dangLayThu = false;
+  }
+}
+setTimeout(() => { layThu(); setInterval(layThu, 120_000); }, 30_000);
 
 function layBan() {
   const c = cfg();

@@ -46,6 +46,7 @@ export function tierOf(r) {
   if (r.action === 'claude_tool') return r.params.nguy || r.params.mo ? 3 : 2;   // Claude xin công cụ: phá máy, hay không rõ đích → bậc 3
   if (r.action === 'screen_grant') return 3;   // xem màn hình thật của chủ: luôn hỏi từng lần
   if (r.action === 'snapshot_undo') return 3;
+  if (r.action === 'thu_gui') return 3;        // thư đi ra ngoài, gửi rồi không rút lại được: duyệt TỪNG lá, không "1 giờ", không "Luôn"
   if (r.action === 'run_command' && r.params.asRoot) return 3;
   if (r.action === 'file_delete' && r.params.isDir) return 3;
   return 2;

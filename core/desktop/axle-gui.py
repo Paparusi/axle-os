@@ -1419,7 +1419,7 @@ class CuaSo(Adw.ApplicationWindow):
             self.may_bao_hop.append(hop)
         app = self.get_application()
         for x in moi:
-            if x.get("loai") in ("nhac", "viec"):    # bộ duyệt đã tự bật thông báo cho lịch — không nhân đôi
+            if x.get("loai") in ("nhac", "viec", "thu"):    # bộ duyệt đã tự bật thông báo cho lịch / thư — không nhân đôi
                 continue
             n = Gio.Notification.new(x["tieu_de"])
             n.set_body(x["noi_dung"])
