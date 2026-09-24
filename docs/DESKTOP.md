@@ -380,6 +380,16 @@ link tới trang chưa có thành nút loại `thieu` (vẽ đứt nét đỏ; b
 (hộp trạm 64KB đã mã hoá) — wiki lớn thì giữ trang nhiều liên kết nhất, `bo_bot` = số trang bị ẩn (0.1.140).
 App: `query brain-graph` → tấm **Liên kết trong Bộ não** trong 📚: xếp lực (đẩy–kéo, 200 vòng ngay trên điện thoại),
 màu theo loại, chạm chấm → thấy nó nối với ai + nút "Hỏi về trang này". Thử: test-brain 32 ca (5 ca đồ thị).
+**Máy tự báo (24/9, 0.1.155, hướng số 3):** `approve/may-bao.js` — bộ duyệt khám mỗi 5 phút (90 giây sau khi chạy):
+mạng (`kiem-mang.py --json`), ổ đĩa (statfs), dịch vụ hỏng (`systemctl --failed`, bỏ `*-wait-online`), bản Axle mới (hỏi
+latest.json 6 giờ một lần). `danhGia` là hàm thuần: CHỈ khi trạng thái đổi mới thành sự cố — mất mạng / không tới trạm thì
+im (không gửi ra được), có lại mới báo "Máy vừa có mạng lại sau 2 giờ 30 phút · Mất từ 07:45 tới 10:15. Lúc đó: <lý do>";
+Tailscale hỏng quá 10 phút mới báo; ổ ≥ 90% báo một lần, dưới 85% mới báo lại; dịch vụ mới hỏng báo, lành rồi hỏng lại
+báo lại; mỗi bản mới báo một lần. Sự cố lưu /var/lib/axle-approve/may-bao.json (30 cái), vào ban.json `may_bao`, gửi app
+tin `thong-bao` (kênh app gắn `push: 'may'`) + `state may-bao` khi app chào/hỏi. Trạm: loại đẩy `may` với câu chung
+"Máy có chuyện cần xem — mở app để biết chi tiết" (thread riêng, cổng gộp 3 giây theo từng loại; loại lạ không đẩy).
+Bàn → Máy: "Máy báo gần đây" + thông báo GNOME cho sự cố xuất hiện sau khi mở Bàn. `axle bao`. Thử: test-may-bao 23 ca,
+test-relay (+2 ca).
 **Mốc có ngày (24/9, 0.1.154, phần máy của hướng "Bộ não tự nhắc hạn"):** `moc.json` ở gốc Bộ não (git), chỉ ghi qua
 `brain_moc_them`/`brain_moc_xoa` (đọc: `brain_moc`) — mỗi mốc: viec, ngay (lần đầu), lap mot_lan|thang|nam, den (dừng
 lặp, vd hết hợp đồng), nhac_truoc, trang. `cacLan` tính các lần (ngày 31 lặp tháng → tháng thiếu ngày lấy ngày cuối),

@@ -60,6 +60,7 @@ sudo axle app pair       in mã QR để app quét; khớp mã đối chiếu 6 
 sudo axle app devices | remove <id>
                          điện thoại đã ghép / gỡ một điện thoại
 sudo axle duyet [<id> a|h|l|r] · axle duyet --json   duyệt tại máy · việc đang chờ (Bàn Axle đọc)
+axle bao                 máy tự báo gần đây: mất mạng, ổ gần đầy, dịch vụ hỏng, bản mới (tự khám mỗi 5 phút)
 axle tay cuaso|chup|bam N|go N "chữ"|doc N|mo <app>   tay cho mọi ứng dụng: bảng phần tử qua trợ năng, không tiêm phím
 sudo axle phanxa xuat [--tu ngày]   xuất nhãn (chủ đã quyết gì) cho lớp phản xạ
 axle brain ds|tim <từ>|mo|lint      Bộ não Axle (~/Axle/Brain): tài liệu gửi lên + wiki Claude tự bảo trì; lint = dọn đêm
@@ -966,6 +967,9 @@ case "${1:-help}" in
   approve)   shift; approve_cmd "$@" ;;
   app)       shift; app_cmd "$@" ;;
   duyet)     shift; duyet_cmd "$@" ;;
+  bao)       [ -r "$BAN_FILE" ] || { echo "Chưa đọc được $BAN_FILE (bộ duyệt chưa chạy?)" >&2; exit 1; }
+             jq -r 'if ((.may_bao // []) | length) == 0 then "Chưa có gì — máy tự khám mỗi 5 phút: mạng, ổ đĩa, dịch vụ, bản cập nhật."
+                    else .may_bao[] | "\(.luc | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601 | localtime | strftime("%H:%M %d/%m"))  \(.tieu_de)\n      \(.noi_dung)" end' "$BAN_FILE" ;;
   phanxa)    shift; phanxa_cmd "$@" ;;
   cmdlog)    shift; exec sudo -n /usr/local/lib/axle/axle-cmdlog "$@" ;;
   version)   cat /etc/axle/version ;;

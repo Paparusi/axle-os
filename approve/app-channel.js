@@ -71,8 +71,10 @@ export function createAppChannel({ log, hostname, onDecision, onCommand, onHello
     return d;
   }
 
-  // Chỉ yêu cầu duyệt mới làm điện thoại rung (push: 'alert'); trạm không đọc được hộp nên máy phải đánh dấu
-  const send = (d, msg) => call('POST', '/v1/send', { to: d.id, box: sealMsg(me, d.dx, msg), ...(msg.type === 'request' ? { push: 'alert' } : {}) });
+  // Chỉ yêu cầu duyệt (push: 'alert') và máy tự báo sự cố (push: 'may') mới làm điện thoại rung; trạm không đọc được hộp
+  // nên máy phải đánh dấu
+  const coDay = (msg) => (msg.type === 'request' ? { push: 'alert' } : msg.type === 'thong-bao' ? { push: 'may' } : {});
+  const send = (d, msg) => call('POST', '/v1/send', { to: d.id, box: sealMsg(me, d.dx, msg), ...coDay(msg) });
   async function broadcast(msg) {
     for (const d of devices) await send(d, msg).catch((e) => log({ warn: `app → ${d.name}: ${e.message}` }));
   }

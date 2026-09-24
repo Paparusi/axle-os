@@ -202,6 +202,29 @@ def mot_dong(cmd):
 
 
 # ---------- phần thuần (không GTK) — thử được bằng build/gui-logic-smoke.py ----------
+def doc_may_bao(chu):
+    """ban.json → sự cố máy tự báo (mới nhất trước). Tệp hỏng/thiếu → [] (Bàn vẫn chạy, mục này để trống)."""
+    try:
+        j = json.loads(chu)
+    except (ValueError, TypeError):
+        return []
+    ra = []
+    for x in (j.get("may_bao") if isinstance(j, dict) else None) or []:
+        if isinstance(x, dict) and isinstance(x.get("id"), str) and isinstance(x.get("tieu_de"), str):
+            ra.append({"id": x["id"], "loai": str(x.get("loai", "")), "tieu_de": x["tieu_de"][:200],
+                       "noi_dung": str(x.get("noi_dung", ""))[:400], "luc": str(x.get("luc", ""))})
+    return ra
+
+
+def gio_su_kien(luc):
+    """"2026-09-24T03:15:00.000Z" → "10:15 · 24/09" theo giờ máy."""
+    try:
+        t = datetime.datetime.fromisoformat(str(luc).replace("Z", "+00:00")).astimezone()
+    except ValueError:
+        return ""
+    return f"{t:%H:%M} · {t:%d/%m}"
+
+
 def doc_ban(chu):
     """Nội dung ban.json → (việc chờ, số hôm nay, agent). Tệp hỏng/thiếu → None: Bàn nói thật, không giả vờ trống."""
     try:
@@ -454,6 +477,7 @@ class CuaSo(Adw.ApplicationWindow):
         self.tabs = Adw.ViewStack()
         self.dang_lam = False        # đang chạy một việc "bảo Axle làm"
         self.hen_mang, self.dang_kiem_mang = 0, False   # khám mạng: hẹn giờ gom báo đổi mạng / đang khám
+        self.may_bao_ids, self.may_bao_da_thay = None, set()   # máy tự báo: lần đầu chỉ ghi nhận, sự cố MỚI mới bật thông báo
         self.co_cuoc = False         # đã có mạch hội thoại → lần sau nối tiếp (--tiep)
         self.phien = str(uuid.uuid4())   # id cuộc riêng của Bàn (app có id khác) — không lẫn mạch với nhau
         self.tien_trinh = None
@@ -879,6 +903,8 @@ class CuaSo(Adw.ApplicationWindow):
     def nap_ban(self, *_):
         chu = doc(BAN_FILE, "")
         b = doc_ban(chu) if chu else None
+        if hasattr(self, "may_bao_hop"):
+            self.hien_may_bao(doc_may_bao(chu) if chu else [])
         self.don(self.noi_can)
         self.don(self.noi_dang)
         if b is None:
@@ -1065,6 +1091,11 @@ class CuaSo(Adw.ApplicationWindow):
         self.mang_buoc = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, margin_top=10)
         gm.add(self.mang_buoc)
         t.add(gm)
+        gb = Adw.PreferencesGroup(title="Máy báo gần đây",
+                                  description="Máy tự khám mỗi 5 phút: mạng, ổ đĩa, dịch vụ hỏng, bản cập nhật. Có chuyện là báo lên điện thoại và hiện ở đây.")
+        self.may_bao_hop = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        gb.add(self.may_bao_hop)
+        t.add(gb)
         g = Adw.PreferencesGroup(title="Máy này")
         self.hang = {}
         for k, ten in [("host", "Tên máy"), ("os", "Hệ điều hành"), ("dia", "Ổ đĩa"),
@@ -1092,6 +1123,31 @@ class CuaSo(Adw.ApplicationWindow):
         g2.add(r2)
         t.add(g2)
         return t
+
+    def hien_may_bao(self, ds):
+        """Vẽ lại danh sách khi có sự cố mới; sự cố xuất hiện SAU lúc mở Bàn thì bật thông báo GNOME (bấm → trang Máy)."""
+        ids = [x["id"] for x in ds]
+        if ids == self.may_bao_ids:
+            return
+        moi = [x for x in ds if x["id"] not in self.may_bao_da_thay] if self.may_bao_ids is not None else []
+        self.may_bao_ids = ids
+        self.may_bao_da_thay.update(ids)
+        self.don(self.may_bao_hop)
+        if not ds:
+            self.may_bao_hop.append(self.dong_mo("Chưa có gì — máy vẫn ổn."))
+        for x in ds[:8]:
+            hop = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            td = Gtk.Label(xalign=0, wrap=True)   # đậm thường, không to ngang tiêu đề nhóm
+            td.set_markup(f"<b>{GLib.markup_escape_text(x['tieu_de'], -1)}</b>")
+            hop.append(td)
+            hop.append(Gtk.Label(label=f"{gio_su_kien(x['luc'])} · {x['noi_dung']}", xalign=0, wrap=True, css_classes=["dim-label", "caption"]))
+            self.may_bao_hop.append(hop)
+        app = self.get_application()
+        for x in moi:
+            n = Gio.Notification.new(x["tieu_de"])
+            n.set_body(x["noi_dung"])
+            n.set_default_action_and_target_value("app.mo-muc", GLib.Variant.new_string("may"))
+            app.send_notification(f"may-{x['id']}", n)
 
     def mo_muc(self, ma):
         self.ds.select_row(self.ds.get_row_at_index(self.muc_ma.index(ma)))

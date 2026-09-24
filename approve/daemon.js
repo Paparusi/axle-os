@@ -18,6 +18,7 @@ import { addRule, addSession, autoLabel, canRemember, canSession, describeRule, 
   saveRules, tierLine, tierOf, writeDurable } from './rules.js';
 import { buildDigest } from './digest.js';
 import { banChoApp, gopNhatKy, lenhCongCu, tenTepAnToan } from './mota.js';
+import { CHU_KY as MAY_BAO_CHU_KY, danhGia as mayBaoDanhGia, doDac as mayBaoDoDac } from './may-bao.js';
 import { choApp as brainChoApp, docMoc as brainDocMoc, doThi as brainDoThi, sapToi as brainSapToi, tim as brainTim } from '../mcp/brain.js';
 import { createAppChannel } from './app-channel.js';
 import { machineState } from './machine-state.js';
@@ -454,6 +455,7 @@ const app = createAppChannel({
     log({ app: 'hello', device: d.name });
     app.sendTo(d.id, { type: 'agents', list: agentList() });
     app.sendTo(d.id, { type: 'state', what: 'so', data: banChoApp(layBan()) });   // mở app là có sổ ngay; app cũ bỏ qua, vô hại
+    app.sendTo(d.id, { type: 'state', what: 'may-bao', data: mayBao.su_kien.slice(0, 20) });   // sự cố lỡ đẩy (máy mất mạng) vẫn thấy
   },
   async onTask(d, task) {
     // Dừng câu hỏi đang trả lời (nút Dừng ở thẻ Hỏi Axle): ký như việc nhanh, tác động chỉ tới câu của chính điện thoại đó
@@ -491,6 +493,7 @@ const app = createAppChannel({
     }
     // Tab Sổ trên app: cùng nội dung công bố cho Bàn (số hôm nay + ~40 việc đã hỏi chủ), bỏ pending, cắt vừa hộp
     if (what === 'so') return app.sendTo(d.id, { type: 'state', what: 'so', data: banChoApp(layBan()) });
+    if (what === 'may-bao') return app.sendTo(d.id, { type: 'state', what: 'may-bao', data: mayBao.su_kien.slice(0, 20) });
     log({ warn: `app: ${d.name} hỏi chuyện lạ ${what}` });
   },
   async onShell(d, cmd) {
@@ -885,6 +888,36 @@ function docDuoiLog(toiDa = 262144) {
 }
 const soGanDay = (toiDa = 40) => gopNhatKy(docDuoiLog()).slice(0, toiDa).map(({ params, ...x }) => x);   // không đưa params (lệnh đầy đủ) ra tệp
 
+// ---- Máy tự báo (24/9): mạng, ổ đĩa, dịch vụ hỏng, bản mới → sự cố lên app (trạm đẩy "Máy có chuyện cần xem") + Bàn ----
+const MAY_BAO_FILE = process.env.AXLE_MAY_BAO_STATE || '/var/lib/axle-approve/may-bao.json';
+let mayBao = { trang_thai: {}, su_kien: [], ban_luc: 0 };
+try { mayBao = { ...mayBao, ...JSON.parse(readFileSync(MAY_BAO_FILE, 'utf8')) }; } catch { /* chưa có */ }
+let dangKhamMay = false;
+async function khamMay() {
+  if (dangKhamMay) return;
+  dangKhamMay = true;
+  try {
+    const kiemBan = Date.now() - (mayBao.ban_luc || 0) > 6 * 3600_000;   // hỏi nơi phát hành vài giờ một lần
+    const dd = await mayBaoDoDac({ kiemBan });
+    if (kiemBan) mayBao.ban_luc = Date.now();
+    const { su_kien: moi, moi: trangThai } = mayBaoDanhGia(mayBao.trang_thai, dd);
+    mayBao.trang_thai = trangThai;
+    if (moi.length) {
+      mayBao.su_kien = [...[...moi].reverse(), ...mayBao.su_kien].slice(0, 30);
+      for (const s of moi) log({ may_bao: s.tieu_de });
+      if (app.enabled()) for (const s of moi) await app.broadcast({ type: 'thong-bao', ...s }).catch(() => {});
+      publishBan();
+    }
+    mkdirSync(path.dirname(MAY_BAO_FILE), { recursive: true });
+    writeDurable(MAY_BAO_FILE, JSON.stringify(mayBao));
+  } catch (e) {
+    log({ warn: `máy tự báo: ${e.message}` });
+  } finally {
+    dangKhamMay = false;
+  }
+}
+setTimeout(() => { khamMay(); setInterval(khamMay, MAY_BAO_CHU_KY); }, 90_000);
+
 function layBan() {
   const c = cfg();
   const pending = [...requests.values()].filter((r) => r.state === 'pending').map((r) => ({
@@ -892,7 +925,7 @@ function layBan() {
     buttons: keyboard(r).flat().map((b) => b.callback_data.slice(-1)).join(''),
     ageSec: Math.round((Date.now() - r.created) / 1000), expires: new Date(r.created + c.expireSec * 1000).toISOString() }));
   const agents = agentList().map((a) => ({ ten: a.name, vai: a.role, user: a.user, tam_dung: a.suspended }));
-  return { ts: new Date().toISOString(), host: hostname(), pending, homNay: homNay(), agents, so: soGanDay() };
+  return { ts: new Date().toISOString(), host: hostname(), pending, homNay: homNay(), agents, so: soGanDay(), may_bao: mayBao.su_kien.slice(0, 10) };
 }
 let banHen = null;
 function publishBan() {   // đổi trạng thái dồn dập (một việc: pending → running → done) → ghi một lần
@@ -904,7 +937,7 @@ function publishBan() {   // đổi trạng thái dồn dập (một việc: pen
 // (tuổi việc/ts đổi liên tục), kẻo 1.440 tin một ngày dội trạm chuyển tiếp.
 let banKeyCu = null;
 const banKey = (b) => JSON.stringify([b.pending.map((r) => r.id), b.homNay, b.agents,
-  b.so.map((x) => [x.id, x.ket_qua, x.quyet_dinh, x.exitCode])]);
+  b.so.map((x) => [x.id, x.ket_qua, x.quyet_dinh, x.exitCode]), (b.may_bao || []).map((x) => x.id)]);
 function publishBanNgay() {
   const ban = layBan();
   const data = JSON.stringify(ban);

@@ -101,6 +101,14 @@ with open(os.path.join(T, "wiki/sources/hop-dong-abc.md"), "w", encoding="utf-8"
 gd = do_thi_brain(T)
 ok(gd and {n["id"] for n in gd["nodes"]} == {"abc", "hop-dong-abc"} and len(gd["edges"]) == 1, "do_thi_brain: chạy doThi của brain.js trên Bộ não thật (2 trang, 1 cạnh)")
 
+doc_may_bao, gio_su_kien = g["doc_may_bao"], g["gio_su_kien"]
+mb = doc_may_bao(json.dumps({"may_bao": [{"id": "mang-1", "loai": "mang", "tieu_de": "Máy vừa có mạng lại sau 2 giờ 30 phút",
+                                          "noi_dung": "Mất từ 07:45 tới 10:15.", "luc": "2026-09-24T03:15:00.000Z"}, {"id": 5}, "rác"]}))
+ok(len(mb) == 1 and mb[0]["tieu_de"].startswith("Máy vừa có mạng lại") and doc_may_bao("hỏng") == [] and doc_may_bao("{}") == [],
+   "doc_may_bao: lấy sự cố hợp lệ, bỏ mục hỏng, tệp hỏng → rỗng")
+os.environ["TZ"] = "Asia/Ho_Chi_Minh"
+import time as _t; _t.tzset()
+ok(gio_su_kien("2026-09-24T03:15:00.000Z") == "10:15 · 24/09" and gio_su_kien("không phải giờ") == "", "gio_su_kien: giờ UTC → giờ máy, sai dạng → rỗng")
 moc_can_bao, sap_toi_brain = g["moc_can_bao"], g["sap_toi_brain"]
 st = [{"id": "m1", "viec": "Đóng tiền thuê 17 triệu", "ngay": "2026-10-10", "con": 3, "nhac": True, "ten_trang": "HĐ thuê nhà"},
       {"id": "m2", "viec": "Hết hạn HĐ Omron", "ngay": "2026-11-20", "con": 44, "nhac": False},
