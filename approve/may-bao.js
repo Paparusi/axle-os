@@ -38,7 +38,9 @@ export function locSuKien(ds = []) {
 export function danhGia(cu = {}, dd = {}, now = Date.now()) {
   const moi = { ...cu };
   const su_kien = [];
-  const them = (loai, tieu_de, noi_dung) => su_kien.push({ id: `${loai}-${now.toString(36)}-${su_kien.length}`, loai, tieu_de, noi_dung, luc: new Date(now).toISOString() });
+  // im: báo lặng — lên Bàn + danh sách máy báo trên app, KHÔNG đẩy thông báo điện thoại (tin vui, không cần làm gì)
+  const them = (loai, tieu_de, noi_dung, { im = false } = {}) => su_kien.push({ id: `${loai}-${now.toString(36)}-${su_kien.length}`, loai, tieu_de, noi_dung,
+    luc: new Date(now).toISOString(), ...(im ? { im: true } : {}) });
 
   if (dd.mang) {
     const m = dd.mang;
@@ -85,8 +87,26 @@ export function danhGia(cu = {}, dd = {}, now = Date.now()) {
 
   const b = dd.ban;
   if (b?.moi_nhat && b.dang_chay && soSanhBan(b.moi_nhat, b.dang_chay) > 0 && cu.ban_da_bao !== b.moi_nhat) {
-    them('cap_nhat', `Có Axle bản mới ${b.moi_nhat}`, `Máy đang chạy ${b.dang_chay}. Cập nhật: Bàn → Máy → Cập nhật, hoặc sudo axle update.`);
+    if (dd.tu_dong === false) {
+      them('cap_nhat', `Có Axle bản mới ${b.moi_nhat}`, `Máy đang chạy ${b.dang_chay}. Cập nhật: Bàn → Máy → Cập nhật, hoặc sudo axle update.`);
+    } else {        // máy tự cập nhật đêm nay → chỉ báo lặng
+      them('cap_nhat', `Có Axle bản mới ${b.moi_nhat}`, `Máy đang chạy ${b.dang_chay}; khoảng 3 giờ sáng máy tự cập nhật. Muốn ngay: Bàn → Máy → Cập nhật.`, { im: true });
+    }
     moi.ban_da_bao = b.moi_nhat;
+  }
+
+  // Lượt tự cập nhật (core/lib/tu-cap-nhat.sh ghi /var/lib/axle/cap-nhat.jsonl): mỗi lượt báo một lần (theo `luc`).
+  // Lên bản mới → báo lặng kèm "có gì mới" (ghi chú phát hành nằm trong tệp đã ký); hỏng → báo có rung.
+  const cn = dd.cap_nhat;
+  if (cn?.luc && cn.luc !== cu.cap_nhat_luc) {
+    if (cn.ket_qua === 'ok') {
+      them('cap_nhat', `Axle đã tự cập nhật lên ${cn.len}`, cn.ghi_chu ? `Có gì mới: ${cn.ghi_chu}` : `Từ bản ${cn.tu}.`, { im: true });
+    } else if (cn.ket_qua === 'quay_ve') {
+      them('cap_nhat', `Bản ${cn.len} hỏng trên máy — Axle đã tự quay về ${cn.tu}`, `${cn.chi_tiet || ''} Máy vẫn chạy bình thường; đêm sau chỉ cài bản mới hơn.`.trim());
+    } else if (cn.ket_qua === 'loi' && cn.len && cn.len !== cn.tu) {
+      them('cap_nhat', 'Tự cập nhật hỏng, cần xem máy', `${cn.chi_tiet || ''} Quay về: Bàn → Quay lại, chọn bản chụp "trước khi cài Axle".`.trim());
+    }
+    moi.cap_nhat_luc = cn.luc;
   }
   return { su_kien, moi };
 }
@@ -118,6 +138,12 @@ export async function doDac({ kiemBan = false, kiemMang = process.env.AXLE_KIEM_
   } catch { dd.dia = null; }
   const f = await chayLenh('systemctl', ['--failed', '--no-legend', '--plain'], 15_000);
   dd.dv_hong = f.code === 0 ? f.out.split('\n').map((l) => l.trim().split(/\s+/)[0]).filter((x) => x && x.includes('.')) : null;
+  // Lượt tự cập nhật gần nhất + công tắc tự cập nhật (xem danhGia)
+  try {
+    const dong = readFileSync(process.env.AXLE_CAP_NHAT_LOG || '/var/lib/axle/cap-nhat.jsonl', 'utf8').trim().split('\n');
+    dd.cap_nhat = JSON.parse(dong[dong.length - 1]);
+  } catch { dd.cap_nhat = null; }
+  try { dd.tu_dong = JSON.parse(readFileSync('/etc/axle/tu-cap-nhat.json', 'utf8')).bat !== false; } catch { dd.tu_dong = true; }
   if (kiemBan) {
     try {
       const src = readFileSync('/etc/axle/release-source', 'utf8').trim().replace(/\/$/, '');

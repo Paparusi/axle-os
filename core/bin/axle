@@ -73,6 +73,7 @@ axle claude "câu hỏi" [--tiep] [--dong] [--tep <tệp>]…
 axle bench [--nghiem]    đo cái giá Axle bắt máy trả: RAM lúc rảnh, khởi động, snapshot, đĩa
 axle version             bản Axle đang chạy
 sudo axle update [--from <url>]   cập nhật lên bản phát hành mới (kiểm chữ ký, chụp hệ thống trước, không hạ cấp)
+axle update tu-dong [on|off]      tự cập nhật ~3 giờ sáng (mặc định bật; hỏng thì tự quay về bản cũ) — xem không cần sudo
 sudo axle desktop on|off · axle desktop status   lớp giao diện GNOME + gõ tiếng Việt (docs/DESKTOP.md)
 axle screen chup [tệp] · axle screen trangthai · sudo axle screen quen
                          chụp màn hình của chính mày; xem/quên giấy phép chia sẻ màn hình
@@ -892,6 +893,37 @@ app_cmd() {   # sudo axle app setup|pair|confirm|devices|remove|terminal
   esac
 }
 
+tu_dong_cmd() {   # axle update tu-dong [status|on|off] — tự cập nhật ~3 giờ sáng (core/lib/tu-cap-nhat.sh, timer axle-tu-cap-nhat)
+  local cfg=/etc/axle/tu-cap-nhat.json nk=/var/lib/axle/cap-nhat.jsonl
+  case "${1:-status}" in
+    on|off)
+      [ "$(id -u)" = 0 ] || { echo "Cần sudo: sudo axle update tu-dong $1" >&2; exit 1; }
+      mkdir -p /etc/axle
+      if [ "$1" = on ]; then printf '{"bat": true}\n' > "$cfg"; echo "Đã bật tự cập nhật: khoảng 3 giờ sáng máy tự kiểm và cài bản mới"
+      else printf '{"bat": false}\n' > "$cfg"; echo "Đã tắt tự cập nhật — cập nhật tay: sudo axle update"; fi
+      chmod 0644 "$cfg" ;;
+    status)
+      if [ -f "$cfg" ] && grep -q '"bat": *false' "$cfg"; then echo "Tự cập nhật: TẮT (bật: sudo axle update tu-dong on)"
+      else echo "Tự cập nhật: BẬT · khoảng 3 giờ sáng · tắt: sudo axle update tu-dong off"; fi
+      [ -s "$nk" ] && python3 - "$nk" <<'PY'
+import json, sys
+try:
+    d = json.loads(open(sys.argv[1], encoding="utf-8").read().splitlines()[-1])
+except Exception:
+    sys.exit(0)
+luc = d.get("luc", "")
+khi = f"{luc[8:10]}/{luc[5:7]} {luc[11:16]}" if len(luc) >= 16 else "?"
+tu, len_, kq = d.get("tu", "?"), d.get("len", "?"), d.get("ket_qua")
+viec = {"ok": f"đã lên {len_} (từ {tu})", "kiem": f"đã là bản mới nhất ({tu})",
+        "quay_ve": f"bản {len_} hỏng, đã tự quay về {tu}", "bo_qua": f"bỏ qua bản {len_} (đã hỏng một lần trên máy này)",
+        "loi": "chưa cập nhật được — " + (d.get("chi_tiet") or "không rõ")[:160]}.get(kq, str(kq))
+print(f"Lần gần nhất {khi}: {viec}")
+PY
+      true ;;
+    *) echo "axle update tu-dong [status|on|off]" >&2; exit 2 ;;
+  esac
+}
+
 thong_bao() {   # thông báo trên màn hình chủ (GNOME) — chỉ khi có phiên đồ hoạ; không có thì im
   [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ] || { [ -S "/run/user/$(id -u)/bus" ] && export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"; } || return 0
   if command -v notify-send >/dev/null; then notify-send -a Axle -i axle "$1" "${2:-}" 2>/dev/null || true
@@ -1032,7 +1064,8 @@ case "${1:-help}" in
   webapp)    shift; exec bash /opt/axle/core/desktop/webapp.sh "$@" ;;
   tay)       shift; exec /usr/bin/python3 /opt/axle/core/desktop/tay.py "$@" ;;   # tay cho mọi ứng dụng (AT-SPI)
   brain)     shift; brain_cmd "$@" ;;
-  update)    [ "$(id -u)" = 0 ] || { echo "Cần sudo: sudo axle update" >&2; exit 1; }
+  update)    if [ "${2:-}" = tu-dong ]; then shift 2; tu_dong_cmd "$@"; exit 0; fi
+             [ "$(id -u)" = 0 ] || { echo "Cần sudo: sudo axle update" >&2; exit 1; }
              shift; exec bash /opt/axle/core/install.sh --update "$@" ;;
   help|-h|--help) usage ;;
   *)         usage; exit 2 ;;

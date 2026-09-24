@@ -35,11 +35,15 @@ MTIME="$(git log -1 --format=%cI)"
 tar --sort=name --owner=0 --group=0 --numeric-owner --mtime="$MTIME" -C "$STAGE" -czf "$OUT/$FILE" axle
 SHA="$(sha256sum "$OUT/$FILE" | cut -d' ' -f1)"
 SIZE="$(stat -c %s "$OUT/$FILE")"
-python3 - "$OUT/latest.json" "$VER" "$COMMIT" "$FILE" "$SHA" "$SIZE" <<'PY'
+# ghi_chu (AXLE_RELEASE_NOTES, phat-hanh.sh truyền vào): nằm TRONG tệp đã ký → máy tự cập nhật xong báo "có gì mới"
+python3 - "$OUT/latest.json" "$VER" "$COMMIT" "$FILE" "$SHA" "$SIZE" "${AXLE_RELEASE_NOTES:-}" <<'PY'
 import json, sys, datetime
-out, ver, commit, f, sha, size = sys.argv[1:]
-json.dump({"product": "axle-server", "version": ver, "commit": commit, "file": f, "sha256": sha, "size": int(size),
-           "date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}, open(out, "w"), indent=1)
+out, ver, commit, f, sha, size, ghi_chu = sys.argv[1:]
+m = {"product": "axle-server", "version": ver, "commit": commit, "file": f, "sha256": sha, "size": int(size),
+     "date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+if ghi_chu.strip():
+    m["ghi_chu"] = ghi_chu.strip()[:1000]
+json.dump(m, open(out, "w"), indent=1)   # ASCII thuần (\uXXXX): locale nào đọc cũng được
 PY
 "$OPENSSL" pkeyutl -sign -inkey "$KEY" -rawin -in "$OUT/latest.json" -out "$OUT/latest.json.sig"
 "$OPENSSL" pkeyutl -verify -pubin -inkey "$ROOT/core/release-key.pub.pem" -rawin -in "$OUT/latest.json" \

@@ -513,3 +513,32 @@ Thử: test-brain +9 ca (themTep: tên, index đủ trường, trùng nội dung
 loiDanIngest), `build/nautilus-smoke.py` 10 ca (Files giả: menu khi nào hiện, lệnh chạy, tách phiên, lùi API 4.0),
 gui-logic-smoke +5 ca (gom_dinh_kem: thư mục / không có / trùng qua lối tắt / quá 6 / quá 50 MB; cau_co_kem; lenh_hoi),
 `AXLE_SHOT_KEM=a:b build/gui-shot.py` chụp ô có tệp đính kèm sẵn.
+
+## Axle tự cập nhật (nhịp D16, 24/9)
+
+Trước nhịp này bản mới chỉ tới máy khi có người gõ `sudo axle update` (thực tế: Claude SSH vào bằng mật khẩu của chủ).
+Giờ timer `axle-tu-cap-nhat` chạy khoảng 3 giờ sáng (lệch ngẫu nhiên tới 40 phút, không bù khi máy tắt) →
+`core/lib/tu-cap-nhat.sh`:
+
+1. Công tắc `/etc/axle/tu-cap-nhat.json` (`{"bat": false}` = tắt; không có tệp = BẬT). `axle update tu-dong [on|off]`,
+   xem trạng thái không cần sudo; Bàn → Tính năng → **Tự cập nhật mỗi đêm**.
+2. Cài qua ĐÚNG `install.sh --update`: kiểm chữ ký, không hạ cấp, chụp hệ thống trước, chờ câu hỏi dở trên điện thoại
+   xong. install.sh nay giữ `latest.json` đã kiểm chữ ký thành `/opt/axle/RELEASE.json`, có `ghi_chu` (ghi chú phát
+   hành — `phat-hanh.sh` truyền vào `release.sh`, nằm TRONG tệp đã ký, ASCII thuần) và khoá `/run/axle-cap-nhat.lock`
+   để tự cập nhật với nút "Cập nhật ngay" không chạy chồng.
+3. Khám: dịch vụ lõi đang bật (axle-approve, axle-mcp-http, axle-vault) phải `active` trong 90 giây.
+4. Dựng máy lỗi hay dịch vụ không lên → **tự quay về** `/opt/axle.prev` + dựng lại máy bằng bản cũ; bản hỏng để ở
+   `/opt/axle.hong` và ghi vào `/var/lib/axle/cap-nhat-bo-qua` → đêm sau KHÔNG cài lại bản đó (bản mới hơn vẫn cài).
+   Không còn bản cũ, hay quay về cũng lỗi → ghi `loi`, chỉ đường `axle undo` về bản chụp "trước khi cài Axle".
+5. Mỗi lượt một dòng `/var/lib/axle/cap-nhat.jsonl` (0644, giữ 200 dòng) {luc, ket_qua: ok|kiem|loi|quay_ve|bo_qua,
+   tu, len, ghi_chu, chi_tiet}. Bộ duyệt đọc trong lượt khám 5 phút (may-bao.js) → **"Axle đã tự cập nhật lên X —
+   Có gì mới: …"** lên Bàn (thông báo GNOME) + danh sách máy báo trên app, LẶNG (cờ `im`: app-channel không nhờ trạm
+   đẩy); quay về / hỏng thì báo CÓ rung. "Có Axle bản mới" khi tự cập nhật đang bật cũng lặng ("khoảng 3 giờ sáng máy
+   tự cập nhật"). Bàn → Máy: dòng Cập nhật Axle hiện bật/tắt + lượt gần nhất, nút đổi tên "Cập nhật ngay".
+
+provision.sh chỉ `enable` + `start` TIMER (start timer không chạy service) — provision chạy BÊN TRONG lượt tự cập
+nhật, restart service là tự giết mình. Kịch bản đang chạy nằm trong /opt/axle mà install.sh đổi tên thư mục: bash vẫn
+đọc tiếp đúng tệp (đổi tên cùng ổ giữ nguyên inode) — cùng lý do `sudo axle update` vẫn chạy được từ trước.
+Thử: `build/tu-cap-nhat-smoke.sh` 11 ca (bộ cài + systemctl + dựng-lại giả: tắt, mới nhất, mất mạng, lên ổn, dịch vụ
+hỏng → quay về, bỏ qua bản hỏng, bản mới hơn vẫn cài, dựng lỗi, mất bản cũ, quay về cũng lỗi, cắt nhật ký; phá thử
+phần khám dịch vụ thì 3 ca đỏ), test-may-bao +8 ca, gui-logic-smoke +3 ca.

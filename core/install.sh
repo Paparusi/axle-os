@@ -27,6 +27,9 @@ for c in curl openssl tar python3 sha256sum; do command -v "$c" >/dev/null || di
 [ "$(findmnt -no FSTYPE /)" = btrfs ] \
   || die "Axle cần ổ hệ thống btrfs — cài bằng ISO Axle, hoặc lúc cài Ubuntu chọn định dạng btrfs cho /"
 
+# Một lượt cập nhật một lúc: tự cập nhật lúc 3 giờ sáng (axle-tu-cap-nhat) mà trùng lúc chủ bấm "Cập nhật" thì lượt sau chờ
+exec 9>/run/axle-cap-nhat.lock
+flock -w 1800 9 || die "Đang có một lượt cài/cập nhật Axle khác chạy — thử lại sau"
 T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
 # `latest.json` bị CDN của GitHub giữ bản cũ theo từng điểm phát: 20/9 máy văn phòng thấy 0.1.104 trong khi
@@ -73,6 +76,8 @@ rm -rf /opt/axle.new
 mkdir -p /opt/axle.new
 tar -xzf "$T/$FILE" -C /opt/axle.new --strip-components=1 --no-same-owner
 [ -f /opt/axle.new/core/provision.sh ] || die "Gói thiếu core/provision.sh"
+# Giữ tệp mô tả bản ĐÃ KIỂM CHỮ KÝ (số bản, băm, ghi chú phát hành) — tự cập nhật đọc "có gì mới" từ đây
+cp "$T/latest.json" /opt/axle.new/RELEASE.json
 
 # Đang có câu hỏi dở trên điện thoại (Hỏi Axle) thì CHỜ trả lời xong rồi mới thay: provision khởi động lại bộ duyệt, mà
 # câu trả lời chạy bên trong bộ duyệt → bị cắt ngang, app quay "đang làm" mãi (24/9, lỗi do chính việc cập nhật). --force: khỏi chờ.

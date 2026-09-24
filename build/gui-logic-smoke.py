@@ -148,5 +148,13 @@ ok(L[1:] == ["claude", "so sánh", "--dong", "--phien", "u-1", "--tiep", "--tep"
    "lenh_hoi: mỗi tệp một --tep, nối mạch khi có cuộc")
 shutil.rmtree(TK, ignore_errors=True)
 
+# Phụ đề "Cập nhật Axle" trên trang Máy (từ `axle update tu-dong status`)
+mo_ta_cap_nhat = g["mo_ta_cap_nhat"]
+ok(mo_ta_cap_nhat("Tự cập nhật: BẬT · khoảng 3 giờ sáng · tắt: sudo axle update tu-dong off\nLần gần nhất 25/09 03:14: đã lên 0.1.164 (từ 0.1.163)")
+   == "Tự cập nhật khoảng 3 giờ sáng (đang bật). Lần gần nhất 25/09 03:14: đã lên 0.1.164 (từ 0.1.163)", "mo_ta_cap_nhat: bật + lượt gần nhất")
+ok(mo_ta_cap_nhat("Tự cập nhật: TẮT (bật: sudo axle update tu-dong on)") == "Tự cập nhật đang tắt — bật ở trang Tính năng.", "mo_ta_cap_nhat: tắt, chưa có lượt nào")
+ok(mo_ta_cap_nhat("") .startswith("Tải bản mới nhất") and mo_ta_cap_nhat("Cần sudo") .startswith("Tải bản mới nhất"),
+   "mo_ta_cap_nhat: máy cũ chưa có lệnh tu-dong / lỗi → câu cũ, không hiện rác")
+
 if fail: print(f"✗ {fail} mục hỏng"); sys.exit(1)
 print("✓ phần thuần của cửa sổ Axle đạt")

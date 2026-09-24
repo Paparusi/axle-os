@@ -67,6 +67,28 @@ r = danhGia(s, { ban: { dang_chay: '0.1.154', moi_nhat: '0.1.160' } }, t0); s = 
 ok(r.su_kien.length === 1 && r.su_kien[0].tieu_de === 'Có Axle bản mới 0.1.160', 'có bản mới → báo');
 ok(danhGia(s, { ban: { dang_chay: '0.1.154', moi_nhat: '0.1.160' } }, t0).su_kien.length === 0, '… cùng bản đó → không báo lặp');
 ok(danhGia(s, { ban: { dang_chay: '0.1.160', moi_nhat: '0.1.160' } }, t0).su_kien.length === 0, 'đã lên bản mới nhất → im');
+ok(r.su_kien[0].im === true && /tự cập nhật/.test(r.su_kien[0].noi_dung), 'tự cập nhật đang bật (mặc định) → báo bản mới LẶNG, nói máy tự cập nhật đêm nay');
+r = danhGia({}, { tu_dong: false, ban: { dang_chay: '0.1.154', moi_nhat: '0.1.160' } }, t0);
+ok(!r.su_kien[0].im && /sudo axle update/.test(r.su_kien[0].noi_dung), 'tắt tự cập nhật → báo có rung, chỉ cách cập nhật tay');
+
+// Lượt tự cập nhật (cap-nhat.jsonl): mỗi lượt báo một lần; lên bản mới = lặng + có gì mới; hỏng = có rung
+s = {};
+const ok1 = { luc: '2026-09-25T03:14:00+07:00', ket_qua: 'ok', tu: '0.1.163', len: '0.1.164', ghi_chu: 'Chuột phải trong Files đưa tệp vào Bộ não.' };
+r = danhGia(s, { cap_nhat: ok1 }, t0); s = r.moi;
+ok(r.su_kien.length === 1 && r.su_kien[0].tieu_de === 'Axle đã tự cập nhật lên 0.1.164' && r.su_kien[0].im === true && r.su_kien[0].noi_dung.includes('Chuột phải'),
+  'tự cập nhật xong → báo lặng "đã lên 0.1.164" kèm ghi chú phát hành');
+ok(danhGia(s, { cap_nhat: ok1 }, t0).su_kien.length === 0, '… cùng lượt đó → không báo lặp');
+ok(danhGia(s, { cap_nhat: { ...ok1, ghi_chu: '' } }, t0).su_kien.length === 0 && danhGia({}, { cap_nhat: { ...ok1, ghi_chu: '' } }, t0).su_kien[0].noi_dung === 'Từ bản 0.1.163.',
+  'không có ghi chú → nói lên từ bản nào');
+const qv = { luc: '2026-09-26T03:20:00+07:00', ket_qua: 'quay_ve', tu: '0.1.164', len: '0.1.165', chi_tiet: 'dịch vụ không chạy sau khi cài: axle-approve' };
+r = danhGia(s, { cap_nhat: qv }, t0); s = r.moi;
+ok(r.su_kien.length === 1 && !r.su_kien[0].im && r.su_kien[0].tieu_de.includes('tự quay về 0.1.164') && r.su_kien[0].noi_dung.includes('axle-approve'),
+  'bản mới hỏng, đã tự quay về → báo có rung, nói lý do');
+ok(['kiem', 'bo_qua'].every((kq) => danhGia(s, { cap_nhat: { luc: `x-${kq}`, ket_qua: kq, tu: '0.1.164', len: '0.1.164' } }, t0).su_kien.length === 0)
+  && danhGia(s, { cap_nhat: { luc: 'x-loi', ket_qua: 'loi', tu: '0.1.164', len: '0.1.164', chi_tiet: 'mạng' } }, t0).su_kien.length === 0,
+  'đã mới nhất / bỏ qua bản hỏng / lỗi mạng trước khi thay → im (đêm sau tự thử lại)');
+r = danhGia(s, { cap_nhat: { luc: 'x-loi2', ket_qua: 'loi', tu: '0.1.164', len: '0.1.165', chi_tiet: 'quay về cũng chưa lành' } }, t0);
+ok(r.su_kien.length === 1 && !r.su_kien[0].im && /cần xem máy/.test(r.su_kien[0].tieu_de), 'quay về cũng hỏng → báo có rung, chỉ đường quay lại');
 ok(soSanhBan('0.1.160', '0.1.154') > 0 && soSanhBan('0.1.99', '0.1.100') < 0 && soSanhBan('0.1.9', '0.1.9') === 0, 'so bản theo số, không theo chữ');
 ok(thoiLuong(45) === '45 phút' && thoiLuong(60) === '1 giờ' && thoiLuong(150) === '2 giờ 30 phút' && thoiLuong(1500) === '1 ngày 1 giờ', 'thời lượng tiếng Việt');
 

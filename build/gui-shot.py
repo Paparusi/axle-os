@@ -50,6 +50,7 @@ case "$1 $2" in
   "dangnhap status") echo "Duyệt đăng nhập bằng điện thoại: ĐANG BẬT" ;;
   "app terminal") echo "Gõ lệnh từ app: BẬT (admin_1, 180 giây)" ;;
   "net kiem") cat "$(dirname "$0")/mang.json" ;;
+  "update tu-dong") printf '%s\\n' "Tự cập nhật: BẬT · khoảng 3 giờ sáng · tắt: sudo axle update tu-dong off" "Lần gần nhất 25/09 03:14: đã lên 0.1.164 (từ 0.1.163)" ;;
   "claude "*) sleep 1; echo "Log tối qua có 2 lỗi kết nối Supabase lúc 02:13 và 02:41, worker tự nối lại sau 30 giây. Không cần sửa gì." ;;
   *) echo "thu: $*" ;;
 esac

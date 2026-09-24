@@ -204,6 +204,16 @@ def gom_dinh_kem(cu, moi, toi_da=TOI_DA_KEM, toi_da_byte=TOI_DA_KEM_BYTE):
     return ds, bo
 
 
+def mo_ta_cap_nhat(ra):
+    """Phụ đề dòng "Cập nhật Axle" từ `axle update tu-dong status`: bật/tắt + lượt gần nhất, gọn một hai câu."""
+    dong = [x.strip() for x in (ra or "").splitlines() if x.strip()]
+    if not dong or not dong[0].startswith("Tự cập nhật"):
+        return "Tải bản mới nhất và cài. Máy tự chụp ảnh hệ thống trước, hỏng thì quay lại được."
+    dau = "Tự cập nhật khoảng 3 giờ sáng (đang bật)." if "BẬT" in dong[0] else "Tự cập nhật đang tắt — bật ở trang Tính năng."
+    gan = next((x for x in dong[1:] if x.startswith("Lần gần nhất")), "")
+    return f"{dau} {gan}".strip()
+
+
 def cau_co_kem(chu, kem):
     """Câu gửi đi: chữ đã gõ; chỉ có tệp mà chưa gõ gì thì hỏi câu mặc định như app điện thoại."""
     chu = (chu or "").strip()
@@ -1267,9 +1277,11 @@ class CuaSo(Adw.ApplicationWindow):
         t.add(g)
 
         g2 = Adw.PreferencesGroup()
+        # Phụ đề = tình trạng tự cập nhật + lượt gần nhất (`axle update tu-dong status`), đọc lại mỗi lần làm mới trang
         r = Adw.ActionRow(title="Cập nhật Axle",
                           subtitle="Tải bản mới nhất và cài. Máy tự chụp ảnh hệ thống trước, hỏng thì quay lại được.")
-        nut = Gtk.Button(label="Cập nhật", valign=Gtk.Align.CENTER)
+        self.hang_cap_nhat = r
+        nut = Gtk.Button(label="Cập nhật ngay", valign=Gtk.Align.CENTER)
         nut.connect("clicked", self.cap_nhat)
         r.add_suffix(nut)
         g2.add(r)
@@ -1402,6 +1414,7 @@ class CuaSo(Adw.ApplicationWindow):
         hong = mot_dong(["systemctl", "--failed", "--no-legend", "--plain"])
         so = len([l for l in hong.splitlines() if l.strip()])
         self.hang["hong"].set_label("không có" if so == 0 else f"{so} dịch vụ")
+        self.hang_cap_nhat.set_subtitle(mo_ta_cap_nhat(chay("update", "tu-dong", "status")[1]))
         return False
 
     def cap_nhat(self, *_):
@@ -1567,6 +1580,18 @@ class CuaSo(Adw.ApplicationWindow):
             self.cong_tac[khoa] = (r, dang_bat)
             g.add(r)
         t.add(g)
+
+        # Tự cập nhật (nhịp D16): cùng kiểu công tắc — đọc lại trạng thái thật sau khi đổi (pkexec huỷ thì trả về)
+        gc = Adw.PreferencesGroup(title="Cập nhật")
+        r = Adw.SwitchRow(title="Tự cập nhật mỗi đêm",
+                          subtitle="Khoảng 3 giờ sáng máy tự kiểm bản mới và cài: kiểm chữ ký, chụp hệ thống trước, chờ câu hỏi "
+                                   "dở xong. Cài xong mà dịch vụ chính không chạy thì tự quay về bản cũ. Sáng ra Bàn báo có gì mới.")
+        dang_bat = lambda: "BẬT" in chay("update", "tu-dong", "status")[1]   # noqa: E731
+        r.set_active(dang_bat())
+        r.connect("notify::active", self.doi_cong_tac, "tudong", ("update", "tu-dong", "on"), ("update", "tu-dong", "off"))
+        self.cong_tac["tudong"] = (r, dang_bat)
+        gc.add(r)
+        t.add(gc)
 
         g2 = Adw.PreferencesGroup(
             title="Chia sẻ màn hình",

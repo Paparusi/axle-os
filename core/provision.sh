@@ -373,6 +373,36 @@ EOF
 systemctl daemon-reload
 systemctl enable --now axle-brain-lint.timer >/dev/null 2>&1 && echo "  axle-brain-lint.timer: 21:30 hằng ngày (chưa có Brain/token thì tự bỏ qua)"
 
+step "Tự cập nhật lúc 3 giờ sáng"
+# Bản mới tự về máy (core/lib/tu-cap-nhat.sh): cài qua install.sh (kiểm chữ ký, chụp hệ thống, chờ câu hỏi dở), khám dịch
+# vụ lõi, hỏng thì tự quay về bản cũ. Chạy CHÍNH TỪ lượt tự cập nhật thì provision này nằm bên trong service đó — chỉ
+# enable/start TIMER (start timer không chạy service), không bao giờ restart service kẻo tự giết mình giữa chừng.
+cat > /etc/systemd/system/axle-tu-cap-nhat.service <<'EOF'
+[Unit]
+Description=Axle tự cập nhật (kiểm chữ ký, chụp hệ thống trước, hỏng thì tự quay về bản cũ)
+Wants=network-online.target
+After=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/axle/core/lib/tu-cap-nhat.sh
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=50min
+EOF
+cat > /etc/systemd/system/axle-tu-cap-nhat.timer <<'EOF'
+[Unit]
+Description=Axle tự cập nhật lúc ~3 giờ sáng
+[Timer]
+OnCalendar=*-*-* 03:00:00
+RandomizedDelaySec=40min
+Persistent=false
+[Install]
+WantedBy=timers.target
+EOF
+systemctl daemon-reload
+systemctl enable axle-tu-cap-nhat.timer >/dev/null 2>&1 && systemctl start axle-tu-cap-nhat.timer >/dev/null 2>&1 \
+  && echo "  axle-tu-cap-nhat.timer: ~3 giờ sáng · $(axle update tu-dong status 2>/dev/null | head -1)"
+
 snapper -c root create -t single -c number -d "axle provision $(cat /etc/axle/version)" >/dev/null
 sync   # mất điện ngay sau khi dựng máy thì các file vừa ghi vẫn còn nguyên
 step "Xong. Việc còn lại: axle net up"
