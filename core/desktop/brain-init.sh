@@ -34,6 +34,7 @@ Brain/
 ```yaml
 ---
 title: Tên trang
+ngan: Tên ngắn ≤ 20 ký tự, không trùng trang khác (vd HĐ Omron, HRVN) — app và Bàn vẽ đồ thị bằng tên này
 type: source | entity | project | decision | learning | concept
 sources: [raw/2026-09/…, hoặc "hỏi 2026-09-21"]
 related: [[trang-khac]]

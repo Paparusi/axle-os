@@ -79,6 +79,18 @@ try {
   ok(nn.length === 1 && nn[0].trang === 'wiki/sources/hop-dong-thue-kho.md' && nn[0].link === 'hop-dong-abc-2026-09', `kiem: bắt tài liệu link thẳng tài liệu (${JSON.stringify(nn)})`);
   b.ghi('wiki/sources/hop-dong-thue-kho.md', '---\ntitle: Hợp đồng thuê kho\ntype: source\n---\nThuê kho của [[cong-ty-abc]], giá 20 triệu/tháng. Địa chỉ ABC ở đây khác ghi ở trang [[cong-ty-abc]]. Hạn một năm tính từ tháng chín.');
   ok(b.kiem().nguon_noi_nguon.length === 0, 'kiem: nối qua trang thực thể chung thì hết báo');
+  // tên ngắn để vẽ đồ thị (Bi 24/9 "rối quá": tiêu đề 50–80 ký tự đè nhau)
+  ok(b.tenNgan('TMDV HRVN Company Limited') === 'TMDV HRVN' && b.tenNgan('Wanek Furniture Co., Ltd (Công ty TNHH Kỹ nghệ Gỗ Hoa Nét)') === 'Wanek Furniture',
+    'tenNgan: bỏ đuôi công ty và phần trong ngoặc');
+  ok(b.tenNgan('Hợp đồng thuê nhà (tầng 3) — Phạm Thị Hồng Trân cho TMDV HRVN thuê') === 'HĐ thuê nhà', 'tenNgan: lấy phần trước " — ", Hợp đồng → HĐ');
+  const dai = b.tenNgan('Omron Healthcare Manufacturing Vietnam Co., Ltd');
+  ok(dai.length === 20 && dai.endsWith('…'), `tenNgan: quá 20 ký tự thì cắt có dấu … (${dai})`);
+  b.ghi('wiki/sources/hop-dong-omron.md', '---\ntitle: Hợp đồng dịch vụ giới thiệu lao động Omron - HRVN (bản edit 21/09/2026)\nngan: HĐ Omron\ntype: source\n---\nBên B là [[cong-ty-abc]]. Phí một tháng lương. Bảo hành ba tháng.');
+  const gOmron = b.doThi().nodes.find((n) => n.id === 'hop-dong-omron');
+  ok(gOmron?.ten === 'HĐ Omron' && gOmron?.ten_day.startsWith('Hợp đồng dịch vụ giới thiệu lao động Omron'), 'doThi: có dòng ngan: thì nhãn = tên ngắn, ten_day = tiêu đề đủ');
+  const tn = b.kiem().thieu_ten_ngan;
+  ok(!tn.includes('wiki/sources/hop-dong-omron.md') && tn.includes('wiki/concepts/kn-1.md') && !tn.includes('wiki/entities/cong-ty-abc.md'),
+    'kiem: tiêu đề dài chưa có ngan: thì báo; có ngan: hoặc tiêu đề ngắn thì không');
 } finally {
   // brain_ghi commit git ở nền → chờ nó xong, dọn có thử lại (không thì rmdir .git/objects đua với git: ENOTEMPTY)
   await new Promise((r) => setTimeout(r, 800));

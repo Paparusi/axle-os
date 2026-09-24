@@ -174,12 +174,30 @@ export function kiem(dir = BRAIN) {
       if (!nguonNoi.has(k)) nguonNoi.set(k, { trang: t.duong, link: den });
     }
   }
+  // Tiêu đề dài mà chưa có tên ngắn (dòng `ngan:`): đồ thị phải tự cắt tên → dễ trùng nhau ("HĐ dịch vụ giới thiệu…")
+  const thieuNgan = [];
+  for (const [slug, t] of trang) {
+    if (['index', 'log'].includes(slug)) continue;
+    const dau = dauTrang(t.noiDung);
+    if ((/^title:\s*(.+)$/m.exec(dau)?.[1] ?? '').trim().length > 20 && !/^ngan:\s*\S/m.test(dau)) thieuNgan.push(t.duong);
+  }
   return { so_trang: trang.size, link_hong: linkHongUniq, mo_coi: moCoi, mong, thieu_dau: thieuDau, tai_lieu_chua_trang: chuaTrang,
-    nguon_noi_nguon: [...nguonNoi.values()] };
+    nguon_noi_nguon: [...nguonNoi.values()], thieu_ten_ngan: thieuNgan };
 }
 
 // ĐỒ THỊ liên kết wiki (app vẽ): nút = trang (slug, tiêu đề, loại), cạnh = [[link]] (một cạnh cho mỗi cặp); link tới
 // trang chưa có → nút loại "thieu" để nhìn thấy lỗ hổng. index/log không vẽ (là mục lục, nối tới tất cả).
+// Tên ngắn để VẼ (nhãn trên đồ thị): tiêu đề trang thường dài 50–80 ký tự ("Hợp đồng dịch vụ giới thiệu lao động Omron -
+// HRVN (bản edit 21/09/2026)") — vẽ nguyên văn là nhãn đè nhau, cắt ở mép (Bi 24/9: "rối quá"). Ưu tiên dòng `ngan:` do
+// Claude ghi trong YAML; không có thì cắt tạm: bỏ (…), lấy phần trước " — ", bỏ đuôi công ty, "Hợp đồng" → "HĐ".
+export function tenNgan(t, toiDa = 20) {
+  const s = String(t || '').replace(/\s*\([^)]*\)/g, '').split(/\s+[—–]\s+/)[0]
+    .replace(/,?\s*\b(Company Limited|Co\.,?\s*Ltd\.?|Ltd\.?|JSC|Corporation|Corp\.?)\s*$/i, '')
+    .replace(/^Công ty (TNHH|Cổ phần|CP)\s+/i, '').replace(/^Hợp đồng\b/i, 'HĐ')
+    .replace(/\s{2,}/g, ' ').trim().replace(/[,\s]+$/, '');
+  return s.length > toiDa ? `${s.slice(0, toiDa - 1).trimEnd()}…` : s;
+}
+
 // Trả về đồ thị cho app: nút = trang, cạnh = [[link]] gộp hai chiều. Gói phải lọt hộp trạm (64KB đã mã hoá) → giữ
 // ≤ toiDaByte JSON: quá thì giữ những trang NHIỀU liên kết nhất (cắt dần 20%), rồi bỏ cạnh chạm nút đã cắt.
 export function doThi(dir = BRAIN, { toiDaNut = 400, toiDaByte = 40_000 } = {}) {
@@ -189,10 +207,13 @@ export function doThi(dir = BRAIN, { toiDaNut = 400, toiDaByte = 40_000 } = {}) 
     const slug = f.replace(/\.md$/, ''); if (['index', 'log'].includes(slug)) continue;
     const s = readFileSync(p, 'utf8');
     const dau = /^---\n([\s\S]*?)\n---/.exec(s)?.[1] ?? '';
-    const ten = (/^title:\s*(.+)$/m.exec(dau)?.[1] ?? slug).trim().replace(/^["']|["']$/g, '');
+    const tenDay = (/^title:\s*(.+)$/m.exec(dau)?.[1] ?? slug).trim().replace(/^["']|["']$/g, '');
+    const ngan = (/^ngan:\s*(.+)$/m.exec(dau)?.[1] ?? '').trim().replace(/^["']|["']$/g, '');
     const loai = (/^type:\s*(\w+)/m.exec(dau)?.[1] ?? path.basename(d).replace(/s$/, '') ?? 'concept').toLowerCase();
     const than = s.replace(/^---[\s\S]*?---\s*/m, '').replace(/^#.*$/mg, '').replace(/\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/g, '$1').trim();
-    nut.set(slug, { id: slug, ten, loai, duong: path.relative(dir, p), mo_ta: than.slice(0, 120).replace(/\s+/g, ' '), noiDung: s });
+    // `ten` = nhãn vẽ (ngắn) — app cũ đọc đúng trường này nên đổi là thấy ngay, khỏi dựng app; `ten_day` = tiêu đề đầy đủ
+    nut.set(slug, { id: slug, ten: ngan || tenNgan(tenDay), ten_day: tenDay, loai, duong: path.relative(dir, p),
+      mo_ta: than.slice(0, 120).replace(/\s+/g, ' '), noiDung: s });
   } } };
   if (existsSync(wiki)) walk(wiki);
   const canh = new Map();
@@ -200,7 +221,7 @@ export function doThi(dir = BRAIN, { toiDaNut = 400, toiDaByte = 40_000 } = {}) 
     for (const m of n.noiDung.replace(/`[^`\n]*`/g, '').matchAll(/\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]/g)) {
       const b = m[1].trim();
       if (b === a || ['index', 'log'].includes(b)) continue;
-      if (!nut.has(b)) nut.set(b, { id: b, ten: b, loai: 'thieu', duong: '', mo_ta: 'trang chưa có (link hỏng)', noiDung: '' });
+      if (!nut.has(b)) nut.set(b, { id: b, ten: tenNgan(b), ten_day: b, loai: 'thieu', duong: '', mo_ta: 'trang chưa có (link hỏng)', noiDung: '' });
       const k = [a, b].sort().join('|');
       if (!canh.has(k)) canh.set(k, { a, b });
     }
@@ -291,7 +312,8 @@ export function register(tool) {
     description: 'Deterministic check: broken [[links]], orphan pages, thin pages (<3 sentences), pages missing the YAML header, '
       + 'documents in raw/ with no page mentioning them, and source pages linking directly to another source page (nguon_noi_nguon: '
       + 'allowed only when one amends/replaces/annexes the other; otherwise move the shared detail to the common entity page, '
-      + 'link that page, and remove the direct link). Run this FIRST when asked to LINT; fix what it lists; do not guess.',
+      + 'link that page, and remove the direct link), and pages with a long title but no short name (thieu_ten_ngan: add a '
+      + '`ngan:` line, ≤20 chars, distinct from other pages, to the YAML header). Run this FIRST when asked to LINT; fix what it lists; do not guess.',
     inputSchema: {},
     annotations: { readOnlyHint: true },
   }, async () => { khoiTao(); return JSON.stringify(kiem(), null, 1); });

@@ -380,6 +380,12 @@ link tới trang chưa có thành nút loại `thieu` (vẽ đứt nét đỏ; b
 (hộp trạm 64KB đã mã hoá) — wiki lớn thì giữ trang nhiều liên kết nhất, `bo_bot` = số trang bị ẩn (0.1.140).
 App: `query brain-graph` → tấm **Liên kết trong Bộ não** trong 📚: xếp lực (đẩy–kéo, 200 vòng ngay trên điện thoại),
 màu theo loại, chạm chấm → thấy nó nối với ai + nút "Hỏi về trang này". Thử: test-brain 32 ca (5 ca đồ thị).
+**Đồ thị đỡ rối (24/9, 0.1.152):** Bi gửi ảnh app "rối quá" — nhãn là tiêu đề 47–77 ký tự đè nhau, cắt ở mép; thực thể
+(xanh lá) với khái niệm (xanh ngọc) gần trùng màu; chú thích liệt kê cả loại không có. Sửa: `doThi` trả `ten` = tên
+ngắn (dòng `ngan:` trong YAML, không có thì `tenNgan()` cắt: bỏ (…), lấy trước " — ", bỏ đuôi công ty, Hợp đồng→HĐ,
+≤ 20 ký tự) và `ten_day` = tiêu đề đủ — app CŨ đọc `ten` nên đổi ngay không cần dựng app; QUY-UOC/lời dặn INGEST bắt
+ghi `ngan:`; `brain_kiem` có `thieu_ten_ngan` cho LINT đêm tự thêm. Bàn + app (bản dựng sau): bảy màu tách bạch, chú
+thích chỉ loại đang có, chi tiết hiện tiêu đề đủ; app thêm lề ngang (chấm không sát mép), khung cao 360.
 **Tự khám mạng (24/9, 0.1.149):** sinh ra từ buổi sáng 24/9 — máy nhà đem lên văn phòng không có mạng, mười mấy vòng
 "gõ lệnh này rồi chụp màn hình" mới ra được dây cắm vào cổng WAN của cục mesh. `axle net kiem [--json]`
 (`core/lib/kiem-mang.py`, không cần sudo, ~1 giây khi mạng ổn) khám lần lượt dây/Wi-Fi → IPv4 → router (ping + bảng láng

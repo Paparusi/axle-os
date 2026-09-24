@@ -45,8 +45,9 @@ BRAIN_DIR = os.environ.get("AXLE_BRAIN_DIR", os.path.expanduser("~/Axle/Brain"))
 APP_JSON = os.environ.get("AXLE_APP_JSON", "/etc/axle/app.json")   # {"relay": …} — bản cài công khai chưa có, phải đặt tay
 BRAIN_JS = os.environ.get("AXLE_BRAIN_JS", "/opt/axle/mcp/brain.js")   # đồ thị liên kết lấy CÙNG một nguồn với app (doThi)
 NODE = os.environ.get("AXLE_NODE", "/usr/bin/node")
-MAU_LOAI = {"source": (0x60, 0xA5, 0xFA), "entity": (0x34, 0xD3, 0x99), "project": (0xF5, 0x9E, 0x0B), "decision": (0xA7, 0x8B, 0xFA),
-            "learning": (0xFB, 0xBF, 0x24), "concept": (0x2D, 0xD4, 0xBF), "thieu": (0xF8, 0x71, 0x71)}
+# Bảy màu phải tách bạch (24/9: thực thể xanh lá với khái niệm xanh ngọc gần như trùng, dự án cam với bài học vàng cũng thế)
+MAU_LOAI = {"source": (0x60, 0xA5, 0xFA), "entity": (0x34, 0xD3, 0x99), "project": (0xFB, 0x92, 0x3C), "decision": (0xA7, 0x8B, 0xFA),
+            "learning": (0xFA, 0xCC, 0x15), "concept": (0xF4, 0x72, 0xB6), "thieu": (0xF8, 0x71, 0x71)}
 TEN_LOAI = {"source": "Nguồn", "entity": "Thực thể", "project": "Dự án", "decision": "Quyết định", "learning": "Bài học",
             "concept": "Khái niệm", "thieu": "Thiếu trang"}
 KHUNG_DO_THI = (1000, 500)   # xếp một lần trong khung 2:1 (~ thẻ 680×340 trên Bàn), lúc vẽ co đều cho vừa widget
@@ -638,12 +639,8 @@ class CuaSo(Adw.ApplicationWindow):
         self.nao_do_thi = DoThiBrain(self.chon_trang_nao) if CO_CAIRO else None
         if self.nao_do_thi:
             noi0.append(self.nao_do_thi)
-        chu_thich = Gtk.Box(spacing=12)
-        for loai in ("source", "entity", "project", "decision", "learning", "concept", "thieu"):
-            c = MAU_LOAI[loai]
-            chu_thich.append(Gtk.Label(use_markup=True, css_classes=["dim-label", "caption"],
-                                       label=f'<span foreground="#{c[0]:02X}{c[1]:02X}{c[2]:02X}">●</span> {TEN_LOAI[loai]}'))
-        noi0.append(chu_thich)
+        self.nao_chu_thich = Gtk.Box(spacing=12)   # chỉ những loại đang có trong đồ thị — vẽ lại mỗi lần nạp
+        noi0.append(self.nao_chu_thich)
         self.nao_chon = Gtk.Label(label="Chấm một trang để xem nó nối với ai.", xalign=0, wrap=True, css_classes=["dim-label"])
         noi0.append(self.nao_chon)
         hang_nut = Gtk.Box(spacing=8)
@@ -703,6 +700,13 @@ class CuaSo(Adw.ApplicationWindow):
 
     def dat_do_thi_nao(self, g, vt):
         self.nao_do_thi.dat(g, vt)
+        self.don(self.nao_chu_thich)
+        co = {n.get("loai") for n in (g or {}).get("nodes", [])}
+        for loai in ("source", "entity", "project", "decision", "learning", "concept", "thieu"):
+            if loai in co:
+                c = MAU_LOAI[loai]
+                self.nao_chu_thich.append(Gtk.Label(use_markup=True, css_classes=["dim-label", "caption"],
+                                                    label=f'<span foreground="#{c[0]:02X}{c[1]:02X}{c[2]:02X}">●</span> {TEN_LOAI[loai]}'))
         self.chon_trang_nao(None)
         if g is None:
             self.nao_chon.set_label("Chưa vẽ được liên kết — máy cần node và /opt/axle/mcp/brain.js (bản Axle đầy đủ).")
@@ -722,7 +726,7 @@ class CuaSo(Adw.ApplicationWindow):
             return
         self.nao_nut_hoi.set_label("Tạo trang này" if n["loai"] == "thieu" else "Hỏi Bàn về trang này")
         hx = [self.nao_do_thi.ten(h) for h in sorted(self.nao_do_thi.hang_xom(n["id"]))]
-        chu = f"{n['ten']} · {TEN_LOAI.get(n['loai'], n['loai'])} · {n.get('so_link', 0)} liên kết"
+        chu = f"{n.get('ten_day') or n['ten']} · {TEN_LOAI.get(n['loai'], n['loai'])} · {n.get('so_link', 0)} liên kết"
         if n.get("mo_ta"):
             chu += f"\n{n['mo_ta']}"
         if hx:

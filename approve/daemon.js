@@ -561,7 +561,7 @@ const app = createAppChannel({
           return app.sendTo(d.id, { type: 'hoi-result', ok: false, text: `Không lấy được tệp từ trạm (${e.message}) — gửi lại nhé.` });
         }
       }
-      cauDay = `${cau}\n\n(Đính kèm ${tep.length} tệp, đã vào Bộ não Axle (${brain}/raw/${thang}/) — đọc bằng công cụ Read; .xlsx/.docx là nhị phân, hãy đọc bản CSV/văn bản đã đổi:\n${dong.join('\n')}\nSau khi trả lời, INGEST theo QUY-UOC.md (brain_index) bằng brain_ghi: trang wiki/sources/<slug>.md, trang thực thể/dự án liên quan, dòng trong wiki/index.md và wiki/log.md. Nối trang theo mục "Nối trang" của QUY-UOC: tài liệu mới không link thẳng tài liệu cũ chỉ vì chung một bên.)`;
+      cauDay = `${cau}\n\n(Đính kèm ${tep.length} tệp, đã vào Bộ não Axle (${brain}/raw/${thang}/) — đọc bằng công cụ Read; .xlsx/.docx là nhị phân, hãy đọc bản CSV/văn bản đã đổi:\n${dong.join('\n')}\nSau khi trả lời, INGEST theo QUY-UOC.md (brain_index) bằng brain_ghi: trang wiki/sources/<slug>.md, trang thực thể/dự án liên quan, dòng trong wiki/index.md và wiki/log.md. Nối trang theo mục "Nối trang" của QUY-UOC: tài liệu mới không link thẳng tài liệu cũ chỉ vì chung một bên. Mỗi trang có dòng ngan: (tên ngắn ≤ 20 ký tự, vd HĐ Omron) trong YAML đầu trang.)`;
     }
     // 30 phút: Claude có thể phải chờ chủ duyệt (10 phút/yêu cầu) rồi làm tiếp. Không qua bash -l: bị giết thì bash in
     // "Session terminated, killing shell…" lên app (thấy 21/9); axle tự tìm claude ở ~/.local/bin, không cần profile.
