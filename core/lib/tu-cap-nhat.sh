@@ -19,6 +19,8 @@ SYSTEMCTL="${AXLE_SYSTEMCTL:-systemctl}"
 DV_LOI="${AXLE_DV_LOI:-axle-approve axle-mcp-http axle-vault}"
 KHAM_LAN="${AXLE_KHAM_LAN:-18}"          # 18 × 5 giây = 90 giây
 KHAM_NGHI="${AXLE_KHAM_NGHI:-5}"
+THU_LAI="${AXLE_THU_LAI:-3}"             # hỏng vì MẠNG trước khi thay bản → chờ rồi thử lại (24/9 19:13: chập DNS một lúc
+THU_LAI_NGHI="${AXLE_THU_LAI_NGHI:-60}"  # "Could not resolve host: github.com" là mất nguyên một đêm cập nhật)
 
 ban() { cut -d' ' -f1 "$OPT/VERSION" 2>/dev/null || echo "?"; }
 ghi() {   # ghi <ket_qua> <tu> <len> <ghi_chu> <chi_tiet>
@@ -74,10 +76,19 @@ if [ -s "$BO_QUA" ]; then
 fi
 
 RA="$(mktemp)"; trap 'rm -f "$RA"' EXIT
-if [ -n "${AXLE_CAI:-}" ]; then bash -c "$AXLE_CAI" >"$RA" 2>&1; else bash "$OPT/core/install.sh" --update </dev/null >"$RA" 2>&1; fi
-MA=$?
-cat "$RA"
-LEN="$(ban)"
+cai() { if [ -n "${AXLE_CAI:-}" ]; then bash -c "$AXLE_CAI" >"$RA" 2>&1; else bash "$OPT/core/install.sh" --update </dev/null >"$RA" 2>&1; fi; }
+lan=1
+while :; do
+  cai; MA=$?
+  cat "$RA"
+  LEN="$(ban)"
+  # Chưa thay bản mà hỏng vì mạng (không tra được tên, không nối được, quá giờ) → nghỉ rồi thử lại; lỗi khác thì thôi
+  [ "$MA" != 0 ] && [ "$LEN" = "$TU" ] && [ "$lan" -lt "$THU_LAI" ] \
+    && grep -qiE 'resolve host|Failed to connect|timed out|Connection reset|Could not connect|Network is unreachable|curl: \((6|7|28|35|56)\)' "$RA" || break
+  echo "→ mạng trục trặc — thử lại sau ${THU_LAI_NGHI} giây (lần $((lan + 1))/$THU_LAI)"
+  sleep "$THU_LAI_NGHI"
+  lan=$((lan + 1))
+done
 if [ "$LEN" = "$TU" ]; then
   # Không thay bản: đã mới nhất, hoặc hỏng TRƯỚC khi thay (mạng, chữ ký sai, gói hỏng) — máy vẫn nguyên như cũ
   if [ "$MA" = 0 ]; then ghi kiem "$TU" "$TU" "" "$(tail -n 1 "$RA")"

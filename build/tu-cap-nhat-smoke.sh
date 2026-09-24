@@ -9,7 +9,7 @@ ok() { if [ "$1" = 0 ]; then echo "  ✓ $2"; else echo "  ✗ $2"; fail=$((fail
 chk() { if eval "$1"; then ok 0 "$2"; else ok 1 "$2"; fi; }
 
 export AXLE_OPT="$T/opt/axle" AXLE_TU_CAP_NHAT_CFG="$T/cfg.json" AXLE_CAP_NHAT_LOG="$T/cap-nhat.jsonl" AXLE_CAP_NHAT_BO_QUA="$T/bo-qua"
-export AXLE_RELEASE_SOURCE_FILE="$T/nguon" AXLE_KHAM_LAN=2 AXLE_KHAM_NGHI=0 AXLE_DV_LOI="axle-approve axle-vault"
+export AXLE_RELEASE_SOURCE_FILE="$T/nguon" AXLE_KHAM_LAN=2 AXLE_KHAM_NGHI=0 AXLE_DV_LOI="axle-approve axle-vault" AXLE_THU_LAI_NGHI=0
 # systemctl giả: mọi dịch vụ đang bật; "active" trừ khi tên nằm trong $T/dv-hong
 cat > "$T/systemctl" <<EOF
 #!/bin/bash
@@ -25,7 +25,11 @@ doi_ban() { rm -rf "\$O.prev"; mv "\$O" "\$O.prev"; mkdir -p "\$O"; echo "0.1.16
   printf '{"version": "0.1.164", "ghi_chu": "Chu\\\\u1ed9t ph\\\\u1ea3i trong Files."}' > "\$O/RELEASE.json"; }
 case "\$(cat "$T/che-do")" in
   moi-nhat) echo "Đang ở bản mới nhất (0.1.163)"; exit 0 ;;
-  mang) echo "✗ Không tải được https://x/latest.json"; exit 1 ;;
+  mang) echo "curl: (6) Could not resolve host: github.com"; echo "✗ Không tải được https://x/latest.json"; exit 1 ;;
+  mang-roi-ok) n=\$(cat "$T/dem" 2>/dev/null || echo 0); echo \$((n + 1)) > "$T/dem"
+    if [ "\$n" -lt 1 ]; then echo "curl: (6) Could not resolve host: github.com"; exit 1; fi
+    doi_ban; echo "✓ Axle Server 0.1.164 đã sẵn sàng"; exit 0 ;;
+  chu-ky) echo "✗ CHỮ KÝ SAI — dừng"; echo 1 >> "$T/dem"; exit 1 ;;
   ok) doi_ban; echo "✓ Axle Server 0.1.164 đã sẵn sàng"; exit 0 ;;
   dung-loi) doi_ban; echo "✗ provision lỗi"; exit 1 ;;
   mat-ban-cu) doi_ban; rm -rf "\$O.prev"; exit 1 ;;
@@ -50,6 +54,13 @@ chk "[ $m = 0 ] && [ \$(cuoi ket_qua) = kiem ] && [ \$(ban) = 0.1.163 ]" "đã m
 lai; echo mang > "$T/che-do"; m=$(chay)
 chk "[ $m = 1 ] && [ \$(cuoi ket_qua) = loi ] && [ \$(ban) = 0.1.163 ] && [ ! -e '$AXLE_OPT.hong' ] && cuoi chi_tiet | grep -q latest.json" \
   "mất mạng trước khi thay → ghi 'loi' kèm lý do, máy nguyên như cũ, không quay về"
+
+lai; rm -f "$T/dem"; echo mang-roi-ok > "$T/che-do"; m=$(chay)
+chk "[ $m = 0 ] && [ \$(cuoi ket_qua) = ok ] && [ \$(cat '$T/dem') = 2 ] && grep -q 'thử lại' '$T/ra'" "chập mạng lần đầu → nghỉ rồi thử lại, lần sau lên được"
+lai; rm -f "$T/dem"; echo mang > "$T/che-do"; m=$(chay)
+chk "[ $m = 1 ] && [ \$(grep -c 'thử lại sau' '$T/ra') = 2 ] && [ \$(cuoi ket_qua) = loi ]" "mất mạng hẳn → thử đủ 3 lần rồi ghi 'loi'"
+lai; rm -f "$T/dem"; echo chu-ky > "$T/che-do"; m=$(chay)
+chk "[ $m = 1 ] && [ \$(wc -l < '$T/dem') = 1 ]" "lỗi không phải mạng (chữ ký sai) → không thử lại"
 
 lai; echo ok > "$T/che-do"; m=$(chay)
 chk "[ $m = 0 ] && [ \$(cuoi ket_qua) = ok ] && [ \$(cuoi tu) = 0.1.163 ] && [ \$(cuoi len) = 0.1.164 ] && [ \"\$(cuoi ghi_chu)\" = 'Chuột phải trong Files.' ] && [ \$(ban) = 0.1.164 ]" \
