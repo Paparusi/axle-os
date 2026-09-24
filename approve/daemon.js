@@ -1021,17 +1021,20 @@ function chayHangViec() {
   dangViec = p;
   publishBan();                 // dang_hoi tính cả việc đang chạy → `axle update` chờ nó xong
   const bd = Date.now();
+  // stdout = câu trả lời; stderr (cảnh báo của Claude Code, vd "Permission deny rule … matches no known tool") để riêng —
+  // 24/9 lượt thử đầu trộn chung nên dòng cảnh báo nằm đầu kết quả gửi lên điện thoại
   let ra = '';
-  const them = (b) => { if (ra.length < 60000) ra += b; };
-  p.stdout.on('data', them);
-  p.stderr.on('data', them);
+  let loi = '';
+  p.stdout.on('data', (b) => { if (ra.length < 60000) ra += b; });
+  p.stderr.on('data', (b) => { if (loi.length < 4000) loi += b; });
   log({ lich: 'chạy việc', ten: muc.ten });
-  p.on('error', (e) => { ra += `\n✗ ${e.message}`; });
+  p.on('error', (e) => { loi += `\n✗ ${e.message}`; });
   p.on('close', (code) => {
     dangViec = null;
     publishBan();
-    const kq = ra.trim();
-    const xong = code === 0 && kq.length > 0;
+    const xong = code === 0 && ra.trim().length > 0;
+    const kq = xong ? ra.trim() : `${ra.trim()}\n${loi.trim()}`.trim();
+    if (loi.trim()) log({ lich: 'claude báo', ten: muc.ten, stderr: loi.trim().slice(0, 300) });
     let tep = null;
     try {        // bản đầy đủ: ~/Axle/Lich/<tên>/<YYYY-MM-DD HH.MM>.md, của chủ
       const { uid, gid } = ownerIds();

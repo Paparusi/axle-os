@@ -769,7 +769,7 @@ claude_cmd() {
   # ngay chứ không rung điện thoại lúc nửa đêm; cấm hẳn lệnh + sửa tệp; không cho tự đặt thêm lịch.
   if [ -n "$lich" ]; then
     exec "$bin" -p "$cau" --mcp-config "$CLAUDE_MCP_CFG" \
-      --disallowedTools "AskUserQuestion,Bash,Write,Edit,MultiEdit,NotebookEdit${lt:+,$lt}" \
+      --disallowedTools "AskUserQuestion,Bash,Write,Edit,NotebookEdit${lt:+,$lt}" \
       --allowedTools "Read,Grep,Glob,LS,WebFetch,WebSearch${ro:+,$ro},${bt:-mcp__axle__brain_doc}" \
       --append-system-prompt "Đây là VIỆC ĐỊNH KỲ Axle tự chạy theo lịch trên máy của chủ; chủ không ngồi đó. Chỉ đọc, tìm, tra web, đọc/ghi Bộ não (~/Axle/Brain) — không chạy lệnh, không sửa tệp, không hỏi lại ai. Trả lời bằng tiếng Việt, gọn cho màn hình điện thoại: tối đa 12 dòng, số liệu cụ thể, ghi nguồn." </dev/null
   fi
