@@ -122,6 +122,39 @@ try {
     `sapToi: lần 10/10 còn 3 ngày → đã vào khoảng nhắc; tên trang ngắn (${JSON.stringify(tk[0])})`);
   ok(st.every((x, i) => i === 0 || st[i - 1].ngay <= x.ngay) && !st.some((x) => x.viec.startsWith('Hết hạn hợp đồng Omron')), 'sapToi: xếp theo ngày, ngoài 40 ngày thì không có');
   ok(/Đã xoá/.test(b.xoaMoc(thue.id)) && b.docMoc().length === 2 && /Không có/.test(loi(() => b.xoaMoc(thue.id))), 'xoaMoc: xoá được, xoá lại thì báo không có');
+
+  // ---- Đưa tệp vào Bộ não (themTep) — một đường cho điện thoại, Bàn, Files ----
+  const NG = path.join(D, 'ngoai'); mkdirSync(NG, { recursive: true });
+  writeFileSync(path.join(NG, 'Hợp đồng thuê kho (bản ký).pdf'), '%PDF-1.4 hop dong thue kho');
+  writeFileSync(path.join(NG, 'ban-sao.pdf'), '%PDF-1.4 hop dong thue kho');            // cùng nội dung, khác tên
+  writeFileSync(path.join(NG, 'bang-luong.xlsx'), 'PK xlsx');
+  const goiDoi = [];
+  const doiGia = async (f, ra) => { goiDoi.push(f); mkdirSync(ra, { recursive: true }); writeFileSync(path.join(ra, 'noi-dung.txt'), 'chữ'); };
+  const t1 = await b.themTep(path.join(NG, 'Hợp đồng thuê kho (bản ký).pdf'), { thietBi: 'máy này', cau: 'đưa vào từ Files', doi: doiGia });
+  ok(t1.moi && /^raw\/\d{4}-\d{2}\/\d+-Hop-dong-thue-kho-ban-ky\.pdf$/.test(t1.duong) && existsSync(t1.abs) && t1.ten === 'Hợp đồng thuê kho (bản ký).pdf',
+    `themTep: vào raw/YYYY-MM/<ms>-<tên không dấu> (${t1.duong})`);
+  ok(goiDoi.length === 1 && t1.doi.length === 1 && t1.doi[0].endsWith('.doi/noi-dung.txt'), 'themTep: gọi đổi bản đọc được, trả bản đổi');
+  const dongIdx = readFileSync(path.join(b.BRAIN, 'raw/.index.jsonl'), 'utf8').trim().split('\n').map((x) => JSON.parse(x));
+  const cuoi = dongIdx[dongIdx.length - 1];
+  ok(cuoi.duong === t1.duong && cuoi.ten === t1.ten && cuoi.thiet_bi === 'máy này' && cuoi.cau === 'đưa vào từ Files' && /^[0-9a-f]{64}$/.test(cuoi.sha) && cuoi.luc,
+    'themTep: một dòng raw/.index.jsonl đủ trường như tệp điện thoại gửi');
+  const t2 = await b.themTep(path.join(NG, 'ban-sao.pdf'), { doi: doiGia });
+  ok(!t2.moi && t2.duong === t1.duong && t2.da_co_tu && goiDoi.length === 1, 'themTep: trùng nội dung → dùng lại tệp cũ, không chép, không đổi lại');
+  const soDong = readFileSync(path.join(b.BRAIN, 'raw/.index.jsonl'), 'utf8').trim().split('\n').length;
+  ok(soDong === dongIdx.length, 'themTep: tệp trùng không thêm dòng index');
+  const chowned = [];
+  const t3 = await b.themTep(null, { bytes: Buffer.from('PK xlsx khac'), ten: '../../Bảng lương T9.xlsx', thietBi: 'iPhone', doi: doiGia, chown: (p) => chowned.push(p), khoiTao: false, i: 2 });
+  ok(t3.moi && t3.duong.endsWith('-Bang-luong-T9.xlsx') && chowned.length === 3 && chowned.some((x) => x.endsWith('.index.jsonl')),
+    `themTep (điện thoại): nhận byte, tên không leo thư mục, móc chown cho thư mục + tệp + index (${chowned.length})`);
+  const loiThem = async (f, o) => { try { await b.themTep(f, o); return ''; } catch (e) { return e.message; } };
+  ok(/không phải tệp/.test(await loiThem(NG)) && /không có tệp/.test(await loiThem(path.join(NG, 'khong-co.pdf'))), 'themTep: thư mục / tệp không có → báo rõ');
+  writeFileSync(path.join(NG, 'to.pdf'), Buffer.alloc(2 * 1024 * 1024));
+  const loiTo = await loiThem(path.join(NG, 'to.pdf'), { toiDa: 1024 * 1024 });
+  ok(/to\.pdf: 2 MB — quá 1 MB/.test(loiTo) && /quá 12MB/.test(await loiThem(null, { bytes: Buffer.alloc(13 * 1024 * 1024), ten: 'to.pdf', toiDa: 12 * 1024 * 1024 })),
+    `themTep: quá giới hạn → báo (máy: ${loiTo}; điện thoại 12 MB)`);
+  const l2 = b.loiDanIngest([t1, t3]);
+  ok(l2.startsWith('(Đính kèm 2 tệp') && l2.includes(t1.abs) && l2.includes('bản đọc được') && l2.includes('brain_index_them') && l2.includes('brain_moc_them') && !l2.includes('dòng trong wiki/index.md'),
+    'loiDanIngest: kể từng tệp + bản đọc được, dặn brain_index_them (không nối tay index.md), rút mốc');
 } finally {
   // brain_ghi commit git ở nền → chờ nó xong, dọn có thử lại (không thì rmdir .git/objects đua với git: ENOTEMPTY)
   await new Promise((r) => setTimeout(r, 800));

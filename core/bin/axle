@@ -65,8 +65,9 @@ axle tay cuaso|chup|bam N|go N "chữ"|doc N|mo <app>   tay cho mọi ứng dụ
 sudo axle phanxa xuat [--tu ngày]   xuất nhãn (chủ đã quyết gì) cho lớp phản xạ
 axle brain ds|tim <từ>|mo|lint      Bộ não Axle (~/Axle/Brain): tài liệu gửi lên + wiki Claude tự bảo trì; lint = dọn đêm
 axle brain moc [quet]               mốc có ngày rút từ giấy tờ (hạn trả tiền, hết hạn…) sắp tới; quet = Claude đọc lại giấy tờ cũ
+axle brain them [--nap] <tệp…>      đưa tệp trên máy vào Bộ não; --nap: Claude đọc, ghi trang wiki, rút mốc ngay (--bao: xong thì báo)
                          xem và duyệt yêu cầu ngay tại máy (dùng được cả khi mọi kênh khác hỏng)
-axle claude "câu hỏi" [--tiep] [--dong]
+axle claude "câu hỏi" [--tiep] [--dong] [--tep <tệp>]…
                          Claude Code chạy TRÊN máy này: đọc/tìm thì làm ngay, còn ghi tệp/chạy lệnh
                          thì hiện lên điện thoại của mày để duyệt (Face ID). --tiep: nối phiên trước
 axle bench [--nghiem]    đo cái giá Axle bắt máy trả: RAM lúc rảnh, khởi động, snapshot, đĩa
@@ -716,11 +717,22 @@ dangnhap_cmd() {
 #   --tiep: nối tiếp phiên trước (giữ mạch hội thoại).
 CLAUDE_MCP_CFG='{"mcpServers":{"axle":{"command":"/usr/local/bin/axle","args":["mcp","--as","claude"]}}}'
 claude_cmd() {
-  local bin tiep="" dong="" phien="" hoi=()
+  local bin tiep="" dong="" phien="" hoi=() tep=()
   for bin in "$HOME/.local/bin/claude" /usr/local/bin/claude /usr/bin/claude; do [ -x "$bin" ] && break; bin=""; done
   [ -n "$bin" ] || { echo "Chưa cài Claude Code trên máy này (npm i -g @anthropic-ai/claude-code, rồi đăng nhập một lần)" >&2; exit 1; }
-  while [ $# -gt 0 ]; do case "$1" in --tiep) tiep=1 ;; --dong) dong=1 ;; --phien) phien="${2:-}"; shift ;; *) hoi+=("$1") ;; esac; shift; done
-  [ "${#hoi[@]}" -gt 0 ] || { echo 'axle claude "câu hỏi" [--tiep] [--dong] [--phien <uuid>]' >&2; exit 2; }
+  while [ $# -gt 0 ]; do case "$1" in --tiep) tiep=1 ;; --dong) dong=1 ;; --phien) phien="${2:-}"; shift ;; --tep) tep+=("${2:-}"); shift ;; *) hoi+=("$1") ;; esac; shift; done
+  [ "${#hoi[@]}" -gt 0 ] || { echo 'axle claude "câu hỏi" [--tiep] [--dong] [--phien <uuid>] [--tep <tệp>]…' >&2; exit 2; }
+  local cau="${hoi[*]}"
+  # --tep (Bàn: đính kèm / kéo thả / "Hỏi Axle về tệp này" trong Files): tệp vào Bộ não bằng CÙNG hàm với tệp điện
+  # thoại gửi (brain.js themTep), câu hỏi kèm lời dặn đọc bản đã đổi + INGEST (brain.js loiDanIngest).
+  if [ "${#tep[@]}" -gt 0 ]; then
+    local kq; kq="$(/usr/bin/node /opt/axle/mcp/brain-them.mjs --cau "$cau" -- "${tep[@]}")" || true
+    jq -r '.loi[]? | "✗ \(.loi)"' <<<"$kq" 2>/dev/null || true
+    local ld; ld="$(jq -r '.loi_dan // ""' <<<"$kq" 2>/dev/null)" || ld=""
+    [ -n "$ld" ] || { echo "✗ Không đưa được tệp nào vào Bộ não — không hỏi." >&2; exit 1; }
+    jq -r '.ds[] | "📎 \(.ten) → Bộ não\(if .moi then "" else " (đã có từ \(.da_co_tu[0:10]))" end)"' <<<"$kq"
+    cau+=$'\n\n'"$ld"
+  fi
   # --phien <uuid>: mỗi CUỘC một id riêng (app một, Bàn một) — trước đây --tiep = --continue "cuộc gần nhất trong thư
   # mục", Bàn và app hỏi chen nhau là lẫn mạch. Không --phien thì giữ nếp cũ.
   local mach=()
@@ -749,11 +761,11 @@ claude_cmd() {
   # --dong (Bàn dùng): sự kiện JSON từng dòng → bộ lọc in chữ trả lời NGAY khi có + mỗi lần dùng công cụ một dòng "→".
   # </dev/null: claude chờ stdin 3 giây nếu thấy ống dẫn (đo 21/9) — Bàn/cron không có gì để đưa vào.
   if [ -n "$dong" ]; then
-    "$bin" -p "${hoi[*]}" "${mach[@]}" --output-format stream-json --verbose "${opts[@]}" </dev/null \
+    "$bin" -p "$cau" "${mach[@]}" --output-format stream-json --verbose "${opts[@]}" </dev/null \
       | /usr/bin/python3 /opt/axle/core/desktop/claude-dong.py || exit "${PIPESTATUS[0]}"
     exit 0
   fi
-  exec "$bin" -p "${hoi[*]}" "${mach[@]}" "${opts[@]}" </dev/null
+  exec "$bin" -p "$cau" "${mach[@]}" "${opts[@]}" </dev/null
 }
 
 desktop_cmd() {   # sudo axle desktop on|off|status — lớp giao diện (docs/DESKTOP.md)
@@ -880,7 +892,14 @@ app_cmd() {   # sudo axle app setup|pair|confirm|devices|remove|terminal
   esac
 }
 
-brain_cmd() {   # axle brain [ds|tim <từ khoá>|mo|duong|dothi] — Bộ não Axle của tài khoản này (~/Axle/Brain), không cần root
+thong_bao() {   # thông báo trên màn hình chủ (GNOME) — chỉ khi có phiên đồ hoạ; không có thì im
+  [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ] || { [ -S "/run/user/$(id -u)/bus" ] && export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"; } || return 0
+  if command -v notify-send >/dev/null; then notify-send -a Axle -i axle "$1" "${2:-}" 2>/dev/null || true
+  else gdbus call --session --dest org.freedesktop.Notifications --object-path /org/freedesktop/Notifications \
+    --method org.freedesktop.Notifications.Notify Axle 0 axle "$1" "${2:-}" '[]' '{}' 8000 >/dev/null 2>&1 || true; fi
+}
+
+brain_cmd() {   # axle brain [ds|tim <từ khoá>|mo|duong|dothi|them] — Bộ não Axle của tài khoản này (~/Axle/Brain), không cần root
   local B="${AXLE_BRAIN_DIR:-$HOME/Axle/Brain}"
   [ -f "$B/QUY-UOC.md" ] || bash /opt/axle/core/desktop/brain-init.sh "$B" >/dev/null
   case "${1:-ds}" in
@@ -907,7 +926,36 @@ brain_cmd() {   # axle brain [ds|tim <từ khoá>|mo|duong|dothi] — Bộ não 
             [ -r "$HOME/.config/axle/claude.env" ] || { echo "Máy chưa có token Claude (~/.config/axle/claude.env) — bỏ qua dọn đêm"; exit 0; }
             AXLE_BRAIN_DIR="$B" /usr/bin/node -e 'import("/opt/axle/mcp/brain.js").then((b) => { const n = b.gonIndex(); if (n) console.log(`Đã gộp ${n} mục trùng trong index.md`); })' || true
             exec timeout 1500 /usr/local/bin/axle claude "Làm LINT Bộ não Axle theo QUY-UOC.md. Bước 1: gọi brain_kiem (kiểm định máy móc: link hỏng, trang mồ côi, trang mỏng, thiếu YAML đầu trang, tài liệu chưa có trang) — tin kết quả đó, đừng tự nhìn rồi đoán. Bước 2: sửa từng mục nó liệt kê bằng brain_ghi / brain_index_them (không đụng raw/; tài liệu chưa có trang thì đọc bản đã đổi trong raw/ rồi tạo trang sources; nguon_noi_nguon = hai tài liệu link thẳng nhau: nếu không phải sửa đổi/thay thế/phụ lục của nhau thì chuyển chi tiết sang trang thực thể chung và bỏ link thẳng; thieu_ten_ngan = trang tiêu đề dài chưa có tên ngắn: thêm dòng ngan: ≤ 20 ký tự, không trùng trang khác, vào YAML đầu trang). Bước 3: brain_kiem lại, rồi brain_log một dòng tóm tắt. Cuối cùng trả lời 3 dòng: đã sửa gì, còn gì cần chủ quyết." --dong ;;
-    *)      echo "axle brain ds | tim <từ khoá> | mo | duong | dothi | lint" >&2; exit 2 ;;
+    them)   # đưa tệp TRÊN MÁY vào Bộ não (Bàn: Thêm tài liệu · Files: chuột phải "Đưa vào Bộ não Axle"): cùng khuôn raw/ với
+            # tệp điện thoại gửi. --nap: nhờ Claude đọc + ghi trang wiki + rút mốc ngay; --bao: chạy nền, xong hiện thông báo.
+            shift
+            local nap="" bao="" tep=()
+            while [ $# -gt 0 ]; do case "$1" in --nap) nap=1 ;; --bao) bao=1 ;; --) shift; tep+=("$@"); break ;; *) tep+=("$1") ;; esac; shift; done
+            [ "${#tep[@]}" -gt 0 ] || { echo 'axle brain them [--nap] [--bao] <tệp…>' >&2; exit 2; }
+            local kq; kq="$(AXLE_BRAIN_DIR="$B" /usr/bin/node /opt/axle/mcp/brain-them.mjs -- "${tep[@]}")" || true
+            jq -r '.loi[]? | "✗ \(.loi)"' <<<"$kq" >&2 2>/dev/null || true
+            jq -r '.ds[]? | "✓ \(.ten) → \(.duong)\(if .moi then "" else " (đã có từ \(.da_co_tu[0:10]))" end)"' <<<"$kq" 2>/dev/null || true
+            local ten; ten="$(jq -r '[.ds[]?.ten] | join(", ")' <<<"$kq" 2>/dev/null)" || ten=""
+            if [ -z "$ten" ]; then
+              [ -n "$bao" ] && thong_bao "Chưa đưa được vào Bộ não" "$(jq -r '[.loi[]?.loi] | join("\n")' <<<"$kq" 2>/dev/null)"
+              exit 1
+            fi
+            [ -n "$nap" ] || exit 0
+            local cau; cau="Tài liệu mới đưa vào Bộ não ngay trên máy (Bàn hay chuột phải trong Files): tóm tắt mỗi tệp 2–3 câu cho chủ, nêu các mốc có ngày nếu có.
+
+$(jq -r .loi_dan <<<"$kq")"
+            # Một lần nạp một lúc: hai Claude cùng ghi wiki thì git đụng nhau (index.lock) — xếp hàng, chờ tối đa 30 phút
+            local nk="$HOME/.cache/axle/nap"; mkdir -p "$nk"
+            if [ -z "$bao" ]; then exec flock -w 1800 "$nk/.khoa" timeout 1500 /usr/local/bin/axle claude "$cau" --dong; fi
+            local log; log="$nk/$(date +%Y%m%d-%H%M%S)-$$.log"
+            if flock -w 1800 "$nk/.khoa" timeout 1500 /usr/local/bin/axle claude "$cau" --dong >"$log" 2>&1; then
+              thong_bao "Đã đưa vào Bộ não: $ten" "$(grep -v '^→ \|^— xong\|^✗\|^📎' "$log" | tr -s '[:space:]' ' ' | cut -c1-240)"
+            else
+              thong_bao "Axle chưa đọc xong: $ten" "Tệp đã nằm trong Bộ não nhưng Claude chưa ghi được trang. Trên Bàn hỏi: tóm tắt tài liệu mới. (nhật ký: $log)"
+              exit 1
+            fi
+            find "$nk" -name '*.log' -mtime +14 -delete 2>/dev/null || true ;;
+    *)      echo "axle brain ds | tim <từ khoá> | mo | duong | dothi | them <tệp…> | lint" >&2; exit 2 ;;
   esac
 }
 

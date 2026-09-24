@@ -7,9 +7,10 @@
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, appendFileSync } from 'node:fs';
-import { homedir, userInfo } from 'node:os';
+import { homedir, hostname, userInfo } from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
+import { tenTepAnToan } from '../approve/mota.js';
 
 export const BRAIN = process.env.AXLE_BRAIN_DIR || path.join(homedir(), 'Axle/Brain');
 const INIT = process.env.AXLE_BRAIN_INIT || '/opt/axle/core/desktop/brain-init.sh';
@@ -93,6 +94,84 @@ export function ghi(p, noiDung, cheDo = 'ghi', dir = BRAIN) {
   // git giữ lịch sử — chạy nền, hỏng thì bỏ (không có git cũng vẫn ghi được)
   execFile('git', ['-C', dir, 'add', '-A'], () => execFile('git', ['-C', dir, 'commit', '-qm', `Claude: ${cheDo} ${rel}`], () => {}));
   return rel;
+}
+
+// ---- Đưa tệp vào Bộ não: MỘT đường cho mọi ngả — điện thoại (bộ duyệt, root), Bàn / chuột phải trong Files /
+// `axle brain them` (chủ). raw/YYYY-MM/<ms>-<tên an toàn> (bất biến); trùng nội dung (sha256) thì dùng lại tệp cũ; bản
+// đọc được ở <tệp>.doi/ (doi-tep.sh: Excel→CSV từng sheet, Word→txt, PowerPoint→PDF, PDF→txt); mỗi tệp một dòng
+// raw/.index.jsonl {sha, duong, ten, luc, thiet_bi, cau}. Điện thoại tối đa 12 MB (trạm), trên máy tối đa 50 MB.
+export const TOI_DA_THEM = 50 * 1024 * 1024;
+const DOI_TEP = process.env.AXLE_DOI_TEP || '/opt/axle/core/desktop/doi-tep.sh';
+
+/** Đổi sẵn bản đọc được (chạy bằng chính tài khoản đang gọi; bộ duyệt root truyền `doi` riêng chạy bằng chủ).
+ *  Bất đồng bộ: LibreOffice mất vài giây tới cả phút — bộ duyệt không được đứng hình trong lúc đó. */
+export function doiTep(f, ra) {
+  if (!existsSync(DOI_TEP)) return Promise.resolve();
+  return new Promise((xong) => { execFile('timeout', ['110', 'bash', DOI_TEP, f, ra], () => xong()); });
+}
+
+function docIndexRaw(dir) {
+  try {
+    return readFileSync(path.join(dir, 'raw/.index.jsonl'), 'utf8').split('\n').filter(Boolean)
+      .map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+  } catch { return []; }
+}
+
+/**
+ * Đưa MỘT tệp vào raw/. `nguon` = đường tệp trên máy, hoặc `bytes` (tệp điện thoại gửi) kèm `ten`.
+ * Móc cho bộ duyệt chạy root: `chown(p)` cho thư mục/tệp/index vừa tạo, `doi(f, ra)` đổi bản đọc được bằng tài khoản chủ,
+ * `khoiTao: false` khi đã dựng Bộ não bằng tài khoản chủ (root dựng thì thư mục thuộc root).
+ * Trả { duong (tương đối Brain), abs, ten, moi, da_co_tu, doi: [tuyệt đối…] }.
+ */
+export async function themTep(nguon, { bytes, ten, thietBi = hostname(), cau = '', dir = BRAIN, doi = doiTep, chown = () => {},
+  khoiTao: dung = true, toiDa = TOI_DA_THEM, i = 1 } = {}) {
+  const tenGoc = String(ten || (nguon ? path.basename(nguon) : '') || `tep-${i}`);
+  if (!bytes) {
+    let st;
+    try { st = statSync(nguon); } catch { throw new Error(`${tenGoc}: không có tệp này`); }
+    if (!st.isFile()) throw new Error(`${tenGoc}: không phải tệp (thư mục thì chọn từng tệp bên trong)`);
+    if (st.size > toiDa) throw new Error(`${tenGoc}: ${(st.size / 1048576).toFixed(0)} MB — quá ${Math.round(toiDa / 1048576)} MB`);
+    bytes = readFileSync(nguon);
+  } else if (bytes.length > toiDa) throw new Error(`${tenGoc}: quá ${Math.round(toiDa / 1048576)}MB`);
+  if (dung) khoiTao(dir);
+  const sha = createHash('sha256').update(bytes).digest('hex');
+  const cu = docIndexRaw(dir).find((x) => x.sha === sha && x.duong && existsSync(path.join(dir, x.duong)));
+  let f;
+  if (cu) {
+    f = path.join(dir, cu.duong);
+  } else {
+    const thuMuc = path.join(dir, 'raw', new Date().toISOString().slice(0, 7));
+    mkdirSync(thuMuc, { recursive: true, mode: 0o700 });
+    chown(thuMuc);
+    const an = tenTepAnToan(tenGoc, i);
+    const ms = Date.now();
+    f = path.join(thuMuc, `${ms}-${an}`);
+    for (let k = 2; existsSync(f); k++) f = path.join(thuMuc, `${ms}-${k}-${an}`);   // hai tệp cùng tên trong một ms
+    writeFileSync(f, bytes, { mode: 0o600, flag: 'wx' });
+    chown(f);
+    try { await doi(f, `${f}.doi`); } catch { /* không đổi được: Claude đọc bản gốc (ảnh, PDF quét…) */ }
+    const indexFile = path.join(dir, 'raw/.index.jsonl');
+    appendFileSync(indexFile, `${JSON.stringify({ sha, duong: path.relative(dir, f), ten: tenGoc, luc: new Date().toISOString(),
+      thiet_bi: thietBi, cau: String(cau ?? '').slice(0, 200) })}\n`);
+    chown(indexFile);
+  }
+  let doiDs = [];
+  try { doiDs = readdirSync(`${f}.doi`).sort().map((x) => path.join(`${f}.doi`, x)); } catch { /* không có bản đổi */ }
+  return { duong: path.relative(dir, f), abs: f, ten: tenGoc, moi: !cu, da_co_tu: cu?.luc ?? null, doi: doiDs };
+}
+
+/** Một dòng kể tệp cho Claude: tên gốc → chỗ nằm (đã có từ ngày nào) ; bản đọc được. */
+export const dongTep = (t) => `· ${t.ten} → ${t.abs}${t.da_co_tu ? ` (đã có từ ${String(t.da_co_tu).slice(0, 10)})` : ''}${t.doi.length ? ` ; bản đọc được: ${t.doi.join(' , ')}` : ''}`;
+
+/** Lời dặn đi kèm câu hỏi khi có tệp mới — MỘT bản cho điện thoại lẫn Bàn/Files, theo QUY-UOC. */
+export function loiDanIngest(ds, dir = BRAIN) {
+  const thang = [...new Set(ds.map((t) => path.dirname(t.duong)))].map((d) => `${dir}/${d}/`).join(', ');
+  return `(Đính kèm ${ds.length} tệp, đã vào Bộ não Axle (${thang}) — đọc bằng công cụ Read; .xlsx/.docx là nhị phân, hãy đọc bản CSV/văn bản đã đổi:\n`
+    + `${ds.map(dongTep).join('\n')}\n`
+    + 'Sau khi trả lời, INGEST theo QUY-UOC.md (brain_index): brain_ghi trang wiki/sources/<slug>.md và trang thực thể/dự án liên quan, '
+    + 'rồi brain_index_them cho từng trang (KHÔNG nối tay vào index.md) và brain_log một dòng. Nối trang theo mục "Nối trang" của QUY-UOC: '
+    + 'tài liệu mới không link thẳng tài liệu cũ chỉ vì chung một bên. Mỗi trang có dòng ngan: (tên ngắn ≤ 20 ký tự, vd HĐ Omron) trong YAML đầu trang. '
+    + 'Tệp đã có từ trước thì chỉ cập nhật trang cũ nếu cần, đừng tạo trang trùng. Rút mọi việc có ngày (hạn trả tiền, hết hạn, báo trước) bằng brain_moc_them.)';
 }
 
 export function taiLieu(toiDa = 50, dir = BRAIN) {

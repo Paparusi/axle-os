@@ -20,7 +20,8 @@ import { buildDigest } from './digest.js';
 import { banChoApp, gopNhatKy, lenhCongCu, tenTepAnToan } from './mota.js';
 import { docTep as tepDoc, lietKe as tepLietKe } from './tep.js';
 import { CHU_KY as MAY_BAO_CHU_KY, danhGia as mayBaoDanhGia, doDac as mayBaoDoDac, locSuKien as mayBaoLoc } from './may-bao.js';
-import { choApp as brainChoApp, docMoc as brainDocMoc, doThi as brainDoThi, sapToi as brainSapToi, tim as brainTim } from '../mcp/brain.js';
+import { choApp as brainChoApp, docMoc as brainDocMoc, doThi as brainDoThi, loiDanIngest as brainLoiDanIngest, sapToi as brainSapToi,
+  themTep as brainThemTep, tim as brainTim } from '../mcp/brain.js';
 import { createAppChannel } from './app-channel.js';
 import { machineState } from './machine-state.js';
 import { requestHash } from '../app/proto.js';
@@ -549,51 +550,32 @@ const app = createAppChannel({
     if (!h.enabled) return app.sendTo(d.id, { type: 'hoi-result', ok: false, text: 'Hỏi Axle đang tắt trên máy. Bật: sudo axle app hoi on' });
     if (dangHoi.has(d.id)) return app.sendTo(d.id, { type: 'hoi-result', ok: false, text: 'Đang trả lời câu trước — bấm Dừng hoặc chờ xong' });
     const owner = ownerUser();
-    // Tệp đính kèm (D12/D13): lấy từ trạm → BỘ NÃO AXLE của chủ (~/Axle/Brain/raw/YYYY-MM/, vĩnh viễn, không dọn), trùng
-    // nội dung (sha256) thì dùng lại tệp cũ; đổi sẵn sang CSV/văn bản/PDF bằng LibreOffice dưới tài khoản chủ
-    // (doi-tep.sh) — Read không đọc được .xlsx/.docx nhị phân; rồi nhắc Claude INGEST vào wiki theo QUY-UOC.md.
+    // Tệp đính kèm (D12/D13): lấy từ trạm → BỘ NÃO AXLE của chủ (~/Axle/Brain/raw/YYYY-MM/, vĩnh viễn, không dọn) bằng
+    // CÙNG hàm với Bàn / Files (brain.js themTep): trùng nội dung (sha256) thì dùng lại tệp cũ; đổi sẵn sang CSV/văn
+    // bản/PDF bằng LibreOffice dưới tài khoản chủ (doi-tep.sh) — Read không đọc được .xlsx/.docx nhị phân; rồi nhắc
+    // Claude INGEST vào wiki theo QUY-UOC.md (brain.js loiDanIngest — cũng một bản cho mọi ngả).
     let cauDay = cau;
     if (tep?.length) {
       const brain = `/home/${owner}/Axle/Brain`;
-      const thang = new Date().toISOString().slice(0, 7);
-      const dir = path.join(brain, 'raw', thang);
       const { uid, gid } = ownerIds();
       const chown = (p) => { try { if (uid != null) chownSync(p, uid, gid); } catch { /* bỏ */ } };
+      const env = { ...process.env, HOME: `/home/${owner}` };
       try {
-        await runProc('runuser', ['-u', owner, '--', 'bash', '/opt/axle/core/desktop/brain-init.sh', brain], { env: { ...process.env, HOME: `/home/${owner}` } });
-        mkdirSync(dir, { recursive: true, mode: 0o700 });
-        chown(dir);
+        await runProc('runuser', ['-u', owner, '--', 'bash', '/opt/axle/core/desktop/brain-init.sh', brain], { env });
       } catch (e) { log({ warn: `Bộ não: ${e.message}` }); }
-      const indexFile = path.join(brain, 'raw/.index.jsonl');
-      let daCo = [];
-      try { daCo = readFileSync(indexFile, 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean); } catch { /* chưa có */ }
-      const dong = [];
+      const doi = (f, ra) => runProc('timeout', ['110', 'runuser', '-u', owner, '--', 'bash', '/opt/axle/core/desktop/doi-tep.sh', f, ra], { env });
+      const ds = [];
       for (const [i, t] of tep.entries()) {
         try {
           const bytes = await app.layBlob(t.id);
-          if (bytes.length > 12 * 1024 * 1024) throw new Error(`${t.ten}: quá 12MB`);
-          const sha = createHash('sha256').update(bytes).digest('hex');
-          const cu = daCo.find((x) => x.sha === sha && existsSync(path.join(brain, x.duong)));
-          let f;
-          if (cu) {
-            f = path.join(brain, cu.duong);
-          } else {
-            f = path.join(dir, `${Date.now()}-${tenTepAnToan(t.ten, i + 1)}`);
-            writeFileSync(f, bytes, { mode: 0o600 });
-            chown(f);
-            await runProc('timeout', ['110', 'runuser', '-u', owner, '--', 'bash', '/opt/axle/core/desktop/doi-tep.sh', f, `${f}.doi`], { env: { ...process.env, HOME: `/home/${owner}` } });
-            appendFileSync(indexFile, `${JSON.stringify({ sha, duong: path.relative(brain, f), ten: t.ten, luc: new Date().toISOString(), thiet_bi: d.name, cau: cap(cau, 200) })}\n`);
-            chown(indexFile);
-          }
-          let doi = [];
-          try { doi = readdirSync(`${f}.doi`).map((x) => path.join(`${f}.doi`, x)); } catch { /* không đổi được */ }
-          dong.push(`· ${t.ten} → ${f}${cu ? ` (đã có từ ${cu.luc.slice(0, 10)})` : ''}${doi.length ? ` ; bản đọc được: ${doi.join(' , ')}` : ''}`);
+          ds.push(await brainThemTep(null, { bytes, ten: t.ten, thietBi: d.name, cau, dir: brain, doi, chown, khoiTao: false,
+            toiDa: 12 * 1024 * 1024, i: i + 1 }));
         } catch (e) {
           log({ warn: `tệp đính kèm: ${e.message}` });
           return app.sendTo(d.id, { type: 'hoi-result', ok: false, text: `Không lấy được tệp từ trạm (${e.message}) — gửi lại nhé.` });
         }
       }
-      cauDay = `${cau}\n\n(Đính kèm ${tep.length} tệp, đã vào Bộ não Axle (${brain}/raw/${thang}/) — đọc bằng công cụ Read; .xlsx/.docx là nhị phân, hãy đọc bản CSV/văn bản đã đổi:\n${dong.join('\n')}\nSau khi trả lời, INGEST theo QUY-UOC.md (brain_index) bằng brain_ghi: trang wiki/sources/<slug>.md, trang thực thể/dự án liên quan, dòng trong wiki/index.md và wiki/log.md. Nối trang theo mục "Nối trang" của QUY-UOC: tài liệu mới không link thẳng tài liệu cũ chỉ vì chung một bên. Mỗi trang có dòng ngan: (tên ngắn ≤ 20 ký tự, vd HĐ Omron) trong YAML đầu trang. Rút mọi việc có ngày (hạn trả tiền, hết hạn, báo trước) bằng brain_moc_them.)`;
+      cauDay = `${cau}\n\n${brainLoiDanIngest(ds, brain)}`;
     }
     // 30 phút: Claude có thể phải chờ chủ duyệt (10 phút/yêu cầu) rồi làm tiếp. Không qua bash -l: bị giết thì bash in
     // "Session terminated, killing shell…" lên app (thấy 21/9); axle tự tìm claude ở ~/.local/bin, không cần profile.

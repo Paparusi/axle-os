@@ -103,6 +103,10 @@ step "Cửa sổ Axle (bật/tắt mọi thứ không cần dòng lệnh)"
 # chỉ thấy một bản Ubuntu đổi màu. Cửa sổ này đưa tính năng đã có ra khỏi terminal: xem tình trạng máy,
 # ghép điện thoại bằng mã QR hiện ngay trên màn hình, bật/tắt đăng nhập bằng điện thoại và gõ lệnh từ app.
 install -m 0755 "$HERE/axle-gui.py" /usr/local/bin/axle-gui
+# Axle trong Files (24/9): chuột phải vào tệp → "Đưa vào Bộ não Axle" / "Hỏi Axle về tệp này…" (core/desktop/axle-nautilus.py).
+# Cần gói python3-nautilus (nhỏ — lúc làm mới cũng cài nếu thiếu); Files nạp phần mở rộng khi khởi động lại.
+dpkg -s python3-nautilus >/dev/null 2>&1 || apt_try python3-nautilus || echo "  (chưa cài được python3-nautilus — chuột phải trong Files chưa có mục Axle)"
+install -Dm0644 "$HERE/axle-nautilus.py" /usr/share/nautilus-python/extensions/axle.py
 cat > /usr/share/applications/vn.axleos.Axle.desktop <<'EOF'
 [Desktop Entry]
 Type=Application

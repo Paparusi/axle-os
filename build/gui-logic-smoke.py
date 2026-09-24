@@ -126,5 +126,27 @@ with open(os.path.join(T2, "moc.json"), "w", encoding="utf-8") as f:
 st2 = sap_toi_brain(T2, 40)
 ok(st2 and st2[0]["con"] == 0 and st2[0]["nhac"] and len(st2) >= 2, f"sap_toi_brain: chạy sapToi của brain.js trên Bộ não thật ({st2 and len(st2)} lần)")
 
+# Đính kèm ở ô Bảo Axle làm (nút 📎, kéo thả, "Hỏi Axle về tệp này" trong Files)
+gom_dinh_kem, cau_co_kem, lenh_hoi = g["gom_dinh_kem"], g["cau_co_kem"], g["lenh_hoi"]
+TK = tempfile.mkdtemp()
+tk = {t: os.path.join(TK, t) for t in ("Hợp đồng.pdf", "b.xlsx", "c.txt", "d.txt", "e.txt", "f.txt", "g.txt")}
+for f in tk.values():
+    open(f, "w").write("x")
+os.symlink(tk["b.xlsx"], os.path.join(TK, "lien-ket.xlsx"))
+ds, bo = gom_dinh_kem([], [tk["Hợp đồng.pdf"], TK, os.path.join(TK, "khong-co.pdf"), tk["b.xlsx"], os.path.join(TK, "lien-ket.xlsx"), tk["Hợp đồng.pdf"]])
+ok(ds == [tk["Hợp đồng.pdf"], tk["b.xlsx"]] and [x[1] for x in bo] == ["là thư mục — chọn từng tệp bên trong", "không có tệp này", "đã đính kèm", "đã đính kèm"],
+   f"gom_dinh_kem: bỏ thư mục, tệp không có, trùng (kể cả lối tắt tới cùng tệp), giữ thứ tự ({[x[1] for x in bo]})")
+ds2, bo2 = gom_dinh_kem(ds, list(tk.values()))
+ok(len(ds2) == 6 and bo2[-1][1] == "tối đa 6 tệp một lần", "gom_dinh_kem: tối đa 6 tệp một câu, báo lý do")
+with open(os.path.join(TK, "to.bin"), "wb") as f:
+    f.truncate(51 * 1024 * 1024)
+ok(gom_dinh_kem([], [os.path.join(TK, "to.bin")])[1][0][1] == "51 MB — quá 50 MB", "gom_dinh_kem: tệp quá 50 MB → báo cỡ")
+ok(cau_co_kem("  ", [tk["b.xlsx"]]) == "Xem tệp đính kèm và cho biết nội dung." and cau_co_kem("", []) == "" and cau_co_kem(" tóm tắt ", []) == "tóm tắt",
+   "cau_co_kem: chỉ có tệp → câu mặc định như app; không gì → không hỏi")
+L = lenh_hoi("so sánh", "u-1", True, [tk["Hợp đồng.pdf"], tk["b.xlsx"]])
+ok(L[1:] == ["claude", "so sánh", "--dong", "--phien", "u-1", "--tiep", "--tep", tk["Hợp đồng.pdf"], "--tep", tk["b.xlsx"]] and "--tep" not in lenh_hoi("x", "u", False, []),
+   "lenh_hoi: mỗi tệp một --tep, nối mạch khi có cuộc")
+shutil.rmtree(TK, ignore_errors=True)
+
 if fail: print(f"✗ {fail} mục hỏng"); sys.exit(1)
 print("✓ phần thuần của cửa sổ Axle đạt")

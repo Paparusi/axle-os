@@ -484,3 +484,32 @@ thư mục ẩn hay `/tmp` vì app không thấy. Thử: `approve/test-tep.mjs` 
 lối tắt ra /etc / vào .ssh / trong nhà, 12 MB+1, thư mục 1501 tệp lọt hộp thư, xếp mới nhất), `build/relay-blob-smoke.mjs`
 (+4 ca chiều máy → điện thoại, tệp 12 MB đúng từng byte). Chưa có: chạm đường dẫn trong câu trả lời của Claude để mở
 thẳng, tìm tệp theo tên, tệp >12 MB.
+
+## Đưa tệp cho Axle ngay trên máy (nhịp D15, 24/9, 0.1.161)
+
+Trước nhịp này, ngồi ở máy mà muốn Axle đọc một tệp thì phải gửi từ điện thoại — Bàn chỉ cho XEM Bộ não. Giờ có ba
+đường, đều đi chung MỘT hàm với tệp điện thoại gửi (`mcp/brain.js` `themTep`: raw/YYYY-MM/<ms>-<tên không dấu>, trùng
+nội dung sha256 thì dùng lại tệp cũ, doi-tep.sh đổi bản đọc được, một dòng raw/.index.jsonl) và MỘT lời dặn INGEST
+(`loiDanIngest` — trước nằm dính trong bộ duyệt, còn bảo Claude "nối dòng vào index.md" trái QUY-UOC; nay dặn
+brain_index_them + brain_log):
+
+- **Files (Nautilus), chuột phải vào tệp:** "Đưa vào Bộ não Axle" → `axle brain them --nap --bao <tệp…>` chạy nền, tách
+  phiên (đóng Files vẫn chạy): tệp vào raw/, Claude đọc + ghi trang wiki + rút mốc có ngày, xong GNOME hiện thông báo
+  kèm mấy dòng tóm tắt (hỏng thì báo và chỉ nhật ký ở `~/.cache/axle/nap/`). Hai lần nạp xếp hàng bằng `flock` (hai
+  Claude cùng ghi wiki thì git đụng `index.lock`). "Hỏi Axle về tệp này…" → `axle-gui <tệp…>`: Bàn (một phiên duy
+  nhất, `HANDLES_OPEN`) mở ra với tệp nằm sẵn trong ô Bảo Axle làm. Menu chỉ hiện khi MỌI mục chọn là tệp thường cục
+  bộ (không thư mục, không thùng rác / mạng), tối đa 20 tệp. Phần mở rộng: `core/desktop/axle-nautilus.py` →
+  `/usr/share/nautilus-python/extensions/axle.py`, gói `python3-nautilus` (4.1 trên 26.04; mã thử API 4.1 rồi 4.0).
+  Files chỉ nạp phần mở rộng lúc khởi động → cài xong phải đóng hết cửa sổ Files rồi mở lại.
+- **Bàn → Bảo Axle làm:** nút 📎 (hộp chọn tệp của GNOME) và kéo tệp từ Files thả vào thẻ (viền nét đứt khi rê vào);
+  tệp hiện thành một hàng thẻ nhỏ có nút ✕, tối đa 6 tệp, ≤50 MB mỗi tệp (điện thoại 12 MB vì trạm); để trống câu hỏi
+  thì hỏi "Xem tệp đính kèm và cho biết nội dung." như app. Bấm Làm → `axle claude "<câu>" --dong --tep a --tep b`:
+  `--tep` đưa tệp vào Bộ não trước (in "📎 tên → Bộ não"), rồi nối lời dặn vào câu. Xong thì gỡ tệp khỏi ô; hỏng thì
+  giữ để bấm lại. Hàng thẻ là Gtk.Box trong ScrolledWindow cuộn ngang — FlowBox để `halign=START` thì tính sai chiều cao
+  (thẻ thứ hai đè dòng chữ dưới), để FILL thì mỗi thẻ giãn nửa bề ngang (thấy khi tự chụp).
+- **Bàn → Tri thức:** nút "Thêm tài liệu…" và thả tệp vào cả trang → cùng lệnh nạp nền như Files.
+
+Thử: test-brain +9 ca (themTep: tên, index đủ trường, trùng nội dung, byte từ điện thoại + móc chown, giới hạn;
+loiDanIngest), `build/nautilus-smoke.py` 10 ca (Files giả: menu khi nào hiện, lệnh chạy, tách phiên, lùi API 4.0),
+gui-logic-smoke +5 ca (gom_dinh_kem: thư mục / không có / trùng qua lối tắt / quá 6 / quá 50 MB; cau_co_kem; lenh_hoi),
+`AXLE_SHOT_KEM=a:b build/gui-shot.py` chụp ô có tệp đính kèm sẵn.

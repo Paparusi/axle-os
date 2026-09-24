@@ -159,7 +159,60 @@ LOI_DAN = ("Việc đọc, tìm, xem thì Axle làm ngay. Ghi tệp, chạy lệ
 CSS = """
 .ban-the { padding: 16px 18px; }
 .ban-ket-qua { background: alpha(currentColor, 0.05); border-radius: 8px; }
+.ban-kem { background: alpha(currentColor, 0.08); border-radius: 999px; padding: 1px 2px 1px 10px; }
+.ban-tha { outline: 2px dashed @accent_color; outline-offset: -6px; }
 """
+# Đính kèm ở ô "Bảo Axle làm" (nút 📎, kéo thả, "Hỏi Axle về tệp này" trong Files): tệp vào Bộ não bằng CÙNG đường với
+# tệp điện thoại gửi (`axle claude --tep` → brain.js themTep). Trên máy cho tới 50 MB một tệp (điện thoại 12 MB vì trạm).
+TOI_DA_KEM = 6
+TOI_DA_KEM_BYTE = 50 * 1024 * 1024
+CAU_KEM = "Xem tệp đính kèm và cho biết nội dung."
+
+
+def gom_dinh_kem(cu, moi, toi_da=TOI_DA_KEM, toi_da_byte=TOI_DA_KEM_BYTE):
+    """Gộp tệp mới vào danh sách đính kèm: chỉ tệp thường có thật, bỏ trùng (theo đường thật, lối tắt cũng tính),
+    ≤ toi_da tệp, ≤ 50 MB mỗi tệp. Trả (danh sách mới, [(tên, lý do bỏ)…]) — Bàn báo lý do, không im lặng nuốt tệp."""
+    ds, bo = list(cu), []
+    da_co = {os.path.realpath(x) for x in ds}
+    for p in moi:
+        if not p:
+            continue
+        ten = os.path.basename(str(p).rstrip("/")) or str(p)
+        if os.path.isdir(p):
+            bo.append((ten, "là thư mục — chọn từng tệp bên trong"))
+            continue
+        if not os.path.isfile(p):
+            bo.append((ten, "không có tệp này"))
+            continue
+        that = os.path.realpath(p)
+        if that in da_co:
+            bo.append((ten, "đã đính kèm"))
+            continue
+        try:
+            co = os.path.getsize(p)
+        except OSError:
+            bo.append((ten, "không đọc được"))
+            continue
+        if co > toi_da_byte:
+            bo.append((ten, f"{co / 1048576:.0f} MB — quá {toi_da_byte // 1048576} MB"))
+            continue
+        if len(ds) >= toi_da:
+            bo.append((ten, f"tối đa {toi_da} tệp một lần"))
+            continue
+        ds.append(p)
+        da_co.add(that)
+    return ds, bo
+
+
+def cau_co_kem(chu, kem):
+    """Câu gửi đi: chữ đã gõ; chỉ có tệp mà chưa gõ gì thì hỏi câu mặc định như app điện thoại."""
+    chu = (chu or "").strip()
+    return chu or (CAU_KEM if kem else "")
+
+
+def lenh_hoi(cau, phien, tiep, kem):
+    """Lệnh chạy `axle claude` của ô Bảo Axle làm — mỗi tệp đính kèm một cờ --tep."""
+    return [AXLE, "claude", cau, "--dong", "--phien", phien] + (["--tiep"] if tiep else []) + [x for p in kem for x in ("--tep", p)]
 
 
 def chay(*args, root=False, timeout=30):
@@ -607,10 +660,22 @@ class CuaSo(Adw.ApplicationWindow):
         self.nut_lam.connect("clicked", self.bao_lam)
         self.nut_dung = Gtk.Button(label="Dừng", visible=False)
         self.nut_dung.connect("clicked", self.dung_lam)
+        self.nut_kem = Gtk.Button(icon_name="mail-attachment-symbolic",
+                                  tooltip_text="Đính kèm tệp — hay kéo tệp từ Files thả vào thẻ này. Tệp vào Bộ não, Axle đọc rồi trả lời.")
+        self.nut_kem.connect("clicked", self.chon_dinh_kem)
         hang.append(self.o_lenh)
+        hang.append(self.nut_kem)
         hang.append(self.nut_lam)
         hang.append(self.nut_dung)
         noi.append(hang)
+        self.dinh_kem, self.kem_dang_gui = [], []
+        # Một hàng ngang, dài quá thì cuộn ngang. KHÔNG dùng FlowBox: halign=START thì nó tính sai chiều cao (thẻ thứ hai
+        # đè lên dòng chữ dưới), để FILL thì mỗi thẻ bị kéo giãn nửa bề ngang — thấy khi tự chụp 24/9.
+        self.hang_kem = Gtk.Box(spacing=6, halign=Gtk.Align.START)
+        self.hop_kem = Gtk.ScrolledWindow(child=self.hang_kem, vscrollbar_policy=Gtk.PolicyType.NEVER,
+                                          hscrollbar_policy=Gtk.PolicyType.AUTOMATIC, propagate_natural_height=True, visible=False)
+        noi.append(self.hop_kem)
+        self.nhan_tha(the, self.them_dinh_kem)
         self.lenh_trang_thai = Gtk.Label(xalign=0, wrap=True, css_classes=["dim-label"], label=LOI_DAN)
         noi.append(self.lenh_trang_thai)
         self.ket_qua = Gtk.TextView(editable=False, cursor_visible=False, wrap_mode=Gtk.WrapMode.WORD_CHAR,
@@ -686,16 +751,21 @@ class CuaSo(Adw.ApplicationWindow):
         cuon.set_child(Adw.Clamp(child=cot, maximum_size=1100, tightening_threshold=900))
         dau = Gtk.Box(spacing=12)
         dau.append(Gtk.Label(label="Bộ não Axle", xalign=0, css_classes=["title-2"], hexpand=True))
+        nut_them = Gtk.Button(label="Thêm tài liệu…", css_classes=["suggested-action"],
+                              tooltip_text="Chọn tệp — hay kéo tệp thả vào trang này. Axle đọc, ghi trang wiki, rút mốc có ngày rồi báo.")
+        nut_them.connect("clicked", lambda *_: self.chon_tep("Thêm tài liệu vào Bộ não", self.nap_tai_lieu))
         nut_mo = Gtk.Button(label="Mở thư mục", tooltip_text="Sửa tay trang wiki hay xem tệp gốc. Mọi lần ghi đều có trong git.")
         nut_mo.connect("clicked", lambda *_: subprocess.Popen(["xdg-open", BRAIN_DIR]))
         nut_lai = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Đọc lại")
         nut_lai.connect("clicked", lambda *_: self.nap_nao())
+        dau.append(nut_them)
         dau.append(nut_mo)
         dau.append(nut_lai)
         cot.append(dau)
         self.nao_tom_tat = Gtk.Label(xalign=0, wrap=True, css_classes=["dim-label"],
-                                     label="Gửi tài liệu qua Hỏi Axle (điện thoại) hay hỏi Bàn — tệp vào raw/, Claude tóm tắt thành trang wiki và tra lại được sau này.")
+                                     label="Thêm tài liệu ở đây, chuột phải trong Files (Đưa vào Bộ não Axle) hay gửi từ điện thoại — tệp vào raw/, Claude tóm tắt thành trang wiki và tra lại được sau này.")
         cot.append(self.nao_tom_tat)
+        self.nhan_tha(cuon, self.nap_tai_lieu)   # cả trang (kể cả khoảng trống dưới) nhận tệp thả vào
         # Sắp tới: mốc có ngày Claude rút từ giấy tờ — đứng đầu vì là thứ phải làm
         the_m, self.nao_moc = self.the("Sắp tới (60 ngày)")
         cot.append(the_m)
@@ -731,11 +801,11 @@ class CuaSo(Adw.ApplicationWindow):
     def nap_nao(self, *_):
         index = doc(os.path.join(BRAIN_DIR, "wiki/index.md"), "")
         if not index:
-            self.nao_tom_tat.set_label("Chưa có Bộ não trên máy này — gửi tài liệu đầu tiên qua Hỏi Axle, hay chạy: axle brain")
+            self.nao_tom_tat.set_label("Chưa có Bộ não trên máy này — bấm Thêm tài liệu, kéo tệp thả vào đây, hay gửi từ điện thoại")
         else:
             n_tep = sum(1 for _r, _d, fs in os.walk(os.path.join(BRAIN_DIR, "raw")) for f in fs if not f.startswith(".") and ".doi" not in _r)
             n_trang = sum(1 for _r, _d, fs in os.walk(os.path.join(BRAIN_DIR, "wiki")) for f in fs if f.endswith(".md"))
-            self.nao_tom_tat.set_label(f"{BRAIN_DIR} · {n_tep} tài liệu · {n_trang} trang wiki · git giữ lịch sử mọi lần ghi")
+            self.nao_tom_tat.set_label(f"{BRAIN_DIR} · {n_tep} tài liệu · {n_trang} trang wiki · git giữ lịch sử mọi lần ghi · kéo tệp thả vào đây để thêm")
         buf = self.nao_index.get_buffer()
         buf.set_text("")
         self.ket_qua, cu = self.nao_index, self.ket_qua   # mượn bộ dựng Markdown gọn của Bàn cho ô này
@@ -867,6 +937,22 @@ class CuaSo(Adw.ApplicationWindow):
         if n and n.get("duong"):
             subprocess.Popen(["xdg-open", os.path.join(BRAIN_DIR, n["duong"])])
 
+    def nap_tai_lieu(self, ds):
+        """Đưa tệp vào Bộ não + nhờ Claude đọc ngay, chạy nền (`axle brain them --nap --bao`): xong GNOME báo."""
+        ds, bo = gom_dinh_kem([], ds, toi_da=20)
+        if bo:
+            self.bao("Bỏ qua: " + "; ".join(f"{t} ({ly})" for t, ly in bo[:3]))
+        if not ds:
+            return
+        try:
+            subprocess.Popen([AXLE, "brain", "them", "--nap", "--bao", "--", *ds], start_new_session=True,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError as e:
+            self.bao(f"Không chạy được: {e}")
+            return
+        self.bao(f"Đang đưa {len(ds)} tệp vào Bộ não — Axle đọc xong sẽ báo")
+        GLib.timeout_add_seconds(8, lambda: (self.nap_nao(), False)[1])
+
     def hoi_trang_nao(self, *_):
         n = self.nao_trang_chon
         if not n:
@@ -991,19 +1077,87 @@ class CuaSo(Adw.ApplicationWindow):
         ten = NUT[c][0]
         self.chay_nen(("duyet", ma, c), True, f"Đã ghi: {ten.lower()} (#{ma})", sau=self.nap_ban)
 
+    # ---------- Đính kèm tệp / kéo thả ----------
+    def nhan_tha(self, vung, khi_tha):
+        """Cho `vung` nhận tệp kéo từ Files: rê vào thì viền nét đứt, thả thì gọi khi_tha([đường…])."""
+        dt = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY)
+
+        def tha(_dt, gt, _x, _y):
+            vung.remove_css_class("ban-tha")
+            try:
+                ds = [f.get_path() for f in gt.get_files() if f.get_path()]
+            except (AttributeError, TypeError):
+                return False
+            khi_tha(ds)
+            return True
+
+        def vao(*_):
+            vung.add_css_class("ban-tha")
+            return Gdk.DragAction.COPY
+        dt.connect("drop", tha)
+        dt.connect("enter", vao)
+        dt.connect("leave", lambda *_: vung.remove_css_class("ban-tha"))
+        vung.add_controller(dt)
+
+    def chon_tep(self, tieu_de, xong):
+        """Hộp chọn nhiều tệp của GTK (cổng tệp của GNOME) → xong([đường…]); huỷ thì thôi."""
+        hop = Gtk.FileDialog(title=tieu_de, modal=True)
+
+        def ket(_h, kq):
+            try:
+                ds = hop.open_multiple_finish(kq)
+            except GLib.Error:
+                return
+            xong([p for p in (ds.get_item(i).get_path() for i in range(ds.get_n_items())) if p])
+        hop.open_multiple(self, None, ket)
+
+    def chon_dinh_kem(self, *_):
+        self.chon_tep("Đính kèm tệp cho Axle", self.them_dinh_kem)
+
+    def them_dinh_kem(self, ds):
+        self.dinh_kem, bo = gom_dinh_kem(self.dinh_kem, ds)
+        self.ve_kem()
+        if bo:
+            self.bao("Không đính kèm: " + "; ".join(f"{t} ({ly})" for t, ly in bo[:3]))
+        self.o_lenh.grab_focus()
+
+    def bo_kem(self, _nut, p):
+        self.dinh_kem = [x for x in self.dinh_kem if x != p]
+        self.ve_kem()
+
+    def ve_kem(self):
+        self.don(self.hang_kem)
+        for p in self.dinh_kem:
+            chip = Gtk.Box(spacing=4, css_classes=["ban-kem"], valign=Gtk.Align.CENTER)
+            chip.append(Gtk.Image(icon_name="mail-attachment-symbolic"))
+            chip.append(Gtk.Label(label=os.path.basename(p), ellipsize=Pango.EllipsizeMode.MIDDLE, max_width_chars=28,
+                                  tooltip_text=p))
+            nut = Gtk.Button(icon_name="window-close-symbolic", css_classes=["flat", "circular"], tooltip_text="Bỏ tệp này",
+                             sensitive=not self.dang_lam)
+            nut.connect("clicked", self.bo_kem, p)
+            chip.append(nut)
+            self.hang_kem.append(chip)
+        self.hop_kem.set_visible(bool(self.dinh_kem))
+        self.o_lenh.set_placeholder_text("hỏi gì về tệp này? (để trống: Axle đọc và tóm tắt)" if self.dinh_kem else
+                                         "ví dụ: tóm tắt log tối qua · máy in không in được, xem giúp · dọn ổ đĩa")
+
     # "Bảo Axle làm": chạy `axle claude` (Claude Code trên máy, cổng xin phép là điện thoại / Cần bạn)
     def bao_lam(self, *_):
-        cau = self.o_lenh.get_text().strip()
+        cau = cau_co_kem(self.o_lenh.get_text(), self.dinh_kem)
         if not cau or self.dang_lam:
             return
         self.dang_lam = True
+        self.kem_dang_gui = list(self.dinh_kem)
         self.nut_lam.set_sensitive(False)
+        self.nut_kem.set_sensitive(False)
         self.nut_dung.set_visible(True)
         self.ket_qua_cuon.set_visible(True)
+        self.ve_kem()
         self.them_ket_qua(f"› {cau}\n")
-        self.lenh_trang_thai.set_label("Đang làm… việc hệ trọng sẽ hỏi bạn trước khi làm.")
+        self.lenh_trang_thai.set_label("Đang đưa tệp vào Bộ não rồi hỏi Axle…" if self.kem_dang_gui else
+                                       "Đang làm… việc hệ trọng sẽ hỏi bạn trước khi làm.")
         # --dong: chữ chảy ngay khi có + mỗi lần Claude dùng công cụ một dòng "→ …" (core/desktop/claude-dong.py)
-        args = [AXLE, "claude", cau, "--dong", "--phien", self.phien] + (["--tiep"] if self.co_cuoc else [])
+        args = lenh_hoi(cau, self.phien, self.co_cuoc, self.kem_dang_gui)
 
         def worker():
             try:
@@ -1043,7 +1197,12 @@ class CuaSo(Adw.ApplicationWindow):
         self.dang_lam = False
         self.tien_trinh = None
         self.nut_lam.set_sensitive(True)
+        self.nut_kem.set_sensitive(True)
         self.nut_dung.set_visible(False)
+        if ma == 0:      # tệp đã vào Bộ não + đã hỏi xong → gỡ khỏi ô; hỏng thì giữ để bấm Làm lại
+            self.dinh_kem = [x for x in self.dinh_kem if x not in self.kem_dang_gui]
+        self.kem_dang_gui = []
+        self.ve_kem()
         if loi:
             self.them_ket_qua(loi + "\n")
         buf = self.ket_qua.get_buffer()
@@ -1587,7 +1746,8 @@ class App(Adw.Application):
     """Một phiên duy nhất (application-id): Super+B hay autostart gọi lại thì chỉ đưa cửa sổ đang có lên trước.
     `--ban` (autostart sau đăng nhập, phím tắt) mở TO như một mặt tiền; mở từ trình đơn thì cỡ thường."""
     def __init__(self, ban=False):
-        super().__init__(application_id="vn.axleos.Axle")
+        # HANDLES_OPEN: `axle-gui <tệp…>` (chuột phải "Hỏi Axle về tệp này" trong Files) → phiên đang chạy nhận tệp
+        super().__init__(application_id="vn.axleos.Axle", flags=Gio.ApplicationFlags.HANDLES_OPEN)
         self.ban = ban
 
     def do_activate(self):
@@ -1597,6 +1757,13 @@ class App(Adw.Application):
             w.maximize()
         w.present()
 
+    def do_open(self, files, _n, _hint):
+        self.do_activate()
+        w = self.props.active_window
+        w.mo_muc("ban")
+        w.them_dinh_kem([f.get_path() for f in files if f.get_path()])
+
 
 if __name__ == "__main__":
-    App(ban="--ban" in sys.argv[1:]).run(None)
+    # --ban là cờ riêng của Bàn (autostart, Super+B) — bỏ ra trước khi GApplication đọc dòng lệnh (còn lại là tệp)
+    App(ban="--ban" in sys.argv[1:]).run([sys.argv[0]] + [a for a in sys.argv[1:] if a != "--ban"])

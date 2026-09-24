@@ -2,6 +2,7 @@
 """Tự chụp cửa sổ Axle (Bàn) thành PNG để NHÌN thấy bố cục — không cần Xvfb hay máy ảo, chỉ cần một màn hình
 (WSLg, GNOME…): mở cửa sổ với dữ liệu giả, chờ vẽ xong, vẽ lại cây widget ra texture, lưu PNG, tự đóng.
     python3 build/gui-shot.py out/ban.png [--ban] [--trang ban|may|dt|tn|ag|ql|nao]
+    AXLE_SHOT_KEM=/đường/a.pdf:/đường/b.xlsx → ô Bảo Axle làm có sẵn tệp đính kèm
 Dữ liệu giả: ban.json có 2 việc chờ + 2 agent, audit.jsonl có vài lần gọi công cụ, `axle` là script trả lời sẵn —
 để bắt lỗi kiểu 20/9 (phụ đề có < > vỡ Pango, ô QR chừa chỗ trống, thẻ ngang cắt chữ) trước khi phát hành.
 """
@@ -117,11 +118,14 @@ g = runpy.run_path({os.path.join(ROOT, 'core/desktop/axle-gui.py')!r}, run_name=
 App, CuaSo = g['App'], g['CuaSo']
 def chup(app):
     w = app.props.active_window
+    kem = os.environ.get('AXLE_SHOT_KEM')          # tệp đính kèm sẵn ở ô Bảo Axle làm (đường, cách nhau bằng :)
+    if kem:
+        w.them_dinh_kem(kem.split(':'))
     if os.environ.get('AXLE_GUI_TRANG', 'ban') != 'ban':
         w.tabs.set_visible_child_name(os.environ['AXLE_GUI_TRANG'])
         GLib.timeout_add(700, lambda: (luu(app, w), False)[1])
         return False
-    luu(app, w)
+    GLib.timeout_add(500 if kem else 0, lambda: (luu(app, w), False)[1])
     return False
 def luu(app, w):
     W, H = w.get_width(), w.get_height()
