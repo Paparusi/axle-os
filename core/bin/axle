@@ -106,6 +106,9 @@ status() {
   row "Docker"     "$(docker ps -q 2>/dev/null | wc -l) container đang chạy"
   row "PM2"        "$(bash -c '. ~/.nvm/nvm.sh 2>/dev/null; pm2 jlist 2>/dev/null' | jq 'length' 2>/dev/null || echo 0) tiến trình"
   row "Lỗi"        "$(systemctl --failed --no-legend | wc -l) dịch vụ hỏng"
+  # Tự cập nhật: bật/tắt + lượt gần nhất, gộp một dòng (chi tiết: axle update tu-dong)
+  local tc; tc="$(tu_dong_cmd status 2>/dev/null)"
+  row "Cập nhật"   "$(head -1 <<<"$tc" | sed 's/^Tự cập nhật: //; s/ · tắt: .*//; s/ (bật: .*)//')$(sed -n 2p <<<"$tc" | sed 's/^Lần gần nhất / · lần gần nhất /')"
 }
 
 # căn cột theo số KÝ TỰ (printf %-Ns đếm byte nên lệch với chữ có dấu)
