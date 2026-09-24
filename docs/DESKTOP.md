@@ -380,7 +380,17 @@ link tới trang chưa có thành nút loại `thieu` (vẽ đứt nét đỏ; b
 (hộp trạm 64KB đã mã hoá) — wiki lớn thì giữ trang nhiều liên kết nhất, `bo_bot` = số trang bị ẩn (0.1.140).
 App: `query brain-graph` → tấm **Liên kết trong Bộ não** trong 📚: xếp lực (đẩy–kéo, 200 vòng ngay trên điện thoại),
 màu theo loại, chạm chấm → thấy nó nối với ai + nút "Hỏi về trang này". Thử: test-brain 32 ca (5 ca đồ thị).
-**Link sai (24/9, 0.1.147):** Bi thấy đồ thị nối hợp đồng thuê nhà với hợp đồng Omron — hai việc không liên quan. Gốc:
+**Tự khám mạng (24/9, 0.1.149):** sinh ra từ buổi sáng 24/9 — máy nhà đem lên văn phòng không có mạng, mười mấy vòng
+"gõ lệnh này rồi chụp màn hình" mới ra được dây cắm vào cổng WAN của cục mesh. `axle net kiem [--json]`
+(`core/lib/kiem-mang.py`, không cần sudo, ~1 giây khi mạng ổn) khám lần lượt dây/Wi-Fi → IPv4 → router (ping + bảng láng
+giềng, router chặn ping vẫn nhận ra) → Internet (TCP 443 tới 1.1.1.1/8.8.8.8) → DNS → Tailscale → trạm của app, dừng ở
+bước hỏng ĐẦU TIÊN, nói lỗi bằng tiếng Việt + đúng lệnh sửa theo ai quản mạng (NetworkManager: tên kết nối thật;
+networkd: netplan/resolvectl). Các bước sau bước hỏng ghi "·" chứ không ghi ✗. Mã thoát 0 ổn / 1 hỏng / 2 cảnh báo.
+Bàn → Máy có thẻ **Mạng** (mạng ổn: một dòng tóm tắt; lỗi: lời giải thích, từng bước, lệnh bôi đen chép được) và biểu
+ngữ "Máy đang mất mạng: …" dưới thanh tiêu đề; Bàn không hỏi đi hỏi lại mà nghe `Gio.NetworkMonitor` (NetworkManager
+báo mạng đổi) → gom 8 giây → khám một lần. Thử: `build/net-smoke.py` 23 ca (có đúng ca máy `bi` chỉ có IPv6, ca cổng
+WAN mesh, ca IP tĩnh + router INCOMPLETE) + chạy thật; `gui-shot.py --trang may` (AXLE_SHOT_MANG=ok|loi).
+**Link sai (24/9, 0.1.148):** Bi thấy đồ thị nối hợp đồng thuê nhà với hợp đồng Omron — hai việc không liên quan. Gốc:
 lúc ingest hợp đồng thuê nhà, Claude trích hợp đồng Omron để ghi chỗ lệch địa chỉ HRVN (19 vs 119 ngõ 156) bằng một
 [[link]] thẳng. Sửa: QUY-UOC thêm mục "Nối trang" (tài liệu chỉ link thực thể/dự án của chính nó; chung một bên thì nối
 qua trang thực thể; link thẳng chỉ khi sửa đổi/thay thế/phụ lục), lời dặn INGEST của `axle claude` và của tệp đính kèm

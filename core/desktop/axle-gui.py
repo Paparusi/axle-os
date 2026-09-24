@@ -420,6 +420,7 @@ class CuaSo(Adw.ApplicationWindow):
         self.toast = Adw.ToastOverlay()
         self.tabs = Adw.ViewStack()
         self.dang_lam = False        # đang chạy một việc "bảo Axle làm"
+        self.hen_mang, self.dang_kiem_mang = 0, False   # khám mạng: hẹn giờ gom báo đổi mạng / đang khám
         self.co_cuoc = False         # đã có mạch hội thoại → lần sau nối tiếp (--tiep)
         self.phien = str(uuid.uuid4())   # id cuộc riêng của Bàn (app có id khác) — không lẫn mạch với nhau
         self.tien_trinh = None
@@ -470,6 +471,10 @@ class CuaSo(Adw.ApplicationWindow):
         nut_tay.connect("clicked", lambda *_: self.minimize())
         thanh.pack_end(nut_tay)
         noi_dung.add_top_bar(thanh)
+        # Biểu ngữ mất mạng ngay dưới thanh tiêu đề: khám mạng ra lỗi thì hiện, kèm nút sang trang Máy xem cách sửa
+        self.bn_mang = Adw.Banner(title="", button_label="Xem cách sửa", revealed=False, use_markup=False)
+        self.bn_mang.connect("button-clicked", lambda *_: self.mo_muc("may"))
+        noi_dung.add_top_bar(self.bn_mang)
         noi_dung.set_content(self.tabs)
 
         chia = Adw.NavigationSplitView(
@@ -479,6 +484,15 @@ class CuaSo(Adw.ApplicationWindow):
         self.toast.set_child(chia)
         self.set_content(self.toast)
         self.lam_moi()
+        # Bộ theo dõi mạng của hệ thống (NetworkManager qua Gio) báo mỗi lần mạng đổi — cắm/rút dây, mất IP, mất Internet.
+        # Không hỏi đi hỏi lại: có báo thì gom 8 giây rồi khám một lần. Mở Bàn là khám ngay một lần.
+        try:
+            mon = Gio.NetworkMonitor.get_default()
+            mon.connect("network-changed", self.mang_doi)
+            mon.connect("notify::connectivity", self.mang_doi)
+        except (AttributeError, TypeError):
+            pass
+        GLib.idle_add(self.kiem_mang)
         self.theo_doi_ban()
 
     def bao(self, chu):
@@ -930,6 +944,18 @@ class CuaSo(Adw.ApplicationWindow):
     # ---------- Máy ----------
     def trang_tong_quan(self):
         t = Trang("Máy", "computer-symbolic")
+        # Mạng đứng đầu: mất mạng là thứ chủ máy cần biết ngay, và là thứ trước đây phải gõ lệnh + chụp màn hình gửi đi
+        gm = Adw.PreferencesGroup(title="Mạng", description="Máy tự khám: dây, địa chỉ IP, router, Internet, DNS, Tailscale, trạm của app.")
+        nut_kiem = Gtk.Button(label="Kiểm lại", valign=Gtk.Align.CENTER)
+        nut_kiem.connect("clicked", self.kiem_mang)
+        gm.set_header_suffix(nut_kiem)
+        self.mang_dong = Adw.ActionRow(title="Đang khám mạng…", subtitle_lines=0, use_markup=False)
+        self.mang_icon = Gtk.Image(icon_name="network-wired-symbolic")
+        self.mang_dong.add_prefix(self.mang_icon)
+        gm.add(self.mang_dong)
+        self.mang_buoc = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, margin_top=10)
+        gm.add(self.mang_buoc)
+        t.add(gm)
         g = Adw.PreferencesGroup(title="Máy này")
         self.hang = {}
         for k, ten in [("host", "Tên máy"), ("os", "Hệ điều hành"), ("dia", "Ổ đĩa"),
@@ -957,6 +983,69 @@ class CuaSo(Adw.ApplicationWindow):
         g2.add(r2)
         t.add(g2)
         return t
+
+    def mo_muc(self, ma):
+        self.ds.select_row(self.ds.get_row_at_index(self.muc_ma.index(ma)))
+
+    def mang_doi(self, *_):
+        """Gio báo mạng đổi — gom các báo liên tiếp (cắm dây là cả loạt), 8 giây sau khám lại một lần."""
+        if not self.hen_mang:
+            self.hen_mang = GLib.timeout_add_seconds(8, self._mang_hen)
+
+    def _mang_hen(self):
+        self.hen_mang = 0
+        self.kiem_mang()
+        return False
+
+    def kiem_mang(self, *_):
+        """`axle net kiem --json` ở luồng nền (vài giây; mạng chết thì lâu hơn), xong thì vẽ kết quả + biểu ngữ."""
+        if self.dang_kiem_mang:
+            return False
+        self.dang_kiem_mang = True
+        self.mang_dong.set_title("Đang khám mạng…")
+        self.mang_dong.set_subtitle("Mất vài giây")
+
+        def worker():
+            _ma, ra = chay("net", "kiem", "--json", timeout=45)
+            dong = next((d for d in ra.splitlines() if d.startswith("{")), "")
+            try:
+                kq = json.loads(dong)
+            except ValueError:
+                kq = None
+            GLib.idle_add(self.hien_mang, kq, ra)
+        threading.Thread(target=worker, daemon=True).start()
+        return False
+
+    def hien_mang(self, kq, ra=""):
+        self.dang_kiem_mang = False
+        self.don(self.mang_buoc)
+        if not kq:
+            self.mang_icon.set_from_icon_name("dialog-question-symbolic")
+            self.mang_dong.set_title("Chưa khám được mạng")
+            self.mang_dong.set_subtitle(ra.strip().splitlines()[-1][:200] if ra.strip() else "Lệnh axle net kiem không trả lời")
+            return False
+        self.mang_icon.set_from_icon_name({"ok": "emblem-ok-symbolic", "canh_bao": "dialog-warning-symbolic"}.get(kq["muc"], "network-error-symbolic"))
+        self.mang_dong.set_title(kq["tieu_de"])
+        self.mang_dong.set_subtitle(f"khám lúc {(kq.get('luc') or '')[11:16] or datetime.datetime.now().strftime('%H:%M')}")
+        # Lời giải thích là chỗ chủ máy cần đọc (lỗi ở đâu, sửa sao) → chữ thường, không để làm dòng phụ nhỏ mờ
+        if kq.get("giai_thich"):
+            self.mang_buoc.append(Gtk.Label(label=kq["giai_thich"], xalign=0, wrap=True, margin_bottom=6))
+        ky = {"ok": "✓", "loi": "✗", "bo_qua": "·", "khong_ro": "–"}
+        # Mạng ổn thì một dòng tóm tắt là đủ; có lỗi mới liệt kê từng bước
+        for b in (kq.get("buoc", []) if kq["muc"] != "ok" else []):
+            nhan = Gtk.Label(xalign=0, wrap=True, css_classes=[] if b["trang_thai"] in ("ok", "loi") else ["dim-label"])
+            nhan.set_markup(f'{ky.get(b["trang_thai"], "?")} <b>{GLib.markup_escape_text(b["ten"], -1)}</b> · '
+                            f'{GLib.markup_escape_text(b["chi_tiet"], -1)}')
+            self.mang_buoc.append(nhan)
+        if kq.get("lenh"):
+            self.mang_buoc.append(Gtk.Label(label="Chạy trong Terminal (bôi đen để chép):", xalign=0, margin_top=6,
+                                            css_classes=["dim-label", "caption"]))
+            for l in kq["lenh"]:
+                self.mang_buoc.append(Gtk.Label(label=l, xalign=0, wrap=True, selectable=True, css_classes=["monospace"]))
+        loi = kq["muc"] == "loi"
+        self.bn_mang.set_title(f"Máy đang mất mạng: {kq['tieu_de']}" if loi else "")
+        self.bn_mang.set_revealed(loi)
+        return False
 
     @staticmethod
     def chay_lau():

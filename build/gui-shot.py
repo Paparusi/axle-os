@@ -45,11 +45,29 @@ case "$1 $2" in
   "snapshots --csv") printf '%s\\n' 'number,date,description' '12,2026-09-21 09:10:11,"axle provision 0.1.117"' '13,2026-09-21 10:00:00,"trước khi cài Axle Desktop"' ;;
   "dangnhap status") echo "Duyệt đăng nhập bằng điện thoại: ĐANG BẬT" ;;
   "app terminal") echo "Gõ lệnh từ app: BẬT (admin_1, 180 giây)" ;;
+  "net kiem") cat "$(dirname "$0")/mang.json" ;;
   "claude "*) sleep 1; echo "Log tối qua có 2 lỗi kết nối Supabase lúc 02:13 và 02:41, worker tự nối lại sau 30 giây. Không cần sửa gì." ;;
   *) echo "thu: $*" ;;
 esac
 """)
 os.chmod(axle, stat.S_IRWXU)
+# Khám mạng giả cho trang Máy: mặc định ca 24/9 (dây vào cổng WAN cục mesh) để thấy biểu ngữ + bước + lệnh sửa;
+# AXLE_SHOT_MANG=ok thì máy khoẻ. Kết luận lấy từ đúng hàm ket_luan của core/lib/kiem-mang.py.
+import importlib.util
+_spec = importlib.util.spec_from_file_location("kiem_mang", os.path.join(ROOT, "core/lib/kiem-mang.py"))
+_km = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_km)
+_sk = {"card": [{"ten": "enp34s0", "wifi": False, "tin_hieu": True, "trang_thai": "up"}], "mac": {"enp34s0": "34:5a:60:35:44:0b"},
+       "ipv4": {"enp34s0": ["192.168.1.216/24"]}, "ipv6": {}, "gw": "192.168.1.1", "gw_dev": "enp34s0", "gw_ping": True,
+       "gw_lang_gieng": "REACHABLE", "internet": True, "dns": True, "quan_ly": "nm",
+       "ket_noi": {"enp34s0": {"trang_thai": "connected", "ten": "netplan-enp34s0"}}, "xin_ipv4": {"enp34s0": "dhcp"},
+       "ts": {"trang_thai": "Running", "online": True, "ip": "100.66.109.71"}, "tram": {"url": "https://tram.example.com", "ok": True}}
+if os.environ.get("AXLE_SHOT_MANG", "loi") != "ok":
+    _sk.update(ipv4={}, gw=None, gw_dev=None, internet=False, dns=False, ts={"trang_thai": "Running", "online": False, "ip": None},
+               tram={"url": "https://tram.example.com", "ok": False},
+               ket_noi={"enp34s0": {"trang_thai": "connecting (getting IP configuration)", "ten": "netplan-enp34s0"}})
+with open(os.path.join(T, "mang.json"), "w", encoding="utf-8") as f:
+    json.dump(_km.ket_luan(_sk), f, ensure_ascii=False)
 
 # Bộ não giả cho trang Tri thức: 8 trang nối nhau, một link tới trang chưa có, một trang mồ côi — đủ để nhìn đồ thị
 import shutil

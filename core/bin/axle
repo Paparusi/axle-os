@@ -17,6 +17,7 @@ axle diff <số>           file hệ thống nào đã đổi kể từ snapshot
 axle undo <số> [--yes]   đưa file hệ thống về như lúc snapshot <số>
                          (/home, /var/log, Docker, vault, Tailscale không bị đụng; tự chụp snapshot trước khi undo)
 axle net up              vào mạng riêng (Tailscale), in link đăng nhập
+axle net [kiem] [--json] khám mạng: dây, IP, router, Internet, DNS, Tailscale, trạm → lỗi ở đâu, sửa thế nào
 axle mcp                 chạy cổng MCP (stdio) cho agent; từ máy khác:
                            claude mcp add axle -- ssh admin_1@<máy> axle mcp
 axle agents              các agent (user riêng ag-<tên>, token HTTP) + công cụ được cấp + đang chạy?
@@ -933,7 +934,11 @@ case "${1:-help}" in
              pre="$("${SNAP[@]}" create -t single -c number -d "trước khi undo về #$2" --print-number)"
              "${SNAP[@]}" undochange "$2..0"
              echo "Đã đưa về #$2. Muốn quay lại trạng thái vừa rồi: axle undo $pre" ;;
-  net)       [ "${2:-}" = up ] || { usage; exit 2; }; sudo tailscale up ;;
+  net)       case "${2:-kiem}" in
+               up)   sudo tailscale up ;;
+               kiem) shift; [ $# -gt 0 ] && shift; exec python3 /opt/axle/core/lib/kiem-mang.py "$@" ;;
+               *)    usage; exit 2 ;;
+             esac ;;
   mcp)       shift; mcp_cmd "$@" ;;
   audit)     { [ -f "$AUDIT" ] && tail -n 500 "$AUDIT"
                journalctl -u 'axle-mcp@*' -u axle-mcp-http -o cat --no-pager -n 500 2>/dev/null | grep '^{' || true
