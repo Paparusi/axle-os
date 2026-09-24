@@ -68,6 +68,38 @@ def do_thi_brain(brain_dir=None):
         return None
 
 
+def sap_toi_brain(brain_dir=None, so_ngay=60):
+    """Mốc có ngày sắp tới (hạn trả tiền, hết hạn…) — chạy đúng sapToi của brain.js; None khi máy chưa có Bộ não / node."""
+    d = brain_dir or BRAIN_DIR
+    if not os.path.isdir(os.path.join(d, "wiki")) or not os.path.exists(BRAIN_JS):
+        return None
+    try:
+        r = subprocess.run([NODE, "-e", "import(process.argv[1]).then((b) => process.stdout.write(JSON.stringify("
+                            "b.sapToi(process.argv[2], { soNgay: Number(process.argv[3]) }))))", BRAIN_JS, d, str(so_ngay)],
+                           capture_output=True, text=True, timeout=20)
+        st = json.loads(r.stdout) if r.returncode == 0 and r.stdout else None
+        return st if isinstance(st, list) else None
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+
+
+def moc_can_bao(sap_toi, da_bao):
+    """Mốc nào cần bật thông báo lúc này: vào khoảng nhắc (còn ≤ nhac_truoc ngày) thì báo MỘT lần, đúng ngày hạn báo thêm
+    một lần. Trả [(khoá, tiêu đề, nội dung)] cho những khoá chưa có trong da_bao — Bàn mở lại cũng không báo lặp."""
+    ra = []
+    for x in sap_toi or []:
+        if not x.get("nhac"):
+            continue
+        hom_nay = x.get("con") == 0
+        khoa = f"{x.get('id')}|{x.get('ngay')}|{'hom_nay' if hom_nay else 'truoc'}"
+        if khoa in (da_bao or {}):
+            continue
+        tieu_de = f"Hôm nay: {x.get('viec', '')}" if hom_nay else f"Còn {x.get('con')} ngày: {x.get('viec', '')}"
+        ngay = str(x.get("ngay", ""))
+        ra.append((khoa, tieu_de, f"{ngay[8:10]}/{ngay[5:7]}" + (f" · {x['ten_trang']}" if x.get("ten_trang") else "")))
+    return ra
+
+
 def xep_do_thi(nodes, edges, W, H, vong=200):
     """Xếp đồ thị bằng lực (Fruchterman–Reingold gọn, cùng cách với app): nút đẩy nhau k²/d, cạnh kéo d²/k, kéo nhẹ về tâm,
     nhiệt giảm dần; cuối cùng co cho vừa khung W×H. Trả {id: (x, y)}. Thuần Python, chạy ở luồng nền."""
@@ -494,6 +526,11 @@ class CuaSo(Adw.ApplicationWindow):
         except (AttributeError, TypeError):
             pass
         GLib.idle_add(self.kiem_mang)
+        # Nhắc mốc: 20 giây sau khi mở (đợi phiên làm việc ổn), rồi mỗi 30 phút. Bấm thông báo → mở trang Tri thức.
+        mo = Gio.SimpleAction.new("mo-muc", GLib.VariantType.new("s"))
+        mo.connect("activate", lambda _a, v: (self.present(), self.mo_muc(v.get_string())))
+        app.add_action(mo)
+        GLib.timeout_add_seconds(20, lambda: (self.kiem_moc(), GLib.timeout_add_seconds(1800, self.kiem_moc), False)[-1])
         self.theo_doi_ban()
 
     def bao(self, chu):
@@ -635,6 +672,9 @@ class CuaSo(Adw.ApplicationWindow):
         self.nao_tom_tat = Gtk.Label(xalign=0, wrap=True, css_classes=["dim-label"],
                                      label="Gửi tài liệu qua Hỏi Axle (điện thoại) hay hỏi Bàn — tệp vào raw/, Claude tóm tắt thành trang wiki và tra lại được sau này.")
         cot.append(self.nao_tom_tat)
+        # Sắp tới: mốc có ngày Claude rút từ giấy tờ — đứng đầu vì là thứ phải làm
+        the_m, self.nao_moc = self.the("Sắp tới (60 ngày)")
+        cot.append(the_m)
         the0, noi0 = self.the("Liên kết giữa các trang")
         self.nao_do_thi = DoThiBrain(self.chon_trang_nao) if CO_CAIRO else None
         if self.nao_do_thi:
@@ -687,6 +727,7 @@ class CuaSo(Adw.ApplicationWindow):
             self.nao_log.append(Gtk.Label(label=d[2:], xalign=0, wrap=True, css_classes=["dim-label", "caption"]))
         self.nao_chon.set_label("Đang vẽ liên kết…")
         threading.Thread(target=self.nap_do_thi_nao, daemon=True).start()
+        threading.Thread(target=lambda: GLib.idle_add(self.dat_moc_nao, sap_toi_brain()), daemon=True).start()
         return False
 
     def nap_do_thi_nao(self):
@@ -697,6 +738,70 @@ class CuaSo(Adw.ApplicationWindow):
         g = do_thi_brain()
         vt = xep_do_thi(g["nodes"], g.get("edges", []), *KHUNG_DO_THI) if g else {}
         GLib.idle_add(self.dat_do_thi_nao, g, vt)
+
+    def dat_moc_nao(self, st):
+        self.don(self.nao_moc)
+        if st is None:
+            self.nao_moc.append(self.dong_mo("Chưa đọc được mốc — cần bản Axle đầy đủ (node + brain.js)."))
+            return False
+        esc = lambda s: GLib.markup_escape_text(str(s), -1)   # noqa: E731
+        if not st:
+            self.nao_moc.append(self.dong_mo("Chưa có hạn nào trong 60 ngày tới.",
+                                             "Claude tự rút hạn trả tiền, hết hạn, báo trước… khi đọc giấy tờ mới. Giấy tờ đã gửi trước đây thì bấm Quét."))
+        for x in st[:12]:
+            con = "hôm nay" if x["con"] == 0 else f"còn {x['con']} ngày"
+            nhan = Gtk.Label(xalign=0, wrap=True, css_classes=[] if x.get("nhac") else ["dim-label"])
+            nhan.set_markup(f"<b>{x['ngay'][8:10]}/{x['ngay'][5:7]}</b> · {esc(con)} · {esc(x['viec'])}"
+                            + (f" · <i>{esc(x['ten_trang'])}</i>" if x.get("ten_trang") else ""))
+            self.nao_moc.append(nhan)
+        if len(st) > 12:
+            self.nao_moc.append(self.dong_mo(f"và {len(st) - 12} lần nữa — xem đủ: axle brain moc"))
+        nut = Gtk.Button(label="Quét giấy tờ cũ", halign=Gtk.Align.START,
+                         tooltip_text="Nhờ Claude đọc lại giấy tờ đã gửi để rút hạn trả tiền, hết hạn… (điền sẵn vào ô Bảo Axle làm)")
+        nut.connect("clicked", self.quet_moc)
+        self.nao_moc.append(nut)
+        return False
+
+    def quet_moc(self, *_):
+        self.o_lenh.set_text("Quét Bộ não tìm mốc có ngày trong giấy tờ đã gửi (hạn trả tiền, hết hạn, báo trước, tăng giá) và thêm bằng brain_moc_them.")
+        self.mo_muc("ban")
+        self.o_lenh.grab_focus()
+
+    def kiem_moc(self):
+        """Mỗi 30 phút: mốc nào vào khoảng nhắc thì bật thông báo GNOME (một lần; đúng ngày thêm một lần)."""
+        def worker():
+            st = sap_toi_brain()
+            f = os.path.expanduser("~/.cache/axle/moc-da-bao.json")
+            try:
+                with open(f, encoding="utf-8") as h:
+                    da = json.load(h)
+            except (OSError, ValueError):
+                da = {}
+            bao = moc_can_bao(st, da)
+            if not bao:
+                return
+            hom = datetime.date.today().isoformat()
+            da.update({k: hom for k, _t, _n in bao})
+            cu = (datetime.date.today() - datetime.timedelta(days=120)).isoformat()
+            da = {k: v for k, v in da.items() if v >= cu}
+            try:
+                os.makedirs(os.path.dirname(f), exist_ok=True)
+                with open(f, "w", encoding="utf-8") as h:
+                    json.dump(da, h)
+            except OSError:
+                pass
+            GLib.idle_add(self.gui_thong_bao, bao)
+        threading.Thread(target=worker, daemon=True).start()
+        return True
+
+    def gui_thong_bao(self, bao):
+        app = self.get_application()
+        for khoa, tieu_de, noi_dung in bao:
+            n = Gio.Notification.new(tieu_de)
+            n.set_body(noi_dung)
+            n.set_default_action_and_target_value("app.mo-muc", GLib.Variant.new_string("nao"))
+            app.send_notification(f"moc-{khoa}", n)
+        return False
 
     def dat_do_thi_nao(self, g, vt):
         self.nao_do_thi.dat(g, vt)

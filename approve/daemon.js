@@ -18,7 +18,7 @@ import { addRule, addSession, autoLabel, canRemember, canSession, describeRule, 
   saveRules, tierLine, tierOf, writeDurable } from './rules.js';
 import { buildDigest } from './digest.js';
 import { banChoApp, gopNhatKy, lenhCongCu, tenTepAnToan } from './mota.js';
-import { choApp as brainChoApp, doThi as brainDoThi, tim as brainTim } from '../mcp/brain.js';
+import { choApp as brainChoApp, docMoc as brainDocMoc, doThi as brainDoThi, sapToi as brainSapToi, tim as brainTim } from '../mcp/brain.js';
 import { createAppChannel } from './app-channel.js';
 import { machineState } from './machine-state.js';
 import { requestHash } from '../app/proto.js';
@@ -480,6 +480,8 @@ const app = createAppChannel({
     // nhà chủ (bộ duyệt là root) — chỉ đọc, chỉ trả về điện thoại đã ghép.
     const brainDir = `/home/${ownerUser()}/Axle/Brain`;
     if (what === 'brain') { try { return app.sendTo(d.id, { type: 'state', what: 'brain', data: brainChoApp(brainDir) }); } catch (e) { return app.sendTo(d.id, { type: 'state', what: 'brain', data: { co: false, loi: e.message } }); } }
+    // Mốc có ngày trong 60 ngày tới — app hẹn thông báo ngay trên iPhone (nội dung không đi qua trạm)
+    if (what === 'brain-moc') { try { return app.sendTo(d.id, { type: 'state', what: 'brain-moc', data: { sap_toi: brainSapToi(brainDir, { soNgay: 60 }).slice(0, 60), tong: brainDocMoc(brainDir).length } }); } catch (e) { return app.sendTo(d.id, { type: 'state', what: 'brain-moc', data: { sap_toi: [], tong: 0, loi: e.message } }); } }
     if (what === 'brain-graph') { try { return app.sendTo(d.id, { type: 'state', what: 'brain-graph', data: brainDoThi(brainDir) }); } catch (e) { return app.sendTo(d.id, { type: 'state', what: 'brain-graph', data: { nodes: [], edges: [], loi: e.message } }); } }
     if (what === 'brain-tim') {
       const tk = String(msg?.tu_khoa || '').slice(0, 200);
@@ -561,7 +563,7 @@ const app = createAppChannel({
           return app.sendTo(d.id, { type: 'hoi-result', ok: false, text: `Không lấy được tệp từ trạm (${e.message}) — gửi lại nhé.` });
         }
       }
-      cauDay = `${cau}\n\n(Đính kèm ${tep.length} tệp, đã vào Bộ não Axle (${brain}/raw/${thang}/) — đọc bằng công cụ Read; .xlsx/.docx là nhị phân, hãy đọc bản CSV/văn bản đã đổi:\n${dong.join('\n')}\nSau khi trả lời, INGEST theo QUY-UOC.md (brain_index) bằng brain_ghi: trang wiki/sources/<slug>.md, trang thực thể/dự án liên quan, dòng trong wiki/index.md và wiki/log.md. Nối trang theo mục "Nối trang" của QUY-UOC: tài liệu mới không link thẳng tài liệu cũ chỉ vì chung một bên. Mỗi trang có dòng ngan: (tên ngắn ≤ 20 ký tự, vd HĐ Omron) trong YAML đầu trang.)`;
+      cauDay = `${cau}\n\n(Đính kèm ${tep.length} tệp, đã vào Bộ não Axle (${brain}/raw/${thang}/) — đọc bằng công cụ Read; .xlsx/.docx là nhị phân, hãy đọc bản CSV/văn bản đã đổi:\n${dong.join('\n')}\nSau khi trả lời, INGEST theo QUY-UOC.md (brain_index) bằng brain_ghi: trang wiki/sources/<slug>.md, trang thực thể/dự án liên quan, dòng trong wiki/index.md và wiki/log.md. Nối trang theo mục "Nối trang" của QUY-UOC: tài liệu mới không link thẳng tài liệu cũ chỉ vì chung một bên. Mỗi trang có dòng ngan: (tên ngắn ≤ 20 ký tự, vd HĐ Omron) trong YAML đầu trang. Rút mọi việc có ngày (hạn trả tiền, hết hạn, báo trước) bằng brain_moc_them.)`;
     }
     // 30 phút: Claude có thể phải chờ chủ duyệt (10 phút/yêu cầu) rồi làm tiếp. Không qua bash -l: bị giết thì bash in
     // "Session terminated, killing shell…" lên app (thấy 21/9); axle tự tìm claude ở ~/.local/bin, không cần profile.

@@ -63,6 +63,7 @@ sudo axle duyet [<id> a|h|l|r] · axle duyet --json   duyệt tại máy · vi�
 axle tay cuaso|chup|bam N|go N "chữ"|doc N|mo <app>   tay cho mọi ứng dụng: bảng phần tử qua trợ năng, không tiêm phím
 sudo axle phanxa xuat [--tu ngày]   xuất nhãn (chủ đã quyết gì) cho lớp phản xạ
 axle brain ds|tim <từ>|mo|lint      Bộ não Axle (~/Axle/Brain): tài liệu gửi lên + wiki Claude tự bảo trì; lint = dọn đêm
+axle brain moc [quet]               mốc có ngày rút từ giấy tờ (hạn trả tiền, hết hạn…) sắp tới; quet = Claude đọc lại giấy tờ cũ
                          xem và duyệt yêu cầu ngay tại máy (dùng được cả khi mọi kênh khác hỏng)
 axle claude "câu hỏi" [--tiep] [--dong]
                          Claude Code chạy TRÊN máy này: đọc/tìm thì làm ngay, còn ghi tệp/chạy lệnh
@@ -740,7 +741,7 @@ claude_cmd() {
   local opts=(--mcp-config "$CLAUDE_MCP_CFG"
     --permission-prompt-tool mcp__axle__duyet_quyen
     --allowedTools "Read,Grep,Glob,LS,WebFetch,WebSearch${ro:+,$ro},${bt:-mcp__axle__brain_ghi}"
-    --append-system-prompt "Bạn đang chạy trên máy Axle của chủ. Việc ĐỌC thì cứ làm. Việc ghi tệp, chạy lệnh, xoá sẽ hiện lên điện thoại chủ để duyệt — nói ngắn gọn trước khi xin, đừng xin dồn dập, và bị từ chối thì đừng thử lại bằng cách khác. Có lệnh hay API thì dùng lệnh; chỉ động tới cửa sổ (tay_*) khi việc chỉ tồn tại dưới dạng cửa sổ: tài liệu đang mở chưa lưu, hộp thoại, ứng dụng không có lệnh. Trả lời bằng tiếng Việt, ngắn gọn, gạch đầu dòng khi liệt kê, đừng lặp lại câu hỏi; chủ đọc trên điện thoại. BỘ NÃO AXLE (~/Axle/Brain): câu hỏi về tài liệu, khách hàng, dự án, quyết định cũ → gọi brain_index trước rồi brain_tim/brain_doc, trả lời kèm tên trang/tệp; có tài liệu mới trong raw/ → sau khi trả lời hãy INGEST theo QUY-UOC.md: brain_ghi trang wiki/sources + trang thực thể liên quan, rồi brain_index_them cho từng trang (KHÔNG nối tay vào index.md) và brain_log một dòng; NỐI TRANG: trang tài liệu chỉ link tới thực thể/dự án của chính nó, hai tài liệu chỉ chung một bên thì KHÔNG link thẳng nhau (chi tiết so sánh giữa chúng ghi ở trang thực thể chung), chỉ link thẳng khi cái này sửa đổi/thay thế/là phụ lục của cái kia — app vẽ đồ thị từ đúng các link này; mỗi trang có dòng ngan: trong YAML đầu trang (tên ngắn ≤ 20 ký tự, không trùng trang khác, vd HĐ Omron, HRVN) — đồ thị vẽ bằng tên này; chủ nói ra điều mới đáng nhớ (khách hàng, hẹn, số liệu, quyết định) → ghi vào trang thực thể/quyết định liên quan + một dòng log.md, ngắn gọn, không hỏi lại.")
+    --append-system-prompt "Bạn đang chạy trên máy Axle của chủ. Việc ĐỌC thì cứ làm. Việc ghi tệp, chạy lệnh, xoá sẽ hiện lên điện thoại chủ để duyệt — nói ngắn gọn trước khi xin, đừng xin dồn dập, và bị từ chối thì đừng thử lại bằng cách khác. Có lệnh hay API thì dùng lệnh; chỉ động tới cửa sổ (tay_*) khi việc chỉ tồn tại dưới dạng cửa sổ: tài liệu đang mở chưa lưu, hộp thoại, ứng dụng không có lệnh. Trả lời bằng tiếng Việt, ngắn gọn, gạch đầu dòng khi liệt kê, đừng lặp lại câu hỏi; chủ đọc trên điện thoại. BỘ NÃO AXLE (~/Axle/Brain): câu hỏi về tài liệu, khách hàng, dự án, quyết định cũ → gọi brain_index trước rồi brain_tim/brain_doc, trả lời kèm tên trang/tệp; có tài liệu mới trong raw/ → sau khi trả lời hãy INGEST theo QUY-UOC.md: brain_ghi trang wiki/sources + trang thực thể liên quan, rồi brain_index_them cho từng trang (KHÔNG nối tay vào index.md) và brain_log một dòng; NỐI TRANG: trang tài liệu chỉ link tới thực thể/dự án của chính nó, hai tài liệu chỉ chung một bên thì KHÔNG link thẳng nhau (chi tiết so sánh giữa chúng ghi ở trang thực thể chung), chỉ link thẳng khi cái này sửa đổi/thay thế/là phụ lục của cái kia — app vẽ đồ thị từ đúng các link này; mỗi trang có dòng ngan: trong YAML đầu trang (tên ngắn ≤ 20 ký tự, không trùng trang khác, vd HĐ Omron, HRVN) — đồ thị vẽ bằng tên này; MỐC: đọc giấy tờ xong thì rút mọi việc có ngày (tiền trả định kỳ, hết hạn, hạn báo trước, tăng giá, bảo hành) bằng brain_moc_them — gọi brain_moc trước cho khỏi trùng, viec ngắn có số tiền và đối tác, lặp thì lap thang hoặc nam và den là ngày hết hợp đồng, không đoán ngày — máy và điện thoại tự nhắc; chủ nói ra điều mới đáng nhớ (khách hàng, hẹn, số liệu, quyết định) → ghi vào trang thực thể/quyết định liên quan + một dòng log.md, ngắn gọn, không hỏi lại.")
   # --dong (Bàn dùng): sự kiện JSON từng dòng → bộ lọc in chữ trả lời NGAY khi có + mỗi lần dùng công cụ một dòng "→".
   # </dev/null: claude chờ stdin 3 giây nếu thấy ống dẫn (đo 21/9) — Bàn/cron không có gì để đưa vào.
   if [ -n "$dong" ]; then
@@ -884,6 +885,17 @@ brain_cmd() {   # axle brain [ds|tim <từ khoá>|mo|duong|dothi] — Bộ não 
             AXLE_BRAIN_DIR="$B" /usr/bin/node -e 'import("/opt/axle/mcp/brain.js").then((b) => { for (const x of b.tim(process.argv[1])) console.log(`${x.duong}  (${x.diem})\n  ${x.trich.join("\n  ")}`); })' "${*:2}" ;;
     mo)     xdg-open "$B" >/dev/null 2>&1 & echo "Đã mở $B" ;;
     duong)  echo "$B" ;;
+    moc)    # mốc có ngày (moc.json): hạn trả tiền, hết hạn, báo trước… — `quet` = Claude đọc lại giấy tờ cũ để rút mốc
+            if [ "${2:-}" = quet ]; then
+              [ -r "$HOME/.config/axle/claude.env" ] || { echo "Máy chưa có token Claude (~/.config/axle/claude.env) — chưa quét được" >&2; exit 1; }
+              exec timeout 1500 /usr/local/bin/axle claude "Quét Bộ não tìm mốc có ngày: gọi brain_moc xem đã có gì, rồi đọc từng trang tài liệu trong wiki/sources (brain_index để biết danh sách, brain_doc để đọc) và thêm MỌI việc có ngày bằng brain_moc_them theo mục Mốc có ngày của QUY-UOC — tiền trả định kỳ, hết hạn, hạn báo trước, tăng giá, bảo hành. Không đoán ngày: tài liệu không ghi ngày cụ thể thì bỏ qua. Cuối cùng liệt kê ngắn các mốc vừa thêm." --dong
+            fi
+            AXLE_BRAIN_DIR="$B" /usr/bin/node -e 'import("/opt/axle/mcp/brain.js").then((b) => {
+              const ds = b.docMoc(), st = b.sapToi(undefined, { soNgay: 60 });
+              console.log(`Mốc có ngày: ${ds.length} · sắp tới trong 60 ngày: ${st.length}`);
+              for (const x of st) console.log(`  ${x.ngay.slice(8, 10)}/${x.ngay.slice(5, 7)}  ${(x.con === 0 ? "HÔM NAY" : `còn ${x.con} ngày`).padEnd(12)}${x.nhac ? " !" : "  "} ${x.viec}${x.ten_trang ? `  · ${x.ten_trang}` : ""}`);
+              if (!ds.length) console.log("  (chưa có — gửi giấy tờ qua Hỏi Axle, hoặc: axle brain moc quet)");
+            })' ;;
     dothi)  # đồ thị liên kết wiki (JSON: nodes[{id,ten,loai,duong,mo_ta,so_link}], edges[{a,b}]) — cùng hàm app và Bàn dùng
             AXLE_BRAIN_DIR="$B" /usr/bin/node -e 'import("/opt/axle/mcp/brain.js").then((b) => console.log(JSON.stringify(b.doThi())))' ;;
     lint)   # dọn đêm (timer axle-brain-lint 21:30): Claude làm LINT theo QUY-UOC — link hỏng, trang mồ côi, trang mỏng, thiếu trang

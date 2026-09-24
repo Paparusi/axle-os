@@ -103,6 +103,25 @@ try {
     && sau.includes('Hợp đồng ABC bản mới') && sau.includes('[[hop-dong-thue-kho]]') && (sau.match(/\[\[cong-ty-abc\]\]/g) || []).length === 1,
     'gonIndex: một mục gốc, mỗi trang một dòng, dòng mới hơn thắng, không mất trang nào');
   ok(b.gonIndex() === 0 && readFileSync(fIdx, 'utf8') === sau && b.kiem().index_trung_muc.length === 0, 'gonIndex: chạy lại không đổi gì, kiem hết báo');
+  // mốc có ngày
+  const loi = (f) => { try { f(); return ''; } catch (e) { return e.message; } };
+  ok(/ngay/.test(loi(() => b.themMoc({ viec: 'x', ngay: '2026-02-30' }))) && /lap/.test(loi(() => b.themMoc({ viec: 'x', ngay: '2026-10-10', lap: 'tuan' })))
+    && /trang/.test(loi(() => b.themMoc({ viec: 'x', ngay: '2026-10-10', trang: 'khong-co-trang-nay' })))
+    && /den/.test(loi(() => b.themMoc({ viec: 'x', ngay: '2026-10-10', lap: 'thang', den: '2026-01-01' }))), 'themMoc: chặn ngày không có thật, lap lạ, trang không có, den trước ngay');
+  const thue = b.themMoc({ viec: 'Đóng tiền thuê kho 20 triệu cho ABC', ngay: '2026-10-10', lap: 'thang', den: '2027-08-31', nhac_truoc: 3, trang: 'hop-dong-thue-kho' });
+  b.themMoc({ viec: 'Đóng tiền thuê kho 20 triệu cho ABC', ngay: '2026-10-10', lap: 'thang', den: '2027-08-31', nhac_truoc: 3, trang: '[[hop-dong-thue-kho]]' });
+  b.themMoc({ viec: 'Hết hạn hợp đồng Omron', ngay: '2027-01-31', trang: 'hop-dong-omron' });
+  b.themMoc({ viec: 'Trả lương cuối tháng', ngay: '2026-01-31', lap: 'thang' });
+  ok(b.docMoc().length === 3 && thue.id.startsWith('m'), `themMoc: thêm trùng (cả dạng [[slug]]) thì không nhân đôi (${b.docMoc().length} mốc)`);
+  const cuoiThang = b.cacLan(b.docMoc().find((m) => m.viec === 'Trả lương cuối tháng'), '2026-02-01', '2026-04-30');
+  ok(JSON.stringify(cuoiThang) === '["2026-02-28","2026-03-31","2026-04-30"]', `cacLan: ngày 31 lặp tháng → tháng thiếu ngày lấy ngày cuối (${cuoiThang})`);
+  ok(b.cacLan({ ngay: '2026-10-10', lap: 'thang', den: '2026-12-15' }, '2026-01-01', '2027-12-31').length === 3, 'cacLan: dừng ở ngày den');
+  const st = b.sapToi(b.BRAIN, { tu: '2026-10-07', soNgay: 40 });
+  const tk = st.filter((x) => x.viec.startsWith('Đóng tiền thuê kho'));
+  ok(tk.length === 2 && tk[0].ngay === '2026-10-10' && tk[0].con === 3 && tk[0].nhac === true && tk[1].nhac === false && tk[0].ten_trang === 'HĐ thuê kho',
+    `sapToi: lần 10/10 còn 3 ngày → đã vào khoảng nhắc; tên trang ngắn (${JSON.stringify(tk[0])})`);
+  ok(st.every((x, i) => i === 0 || st[i - 1].ngay <= x.ngay) && !st.some((x) => x.viec.startsWith('Hết hạn hợp đồng Omron')), 'sapToi: xếp theo ngày, ngoài 40 ngày thì không có');
+  ok(/Đã xoá/.test(b.xoaMoc(thue.id)) && b.docMoc().length === 2 && /Không có/.test(loi(() => b.xoaMoc(thue.id))), 'xoaMoc: xoá được, xoá lại thì báo không có');
 } finally {
   // brain_ghi commit git ở nền → chờ nó xong, dọn có thử lại (không thì rmdir .git/objects đua với git: ENOTEMPTY)
   await new Promise((r) => setTimeout(r, 800));

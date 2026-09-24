@@ -86,6 +86,16 @@ TRANG = {
 for p, (ten, loai, than) in TRANG.items():
     with open(os.path.join(B, "wiki", p), "w", encoding="utf-8") as f:
         f.write(f"---\ntitle: {ten}\ntype: {loai}\n---\n{than}\n")
+# Mốc giả cho thẻ "Sắp tới" (ngày tính theo hôm nay để ảnh luôn có mốc trong khoảng nhắc)
+_h = datetime.date.today()
+with open(os.path.join(B, "moc.json"), "w", encoding="utf-8") as f:
+    json.dump({"phien_ban": 1, "moc": [
+        {"id": "m1", "viec": "Đóng tiền thuê văn phòng 17 triệu cho bà Hồng Trân", "ngay": (_h + datetime.timedelta(days=2)).isoformat(),
+         "lap": "thang", "den": None, "nhac_truoc": 3, "trang": "hop-dong-omron-hrvn-2026-09"},
+        {"id": "m2", "viec": "Báo trước 30 ngày nếu không gia hạn hợp đồng", "ngay": (_h + datetime.timedelta(days=15)).isoformat(),
+         "lap": "mot_lan", "den": None, "nhac_truoc": 7, "trang": None},
+        {"id": "m3", "viec": "Hết hạn hợp đồng dịch vụ Omron", "ngay": (_h + datetime.timedelta(days=45)).isoformat(),
+         "lap": "mot_lan", "den": None, "nhac_truoc": 30, "trang": "hop-dong-omron-hrvn-2026-09"}]}, f, ensure_ascii=False)
 with open(os.path.join(B, "wiki/index.md"), "a", encoding="utf-8") as f:
     f.write("\n## Tài liệu (sources)\n- [[hop-dong-omron-hrvn-2026-09]] — hợp đồng dịch vụ 9/2026\n")
 

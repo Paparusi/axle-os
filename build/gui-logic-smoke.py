@@ -101,5 +101,22 @@ with open(os.path.join(T, "wiki/sources/hop-dong-abc.md"), "w", encoding="utf-8"
 gd = do_thi_brain(T)
 ok(gd and {n["id"] for n in gd["nodes"]} == {"abc", "hop-dong-abc"} and len(gd["edges"]) == 1, "do_thi_brain: chạy doThi của brain.js trên Bộ não thật (2 trang, 1 cạnh)")
 
+moc_can_bao, sap_toi_brain = g["moc_can_bao"], g["sap_toi_brain"]
+st = [{"id": "m1", "viec": "Đóng tiền thuê 17 triệu", "ngay": "2026-10-10", "con": 3, "nhac": True, "ten_trang": "HĐ thuê nhà"},
+      {"id": "m2", "viec": "Hết hạn HĐ Omron", "ngay": "2026-11-20", "con": 44, "nhac": False},
+      {"id": "m3", "viec": "Gia hạn bảo hiểm", "ngay": "2026-10-07", "con": 0, "nhac": True}]
+bao = moc_can_bao(st, {})
+ok([b[1] for b in bao] == ["Còn 3 ngày: Đóng tiền thuê 17 triệu", "Hôm nay: Gia hạn bảo hiểm"] and bao[0][2] == "10/10 · HĐ thuê nhà",
+   "moc_can_bao: vào khoảng nhắc thì báo, đúng ngày ghi Hôm nay, chưa tới khoảng nhắc thì im")
+ok(moc_can_bao(st, {k: "2026-10-07" for k, _t, _n in bao}) == [], "moc_can_bao: đã báo rồi thì không báo lặp")
+ok(moc_can_bao([dict(st[0], con=0, ngay="2026-10-10")], {bao[0][0]: "2026-10-07"})[0][1].startswith("Hôm nay"), "moc_can_bao: tới đúng ngày thì báo thêm lần nữa")
+T2 = tempfile.mkdtemp(prefix="axle-smoke-moc-")
+subprocess.run(["bash", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "core/desktop/brain-init.sh"), T2], check=True, capture_output=True)
+with open(os.path.join(T2, "moc.json"), "w", encoding="utf-8") as f:
+    json.dump({"phien_ban": 1, "moc": [{"id": "m9", "viec": "Đóng tiền điện", "ngay": datetime.date.today().isoformat(), "lap": "thang",
+                                        "den": None, "nhac_truoc": 2, "trang": None}]}, f)
+st2 = sap_toi_brain(T2, 40)
+ok(st2 and st2[0]["con"] == 0 and st2[0]["nhac"] and len(st2) >= 2, f"sap_toi_brain: chạy sapToi của brain.js trên Bộ não thật ({st2 and len(st2)} lần)")
+
 if fail: print(f"✗ {fail} mục hỏng"); sys.exit(1)
 print("✓ phần thuần của cửa sổ Axle đạt")

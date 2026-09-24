@@ -67,6 +67,11 @@ thuẫn — sửa được thì sửa.
 - Số liệu lấy từ tài liệu thì ghi kèm nguồn; suy đoán thì ghi `confidence: low`.
 - Trả lời chủ bằng tiếng Việt; trang wiki cũng tiếng Việt, ngắn, có số.
 
+## Mốc có ngày (máy và điện thoại tự nhắc)
+Đọc giấy tờ xong, rút MỌI việc có ngày bằng `brain_moc_them` (gọi `brain_moc` trước cho khỏi trùng): tiền trả định kỳ
+(lap=thang hoặc nam, den = ngày hết hợp đồng), ngày hết hạn, hạn báo trước khi chấm dứt/gia hạn, ngày tăng giá, hết bảo
+hành. `viec` ngắn, có số tiền + đối tác; `trang` = trang tài liệu nguồn. Hết việc / rút sai thì `brain_moc_xoa`.
+
 ## Nối trang (app và Bàn vẽ đồ thị từ đúng các [[link]] này — link sai là chủ thấy nối sai)
 - Trang tài liệu (sources) chỉ link tới thực thể / dự án / khái niệm của CHÍNH nó.
 - Hai tài liệu chỉ chung một bên (vd cùng một công ty) thì KHÔNG link thẳng nhau. Chi tiết so sánh giữa chúng (lệch địa

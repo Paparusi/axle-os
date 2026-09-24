@@ -380,6 +380,15 @@ link tới trang chưa có thành nút loại `thieu` (vẽ đứt nét đỏ; b
 (hộp trạm 64KB đã mã hoá) — wiki lớn thì giữ trang nhiều liên kết nhất, `bo_bot` = số trang bị ẩn (0.1.140).
 App: `query brain-graph` → tấm **Liên kết trong Bộ não** trong 📚: xếp lực (đẩy–kéo, 200 vòng ngay trên điện thoại),
 màu theo loại, chạm chấm → thấy nó nối với ai + nút "Hỏi về trang này". Thử: test-brain 32 ca (5 ca đồ thị).
+**Mốc có ngày (24/9, 0.1.154, phần máy của hướng "Bộ não tự nhắc hạn"):** `moc.json` ở gốc Bộ não (git), chỉ ghi qua
+`brain_moc_them`/`brain_moc_xoa` (đọc: `brain_moc`) — mỗi mốc: viec, ngay (lần đầu), lap mot_lan|thang|nam, den (dừng
+lặp, vd hết hợp đồng), nhac_truoc, trang. `cacLan` tính các lần (ngày 31 lặp tháng → tháng thiếu ngày lấy ngày cuối),
+`sapToi` trả các lần trong N ngày kèm `con` (còn mấy ngày) và `nhac` (đã vào khoảng nhắc). INGEST dặn rút mọi việc có
+ngày, không đoán ngày. `axle brain moc [quet]` (quet = Claude đọc lại giấy tờ cũ). Daemon `query brain-moc` cho app.
+Bàn → Tri thức: thẻ **Sắp tới (60 ngày)** đứng đầu + nút "Quét giấy tờ cũ" (điền sẵn vào ô Bảo Axle làm); Bàn tự bật
+thông báo GNOME khi mốc vào khoảng nhắc và đúng ngày (mỗi lần một lần, nhớ ở ~/.cache/axle/moc-da-bao.json), bấm thông
+báo mở trang Tri thức. Cũng trong 0.1.153: mọi công cụ brain_* dùng thẳng (trước đó brain_index_them/brain_log phải xin
+duyệt nên Claude nối tay → index.md nhân đôi mục), cấm nối vào index.md, `gonIndex` gộp mục trùng.
 **Đồ thị đỡ rối (24/9, 0.1.152):** Bi gửi ảnh app "rối quá" — nhãn là tiêu đề 47–77 ký tự đè nhau, cắt ở mép; thực thể
 (xanh lá) với khái niệm (xanh ngọc) gần trùng màu; chú thích liệt kê cả loại không có. Sửa: `doThi` trả `ten` = tên
 ngắn (dòng `ngan:` trong YAML, không có thì `tenNgan()` cắt: bỏ (…), lấy trước " — ", bỏ đuôi công ty, Hợp đồng→HĐ,

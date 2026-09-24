@@ -5,6 +5,7 @@
 // ghi); mỗi lần ghi = một commit git (quay lại được) → vì thế brain_ghi được `axle claude` cho dùng thẳng, không hỏi.
 // Chỉ trong ngữ cảnh chủ (agent phụ trong hộp cát không đọc được nhà chủ).
 import { execFile, execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, appendFileSync } from 'node:fs';
 import { homedir, userInfo } from 'node:os';
 import path from 'node:path';
@@ -371,10 +372,147 @@ export function register(tool) {
     title: 'Write or append a wiki page in the Axle Brain',
     description: 'Create/overwrite (che_do=ghi) or append (che_do=noi) a Markdown page under wiki/ following QUY-UOC.md '
       + '(YAML header, [[links]], Vietnamese). raw/ is immutable. Every write is a git commit and can be reverted; '
-      + 'no owner approval needed — so keep pages factual and cite sources. Update wiki/index.md and wiki/log.md too.',
+      + 'no owner approval needed — so keep pages factual and cite sources. Update wiki/index.md (brain_index_them) and wiki/log.md (brain_log) too.',
     inputSchema: { duong: DUONG, noi_dung: z.string().max(200_000), che_do: z.enum(['ghi', 'noi']).default('ghi') },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
   }, async ({ duong, noi_dung, che_do }) => { khoiTao(); return `Đã ${che_do === 'noi' ? 'nối vào' : 'ghi'} ${ghi(duong, noi_dung, che_do)}`; });
+
+  tool('brain_moc', {
+    title: 'List dated obligations (mốc) and what is coming up',
+    description: 'Every mốc in moc.json plus occurrences in the next 60 days. Call it before brain_moc_them so you do not add duplicates.',
+    inputSchema: {},
+    annotations: { readOnlyHint: true },
+  }, async () => { khoiTao(); return JSON.stringify({ moc: docMoc(), sap_toi: sapToi() }, null, 1); });
+
+  tool('brain_moc_them', {
+    title: 'Add a dated obligation (mốc) extracted from a document',
+    description: 'One item per obligation that has a date: recurring payments (rent due the 10th of each month → lap=thang, den=contract end), '
+      + 'expiry / renewal / notice-before-termination deadlines, price increases, warranty ends (lap=mot_lan or nam). '
+      + 'viec: short Vietnamese with amount and counterparty, e.g. "Đóng tiền thuê văn phòng 17 triệu cho bà Hồng Trân". '
+      + 'trang: slug of the source wiki page (write that page first). Idempotent for the same viec/ngay/lap/trang. '
+      + 'The owner is reminded on the machine and on the phone nhac_truoc days before and on the day.',
+    inputSchema: {
+      viec: z.string().max(160),
+      ngay: z.string().describe('YYYY-MM-DD — lần đầu tiên của mốc'),
+      lap: z.enum(['mot_lan', 'thang', 'nam']).default('mot_lan'),
+      den: z.string().optional().describe('YYYY-MM-DD — mốc lặp dừng sau ngày này (vd ngày hết hợp đồng)'),
+      nhac_truoc: z.number().int().min(0).max(60).default(3),
+      trang: z.string().max(200).optional().describe('slug trang wiki nguồn'),
+    },
+    annotations: { readOnlyHint: false, idempotentHint: true },
+  }, async (a) => { khoiTao(); return JSON.stringify(themMoc(a)); });
+
+  tool('brain_moc_xoa', {
+    title: 'Remove a mốc (obligation ended, or it was extracted wrongly)',
+    inputSchema: { id: z.string().max(20) },
+    annotations: { readOnlyHint: false, destructiveHint: true },
+  }, async ({ id }) => { khoiTao(); return xoaMoc(id); });
 }
 
-export const BRAIN_TOOLS = ['brain_index', 'brain_tim', 'brain_doc', 'brain_tai_lieu', 'brain_ghi', 'brain_index_them', 'brain_log', 'brain_kiem'];
+// ---------- Mốc có ngày (24/9): hạn trả tiền, hết hạn, báo trước, tăng giá, bảo hành… rút từ giấy tờ ----------
+// moc.json ở gốc Bộ não (git giữ lịch sử), chỉ ghi qua brain_moc_them / brain_moc_xoa. Bàn nhắc trên máy; app hẹn thông
+// báo ngay trên iPhone (nội dung không đi qua trạm, máy tắt vẫn nhắc).
+const LAP = ['mot_lan', 'thang', 'nam'];
+const iso = (y, m, d) => `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+function ngayThat(s) {
+  if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const [y, m, d] = s.split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d));
+  return t.getUTCFullYear() === y && t.getUTCMonth() === m - 1 && t.getUTCDate() === d;
+}
+export const homNay = (t = new Date()) => iso(t.getFullYear(), t.getMonth() + 1, t.getDate());   // theo giờ máy
+const cachNgay = (a, b) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
+const congNgay = (a, n) => { const t = new Date(Date.parse(`${a}T00:00:00Z`) + n * 86_400_000); return iso(t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate()); };
+
+// Lần thứ n (từ 0) của một mốc; tháng thiếu ngày (31 → tháng 2) thì lấy ngày cuối tháng
+function lanThu(ngay, lap, n) {
+  if (lap === 'mot_lan') return n === 0 ? ngay : null;
+  const [y, m, d] = ngay.split('-').map(Number);
+  const yy = lap === 'nam' ? y + n : y + Math.floor((m - 1 + n) / 12);
+  const mm = lap === 'nam' ? m : ((m - 1 + n) % 12) + 1;
+  return iso(yy, mm, Math.min(d, new Date(Date.UTC(yy, mm, 0)).getUTCDate()));
+}
+// Các lần rơi vào [tu, den], dừng ở m.den nếu có
+export function cacLan(m, tu, den) {
+  const ra = [];
+  for (let n = 0; n < 2400; n++) {
+    const x = lanThu(m.ngay, m.lap, n);
+    if (!x || x > den || (m.den && x > m.den)) break;
+    if (x >= tu) ra.push(x);
+  }
+  return ra;
+}
+
+const fMoc = (dir) => path.join(dir, 'moc.json');
+export function docMoc(dir = BRAIN) {
+  try { const d = JSON.parse(readFileSync(fMoc(dir), 'utf8')); return Array.isArray(d.moc) ? d.moc : []; } catch { return []; }
+}
+function ghiMoc(ds, dir, viec) {
+  writeFileSync(fMoc(dir), `${JSON.stringify({ phien_ban: 1, moc: ds }, null, 1)}\n`);
+  execFile('git', ['-C', dir, 'add', '-A'], () => execFile('git', ['-C', dir, 'commit', '-qm', `Claude: mốc ${viec}`], () => {}));
+}
+function timTrang(slug, dir) {
+  const tim = (d) => {
+    for (const f of readdirSync(d)) {
+      const p = path.join(d, f);
+      if (statSync(p).isDirectory()) { const r = tim(p); if (r) return r; } else if (f === `${slug}.md`) return p;
+    }
+    return null;
+  };
+  try { return tim(path.join(dir, 'wiki')); } catch { return null; }
+}
+
+export function themMoc({ viec, ngay, lap = 'mot_lan', den = null, nhac_truoc: nhacTruoc = 3, trang = null } = {}, dir = BRAIN) {
+  const v = String(viec ?? '').trim().replace(/\s+/g, ' ');
+  if (!v || v.length > 160) throw new Error('viec: 1–160 ký tự — làm gì, bao nhiêu tiền, với ai');
+  if (!ngayThat(ngay)) throw new Error('ngay: YYYY-MM-DD, ngày có thật (lần đầu tiên của mốc)');
+  if (!LAP.includes(lap)) throw new Error('lap: mot_lan | thang | nam');
+  if (den && (!ngayThat(den) || den < ngay)) throw new Error('den: YYYY-MM-DD, không trước ngay (vd ngày hết hợp đồng)');
+  const nt = Number(nhacTruoc);
+  if (!Number.isInteger(nt) || nt < 0 || nt > 60) throw new Error('nhac_truoc: số ngày 0–60');
+  const sl = trang ? String(trang).replace(/^\[\[|\]\]$/g, '').trim() || null : null;
+  if (sl && !timTrang(sl, dir)) throw new Error(`trang: không có wiki/**/${sl}.md — ghi trang tài liệu trước rồi mới thêm mốc`);
+  const id = `m${createHash('sha1').update(`${v.toLowerCase()}|${ngay}|${lap}|${sl ?? ''}`).digest('hex').slice(0, 10)}`;
+  const ds = docMoc(dir).filter((m) => m.id !== id);
+  ds.push({ id, viec: v, ngay, lap, den: den || null, nhac_truoc: nt, trang: sl, tao: new Date().toISOString() });
+  ds.sort((a, b) => a.ngay.localeCompare(b.ngay) || a.viec.localeCompare(b.viec));
+  ghiMoc(ds, dir, v.slice(0, 60));
+  return { id, lan_toi: cacLan(ds.find((m) => m.id === id), homNay(), congNgay(homNay(), 3660))[0] ?? null };
+}
+
+export function xoaMoc(id, dir = BRAIN) {
+  const ds = docMoc(dir);
+  const con = ds.filter((m) => m.id !== id);
+  if (con.length === ds.length) throw new Error(`Không có mốc ${id}`);
+  ghiMoc(con, dir, `xoá ${id}`);
+  return `Đã xoá mốc ${id}`;
+}
+
+// Các lần sắp tới trong soNgay ngày: {id, viec, ngay, con, nhac (đã vào khoảng nhắc), nhac_truoc, lap, trang, ten_trang}
+export function sapToi(dir = BRAIN, { tu = homNay(), soNgay = 60 } = {}) {
+  const den = congNgay(tu, soNgay);
+  const tenCache = new Map();
+  const tenTrang = (sl) => {
+    if (!sl) return null;
+    if (!tenCache.has(sl)) {
+      let t = sl;
+      try {
+        const dau = /^---\n([\s\S]*?)\n---/.exec(readFileSync(timTrang(sl, dir), 'utf8'))?.[1] ?? '';
+        t = (/^ngan:\s*(.+)$/m.exec(dau)?.[1] ?? '').trim() || tenNgan((/^title:\s*(.+)$/m.exec(dau)?.[1] ?? sl).trim());
+      } catch { /* trang đã xoá — giữ slug */ }
+      tenCache.set(sl, t);
+    }
+    return tenCache.get(sl);
+  };
+  const ra = [];
+  for (const m of docMoc(dir)) {
+    for (const x of cacLan(m, tu, den)) {
+      const con = cachNgay(tu, x);
+      ra.push({ id: m.id, viec: m.viec, ngay: x, con, nhac: con <= m.nhac_truoc, nhac_truoc: m.nhac_truoc, lap: m.lap, trang: m.trang, ten_trang: tenTrang(m.trang) });
+    }
+  }
+  return ra.sort((a, b) => a.ngay.localeCompare(b.ngay) || a.viec.localeCompare(b.viec));
+}
+
+export const BRAIN_TOOLS = ['brain_index', 'brain_tim', 'brain_doc', 'brain_tai_lieu', 'brain_ghi', 'brain_index_them', 'brain_log', 'brain_kiem',
+  'brain_moc', 'brain_moc_them', 'brain_moc_xoa'];
