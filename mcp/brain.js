@@ -81,6 +81,10 @@ export function tim(tuKhoa, { toiDa = 12, dir = BRAIN } = {}) {
 export function ghi(p, noiDung, cheDo = 'ghi', dir = BRAIN) {
   const abs = duongAnToan(p, { ghi: true, dir });
   if (typeof noiDung !== 'string' || noiDung.length > 200_000) throw new Error('Nội dung phải là chuỗi ≤ 200.000 ký tự');
+  // 24/9: nối thẳng vào cuối index.md là sinh mục trùng ("## Tài liệu (sources) (cập nhật …, tiếp)") → bắt dùng brain_index_them
+  if (cheDo === 'noi' && path.relative(dir, abs) === path.join('wiki', 'index.md')) {
+    throw new Error('Không nối vào wiki/index.md — dùng brain_index_them để đặt dòng vào đúng mục');
+  }
   mkdirSync(path.dirname(abs), { recursive: true });
   if (cheDo === 'noi') appendFileSync(abs, (existsSync(abs) && !readFileSync(abs, 'utf8').endsWith('\n') ? '\n' : '') + noiDung + (noiDung.endsWith('\n') ? '' : '\n'));
   else writeFileSync(abs, noiDung);
@@ -100,7 +104,43 @@ export function taiLieu(toiDa = 50, dir = BRAIN) {
 // Thêm/thay MỘT dòng trang vào đúng mục của wiki/index.md — idempotent theo [[slug]] (có rồi thì thay dòng), không nhân
 // đôi tiêu đề mục (lỗi 21/9: Claude "nối" cả khối vào index.md → 6 mục trống + 3 mục trùng, LINT phải dọn). Mục không
 // có thì tạo ở cuối.
+// Tên gốc của một mục: bỏ đuôi "(cập nhật …)" mà Claude hay thêm khi nối tay — "(sources)" thì giữ
+const mucGoc = (h) => h.replace(/^#+\s*/, '').replace(/\s*\((cập nhật|cap nhat|update)[^)]*\)\s*$/i, '').trim();
+
+// Gộp mục trùng trong index.md về một mục gốc, mỗi trang một dòng (dòng xuất hiện SAU thắng — mới hơn), giữ thứ tự mục
+// lần đầu xuất hiện. Sinh ra 24/9: Claude thiếu quyền dùng brain_index_them nên nối thẳng → mục nhân đôi. Trả số mục đã gộp.
+export function gonIndex(dir = BRAIN) {
+  const f = duongAnToan('wiki/index.md', { ghi: true, dir });
+  if (!existsSync(f)) return 0;
+  const cu = readFileSync(f, 'utf8');
+  const dau = []; const muc = new Map(); let cur = null; let soMuc = 0;
+  for (const l of cu.split('\n')) {
+    if (/^##\s+/.test(l)) {
+      soMuc++;
+      const ten = mucGoc(l); const k = ten.toLowerCase();
+      if (!muc.has(k)) muc.set(k, { ten, dong: [] });
+      cur = muc.get(k);
+    } else if (cur) { if (l.trim()) cur.dong.push(l); } else dau.push(l);
+  }
+  const cuoiCung = new Map();   // slug → [mục, dòng] lần cuối
+  for (const [k, m] of muc) for (const l of m.dong) { const s = /\[\[([^\]|#]+)/.exec(l)?.[1]?.trim(); if (s) cuoiCung.set(s, [k, l]); }
+  while (dau.length && dau[dau.length - 1].trim() === '') dau.pop();
+  const ra = [...dau, ''];
+  for (const [k, m] of muc) {
+    ra.push(`## ${m.ten}`);
+    for (const l of m.dong) { const s = /\[\[([^\]|#]+)/.exec(l)?.[1]?.trim(); if (!s || (cuoiCung.get(s)[0] === k && cuoiCung.get(s)[1] === l)) ra.push(l); }
+    ra.push('');
+  }
+  const moi = ra.join('\n').replace(/\n{3,}/g, '\n\n');
+  if (moi !== cu) {
+    writeFileSync(f, moi);
+    execFile('git', ['-C', dir, 'add', '-A'], () => execFile('git', ['-C', dir, 'commit', '-qm', 'Axle: gộp mục trùng trong index.md'], () => {}));
+  }
+  return soMuc - muc.size;
+}
+
 export function indexThem(muc, dong, dir = BRAIN) {
+  gonIndex(dir);   // lỡ ai đó đã nối tay sinh mục trùng thì gộp trước, rồi mới đặt dòng
   const f = duongAnToan('wiki/index.md', { ghi: true, dir });
   const slug = /\[\[([^\]]+)\]\]/.exec(dong)?.[1];
   if (!slug) throw new Error('Dòng phải chứa [[tên-trang]]');
@@ -181,8 +221,16 @@ export function kiem(dir = BRAIN) {
     const dau = dauTrang(t.noiDung);
     if ((/^title:\s*(.+)$/m.exec(dau)?.[1] ?? '').trim().length > 20 && !/^ngan:\s*\S/m.test(dau)) thieuNgan.push(t.duong);
   }
+  // Mục trùng trong index.md (cùng tên gốc, hoặc có đuôi "(cập nhật …)")
+  const daThay = new Set(); const trungMuc = [];
+  for (const l of index.split('\n')) {
+    if (!/^##\s+/.test(l)) continue;
+    const k = mucGoc(l).toLowerCase();
+    if (daThay.has(k) || mucGoc(l) !== l.replace(/^#+\s*/, '').trim()) trungMuc.push(l.replace(/^#+\s*/, '').trim());
+    daThay.add(k);
+  }
   return { so_trang: trang.size, link_hong: linkHongUniq, mo_coi: moCoi, mong, thieu_dau: thieuDau, tai_lieu_chua_trang: chuaTrang,
-    nguon_noi_nguon: [...nguonNoi.values()], thieu_ten_ngan: thieuNgan };
+    nguon_noi_nguon: [...nguonNoi.values()], thieu_ten_ngan: thieuNgan, index_trung_muc: trungMuc };
 }
 
 // ĐỒ THỊ liên kết wiki (app vẽ): nút = trang (slug, tiêu đề, loại), cạnh = [[link]] (một cạnh cho mỗi cặp); link tới
@@ -313,7 +361,8 @@ export function register(tool) {
       + 'documents in raw/ with no page mentioning them, and source pages linking directly to another source page (nguon_noi_nguon: '
       + 'allowed only when one amends/replaces/annexes the other; otherwise move the shared detail to the common entity page, '
       + 'link that page, and remove the direct link), and pages with a long title but no short name (thieu_ten_ngan: add a '
-      + '`ngan:` line, ≤20 chars, distinct from other pages, to the YAML header). Run this FIRST when asked to LINT; fix what it lists; do not guess.',
+      + '`ngan:` line, ≤20 chars, distinct from other pages, to the YAML header), and duplicated sections in index.md '
+      + '(index_trung_muc: any brain_index_them call merges them). Run this FIRST when asked to LINT; fix what it lists; do not guess.',
     inputSchema: {},
     annotations: { readOnlyHint: true },
   }, async () => { khoiTao(); return JSON.stringify(kiem(), null, 1); });

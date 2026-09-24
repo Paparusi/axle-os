@@ -91,6 +91,18 @@ try {
   const tn = b.kiem().thieu_ten_ngan;
   ok(!tn.includes('wiki/sources/hop-dong-omron.md') && tn.includes('wiki/concepts/kn-1.md') && !tn.includes('wiki/entities/cong-ty-abc.md'),
     'kiem: tiêu đề dài chưa có ngan: thì báo; có ngan: hoặc tiêu đề ngắn thì không');
+  // index.md: cấm nối tay; mục trùng (Claude nối tay 24/9) → kiem báo, gonIndex/brain_index_them gộp về mục gốc
+  let loiNoi = ''; try { b.ghi('wiki/index.md', '## Tài liệu (sources) (cập nhật 2026-09-24)\n- [[x]] — y', 'noi'); } catch (e) { loiNoi = e.message; }
+  ok(/brain_index_them/.test(loiNoi), 'brain_ghi không cho nối vào index.md, chỉ đường brain_index_them');
+  const fIdx = path.join(b.BRAIN, 'wiki/index.md');
+  writeFileSync(fIdx, readFileSync(fIdx, 'utf8') + '\n## Tài liệu (sources) (cập nhật 2026-09-24)\n- [[hop-dong-thue-kho]] — thuê kho 20 triệu\n\n## Tài liệu (sources) (cập nhật 2026-09-24, tiếp)\n- [[hop-dong-abc-2026-09]] — Hợp đồng ABC bản mới\n\n## Khách hàng, đối tác, thực thể (cập nhật 2026-09-24)\n- [[cong-ty-abc]] — khách sỉ, thêm 24/9\n');
+  ok(b.kiem().index_trung_muc.length === 3, `kiem: bắt 3 mục trùng (${b.kiem().index_trung_muc.join(' | ')})`);
+  ok(b.gonIndex() === 3, 'gonIndex: gộp 3 mục trùng');
+  const sau = readFileSync(fIdx, 'utf8');
+  ok((sau.match(/^## Tài liệu \(sources\)$/mg) || []).length === 1 && !/cập nhật/.test(sau) && (sau.match(/\[\[hop-dong-abc-2026-09\]\]/g) || []).length === 1
+    && sau.includes('Hợp đồng ABC bản mới') && sau.includes('[[hop-dong-thue-kho]]') && (sau.match(/\[\[cong-ty-abc\]\]/g) || []).length === 1,
+    'gonIndex: một mục gốc, mỗi trang một dòng, dòng mới hơn thắng, không mất trang nào');
+  ok(b.gonIndex() === 0 && readFileSync(fIdx, 'utf8') === sau && b.kiem().index_trung_muc.length === 0, 'gonIndex: chạy lại không đổi gì, kiem hết báo');
 } finally {
   // brain_ghi commit git ở nền → chờ nó xong, dọn có thử lại (không thì rmdir .git/objects đua với git: ENOTEMPTY)
   await new Promise((r) => setTimeout(r, 800));
