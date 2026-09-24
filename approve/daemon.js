@@ -11,14 +11,14 @@ import { createServer, request as httpRequest } from 'node:http';
 import { connect as netConnect } from 'node:net';
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { appendFileSync, chownSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, chmodSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chownSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, chmodSync, unwatchFile, watchFile, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { hostname } from 'node:os';
 import { addRule, addSession, autoLabel, canRemember, canSession, describeRule, findAuto, keyboard, loadRules, prune,
   saveRules, tierLine, tierOf, writeDurable } from './rules.js';
 import { buildDigest } from './digest.js';
 import { banChoApp, gopNhatKy, lenhCongCu, tenTepAnToan } from './mota.js';
-import { CHU_KY as MAY_BAO_CHU_KY, danhGia as mayBaoDanhGia, doDac as mayBaoDoDac } from './may-bao.js';
+import { CHU_KY as MAY_BAO_CHU_KY, danhGia as mayBaoDanhGia, doDac as mayBaoDoDac, locSuKien as mayBaoLoc } from './may-bao.js';
 import { choApp as brainChoApp, docMoc as brainDocMoc, doThi as brainDoThi, sapToi as brainSapToi, tim as brainTim } from '../mcp/brain.js';
 import { createAppChannel } from './app-channel.js';
 import { machineState } from './machine-state.js';
@@ -456,6 +456,7 @@ const app = createAppChannel({
     app.sendTo(d.id, { type: 'agents', list: agentList() });
     app.sendTo(d.id, { type: 'state', what: 'so', data: banChoApp(layBan()) });   // mở app là có sổ ngay; app cũ bỏ qua, vô hại
     app.sendTo(d.id, { type: 'state', what: 'may-bao', data: mayBao.su_kien.slice(0, 20) });   // sự cố lỡ đẩy (máy mất mạng) vẫn thấy
+    app.sendTo(d.id, { type: 'state', what: 'brain-moc', data: mocChoApp() });   // mốc có ngày → app hẹn thông báo ngay trên iPhone
   },
   async onTask(d, task) {
     // Dừng câu hỏi đang trả lời (nút Dừng ở thẻ Hỏi Axle): ký như việc nhanh, tác động chỉ tới câu của chính điện thoại đó
@@ -483,7 +484,7 @@ const app = createAppChannel({
     const brainDir = `/home/${ownerUser()}/Axle/Brain`;
     if (what === 'brain') { try { return app.sendTo(d.id, { type: 'state', what: 'brain', data: brainChoApp(brainDir) }); } catch (e) { return app.sendTo(d.id, { type: 'state', what: 'brain', data: { co: false, loi: e.message } }); } }
     // Mốc có ngày trong 60 ngày tới — app hẹn thông báo ngay trên iPhone (nội dung không đi qua trạm)
-    if (what === 'brain-moc') { try { return app.sendTo(d.id, { type: 'state', what: 'brain-moc', data: { sap_toi: brainSapToi(brainDir, { soNgay: 60 }).slice(0, 60), tong: brainDocMoc(brainDir).length } }); } catch (e) { return app.sendTo(d.id, { type: 'state', what: 'brain-moc', data: { sap_toi: [], tong: 0, loi: e.message } }); } }
+    if (what === 'brain-moc') return app.sendTo(d.id, { type: 'state', what: 'brain-moc', data: mocChoApp() });
     if (what === 'brain-graph') { try { return app.sendTo(d.id, { type: 'state', what: 'brain-graph', data: brainDoThi(brainDir) }); } catch (e) { return app.sendTo(d.id, { type: 'state', what: 'brain-graph', data: { nodes: [], edges: [], loi: e.message } }); } }
     if (what === 'brain-tim') {
       const tk = String(msg?.tu_khoa || '').slice(0, 200);
@@ -892,7 +893,31 @@ const soGanDay = (toiDa = 40) => gopNhatKy(docDuoiLog()).slice(0, toiDa).map(({ 
 const MAY_BAO_FILE = process.env.AXLE_MAY_BAO_STATE || '/var/lib/axle-approve/may-bao.json';
 let mayBao = { trang_thai: {}, su_kien: [], ban_luc: 0 };
 try { mayBao = { ...mayBao, ...JSON.parse(readFileSync(MAY_BAO_FILE, 'utf8')) }; } catch { /* chưa có */ }
+mayBao.su_kien = mayBaoLoc(mayBao.su_kien);   // luật bỏ qua đổi thì lịch sử cũ cũng theo
 let dangKhamMay = false;
+
+// Mốc có ngày cho app (60 ngày tới) — app hẹn thông báo nhắc hạn ngay trên iPhone. Claude ghi moc.json từ tiến trình khác
+// (công cụ MCP) nên bộ duyệt theo dõi tệp: đổi là đẩy danh sách mới lên app, app hẹn lại.
+function mocChoApp() {
+  const dir = `/home/${ownerUser()}/Axle/Brain`;
+  try { return { sap_toi: brainSapToi(dir, { soNgay: 60 }).slice(0, 60), tong: brainDocMoc(dir).length }; } catch (e) { return { sap_toi: [], tong: 0, loi: e.message }; }
+}
+{
+  let theoDoi = null;
+  const ganTheoDoi = () => {
+    const f = `/home/${ownerUser()}/Axle/Brain/moc.json`;
+    if (theoDoi === f) return;
+    if (theoDoi) unwatchFile(theoDoi);
+    theoDoi = f;
+    watchFile(f, { interval: 30_000 }, (cur, prev) => {
+      if (cur.mtimeMs === prev.mtimeMs || !app.enabled()) return;
+      log({ app: 'đẩy mốc', tep: f });
+      app.broadcast({ type: 'state', what: 'brain-moc', data: mocChoApp() }).catch(() => {});
+    });
+  };
+  ganTheoDoi();
+  setInterval(ganTheoDoi, 10 * 60_000);   // đổi chủ máy thì theo tệp mới
+}
 async function khamMay() {
   if (dangKhamMay) return;
   dangKhamMay = true;

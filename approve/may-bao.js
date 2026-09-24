@@ -7,8 +7,10 @@ import { readFileSync, statfsSync } from 'node:fs';
 
 const PHUT = 60_000;
 export const CHU_KY = 5 * PHUT;
-// Dịch vụ "chờ có mạng lúc khởi động" hỏng khi máy lên mà chưa có mạng — sự cố mạng đã báo riêng, báo thêm là nhiễu
-export const BO_QUA_DV = /-wait-online\.service$/;
+// Bỏ qua: dịch vụ "chờ có mạng lúc khởi động" (máy lên lúc chưa có mạng — sự cố mạng đã báo riêng) và lượt tự cập nhật
+// của Ubuntu (apt-daily*: bị chính `axle update` dừng giữa chừng hay mất mạng thì "failed", lượt sau tự chạy lại — 24/9
+// lần khám đầu trên máy thật báo đúng cái này, chủ máy không có gì để làm với nó)
+export const BO_QUA_DV = /(-wait-online|^apt-daily(-upgrade)?)\.service$/;
 
 const hhmm = (t) => { const d = new Date(t); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 export function thoiLuong(phut) {
@@ -20,6 +22,16 @@ export function soSanhBan(a, b) {   // "0.1.160" so với "0.1.154" → >0 nếu
   const x = String(a).split('.').map(Number); const y = String(b).split('.').map(Number);
   for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (x[i] || 0) - (y[i] || 0); if (d) return d; }
   return 0;
+}
+
+/** Bỏ khỏi lịch sử những sự cố "dịch vụ hỏng" mà mọi dịch vụ trong đó nay đã nằm trong danh sách bỏ qua (24/9: lần khám
+ *  đầu báo apt-daily bị chính axle update dừng — sửa luật rồi thì dòng đó cũng không nên còn nằm trên Bàn/app). */
+export function locSuKien(ds = []) {
+  return ds.filter((s) => {
+    if (s?.loai !== 'dich_vu') return true;
+    const ten = String(s.noi_dung || '').split('. Xem lỗi')[0].split(',').map((x) => x.trim()).filter(Boolean);
+    return !(ten.length && ten.every((x) => BO_QUA_DV.test(x)));
+  });
 }
 
 /** Trạng thái cũ + số đo → { su_kien: [{id, loai, tieu_de, noi_dung, luc}], moi }. Số đo nào null thì giữ nguyên phần đó. */

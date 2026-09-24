@@ -389,7 +389,13 @@ báo lại; mỗi bản mới báo một lần. Sự cố lưu /var/lib/axle-app
 tin `thong-bao` (kênh app gắn `push: 'may'`) + `state may-bao` khi app chào/hỏi. Trạm: loại đẩy `may` với câu chung
 "Máy có chuyện cần xem — mở app để biết chi tiết" (thread riêng, cổng gộp 3 giây theo từng loại; loại lạ không đẩy).
 Bàn → Máy: "Máy báo gần đây" + thông báo GNOME cho sự cố xuất hiện sau khi mở Bàn. `axle bao`. Thử: test-may-bao 23 ca,
-test-relay (+2 ca).
+test-relay (+2 ca). Lần khám đầu trên máy thật (0.1.155) báo "Dịch vụ hỏng: apt-daily.service" — là do chính `axle update`
+dừng lượt apt ngầm (SIGTERM) → 0.1.156: apt.sh `reset-failed` sau khi dừng, máy tự báo bỏ qua `apt-daily*`, `locSuKien`
+dọn lịch sử cũ khi nạp.
+**App (commit, CHƯA dựng — chờ Bi bảo, gộp với đồ thị gọn):** 📚 có "Sắp tới"; iPhone tự hẹn thông báo nhắc hạn 8 giờ sáng
+(lúc vào khoảng nhắc + đúng ngày; `moc|<máy>|…`, xoá hẹn cũ mỗi lần máy gửi danh sách mới; tối đa 40/máy; app đang mở vẫn
+hiện banner) — máy gửi `state brain-moc` khi app chào + khi moc.json đổi (bộ duyệt `watchFile` 30 giây); tab Máy có thẻ
+"Máy báo"; tin `thong-bao` khi app đang mở hiện một dòng toast.
 **Mốc có ngày (24/9, 0.1.154, phần máy của hướng "Bộ não tự nhắc hạn"):** `moc.json` ở gốc Bộ não (git), chỉ ghi qua
 `brain_moc_them`/`brain_moc_xoa` (đọc: `brain_moc`) — mỗi mốc: viec, ngay (lần đầu), lap mot_lan|thang|nam, den (dừng
 lặp, vd hết hợp đồng), nhac_truoc, trang. `cacLan` tính các lần (ngày 31 lặp tháng → tháng thiếu ngày lấy ngày cuối),

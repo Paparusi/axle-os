@@ -9,6 +9,8 @@ apt_hold_timers() {
   # mình đứng chờ y chừng đó. Nó nhận SIGTERM thì gói đang cài vẫn cài nốt rồi mới dừng (dpkg không dở dang),
   # phần còn lại để lượt sau cài tiếp — không mất bản vá nào.
   systemctl stop unattended-upgrades.service apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
+  # Dừng giữa chừng thì systemd ghi "failed" (signal) — lỗi do chính mình, xoá đi kẻo máy tự báo "dịch vụ hỏng" (24/9)
+  systemctl reset-failed apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
   trap 'systemctl start $APT_TIMERS 2>/dev/null || true; systemctl start unattended-upgrades.service 2>/dev/null || true' EXIT
 }
 # Bận = có tiến trình đang GIỮ khoá apt/dpkg, hoặc dịch vụ apt-daily đang chạy. Không dò theo tên tiến trình:

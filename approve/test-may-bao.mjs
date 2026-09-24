@@ -1,7 +1,7 @@
 // Thử "máy tự báo" (approve/may-bao.js): danhGia với số đo giả cho từng tình huống, rồi đo máy này thật một lần.
 //   node approve/test-may-bao.mjs
 process.env.TZ = 'Asia/Ho_Chi_Minh';
-const { danhGia, doDac, soSanhBan, thoiLuong } = await import('./may-bao.js');
+const { danhGia, doDac, locSuKien, soSanhBan, thoiLuong } = await import('./may-bao.js');
 let fail = 0;
 const ok = (c, m) => { console.log(`  ${c ? '✓' : '✗'} ${m}`); if (!c) fail++; };
 const PHUT = 60_000;
@@ -48,12 +48,18 @@ ok(danhGia(s, { dia: { dung: 95, con_gb: 11 } }, t0).su_kien.length === 1, 'dọ
 s = {};
 r = danhGia(s, { dv_hong: ['NetworkManager-wait-online.service'] }, t0); s = r.moi;
 ok(r.su_kien.length === 0, 'chỉ NetworkManager-wait-online hỏng (khởi động lúc mất mạng) → không báo');
+ok(danhGia({}, { dv_hong: ['apt-daily.service', 'apt-daily-upgrade.service', 'systemd-networkd-wait-online.service'] }, t0).su_kien.length === 0,
+  'apt-daily bị axle update dừng giữa chừng (24/9, máy thật) → không báo');
 r = danhGia(s, { dv_hong: ['NetworkManager-wait-online.service', 'axle-portal.service'] }, t0); s = r.moi;
 ok(r.su_kien.length === 1 && r.su_kien[0].tieu_de === 'Dịch vụ hỏng: axle-portal.service' && r.su_kien[0].noi_dung.includes('systemctl status axle-portal.service'), 'dịch vụ mới hỏng → báo, kèm lệnh xem lỗi');
 ok(danhGia(s, { dv_hong: ['axle-portal.service'] }, t0).su_kien.length === 0, 'vẫn hỏng → không báo lặp');
 s = danhGia(s, { dv_hong: [] }, t0).moi;
 ok(danhGia(s, { dv_hong: ['axle-portal.service', 'docker.service'] }, t0).su_kien[0]?.tieu_de === '2 dịch vụ hỏng', 'lành rồi hỏng lại, hỏng hai cái → báo gộp');
 ok(danhGia({ dv: ['x.service'] }, { dv_hong: null }, t0).moi.dv[0] === 'x.service', 'không đo được dịch vụ → giữ nguyên trạng thái cũ');
+
+const lichSu = [{ loai: 'dich_vu', noi_dung: 'apt-daily.service. Xem lỗi: systemctl status apt-daily.service' },
+  { loai: 'dich_vu', noi_dung: 'apt-daily.service, docker.service. Xem lỗi: systemctl status apt-daily.service' }, { loai: 'mang', noi_dung: 'x' }];
+ok(locSuKien(lichSu).length === 2 && locSuKien(lichSu)[0].noi_dung.includes('docker'), 'locSuKien: bỏ sự cố cũ chỉ về dịch vụ nay bỏ qua, giữ cái còn dịch vụ thật');
 
 // Bản mới: báo một lần mỗi bản
 s = {};
