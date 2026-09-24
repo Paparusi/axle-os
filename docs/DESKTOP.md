@@ -463,3 +463,24 @@ một nhúm, phải kẹp toạ độ trong khung (sửa cả bản Swift). Th�
 kích thước có thể là 0×0 → không xếp, ô trống mãi. Sửa: xếp trong khung chuẩn 1000×900 bằng `.task(id: graph)` (không
 cần kích thước thật), lúc vẽ co đều theo `size` của Canvas; chưa xếp xong thì tạm vẽ vòng tròn — ô không bao giờ trống
 khi đã có trang. Bàn (Python) vốn đã làm kiểu khung chuẩn nên không dính.
+
+## Xem tệp trên máy từ điện thoại (nhịp D14, 24/9, 0.1.160)
+
+Bi hỏi "App không thể xem file trên máy nhỉ?" rồi "làm cho App có thể xem và đọc tệp trên máy đi". App có nút **📁**
+trên thanh Hỏi Axle và dòng **Tệp trên máy** dưới thẻ máy (tab Máy): duyệt thư mục nhà của chủ, thư mục trước rồi tệp
+(hoặc **Mới nhất trước**, nhớ lựa chọn), mỗi dòng có cỡ + giờ sửa. Chạm tệp → máy đọc (`approve/tep.js`), **niêm phong
+cho đúng điện thoại hỏi**, đưa lên trạm (`POST /v1/blob`, chiều máy → điện thoại) → app lấy một lần, mở hộp, ghi thư mục
+tạm rồi mở bằng **Xem nhanh** của iPhone (PDF, Word, Excel, PowerPoint, ảnh, video, văn bản; đuôi lạ mà nội dung là chữ
+thì thêm `.txt`). Nút chia sẻ của Xem nhanh lưu vào Tệp / AirDrop; đóng là xoá bản tạm. Trạm không bao giờ thấy nội dung.
+
+Chỉ xem, không sửa. Giới hạn: trong thư mục nhà; không chỗ ẩn (`.ssh`, `.config`, token Claude…); không `~/snap` (hồ sơ
+trình duyệt snap nằm đó mà KHÔNG ẩn); không tệp khoá / mật khẩu ở bất cứ đâu (`.pem`, `.key`, `id_*`, `Cookies`,
+`Login Data`, `logins.json`…); bộ duyệt chạy root nên **tự kiểm quyền như chủ** — tệp chủ không đọc được thì cũng không
+gửi; lối tắt trỏ ra ngoài nhà hay vào chỗ cấm thì không hiện, không mở; tệp ≤12 MB (trạm nhận 16 MB sau mã hoá).
+Danh sách thư mục đi qua hộp thư thường (thân ≤80 KB) nên cắt ở 400 mục và ~40 KB (~250 mục tên dài) — thư mục đông
+thì xếp Mới nhất trước để thấy tệp vừa tải / vừa làm. Nhật ký bộ duyệt ghi mỗi lần mở (`mở tệp`: máy, đường, cỡ).
+Lời dặn của `axle claude` thêm: tệp làm cho chủ thì lưu `~/Documents` (hay chỗ chủ nói) và báo đường dẫn — đừng để ở
+thư mục ẩn hay `/tmp` vì app không thấy. Thử: `approve/test-tep.mjs` (27 ca: chỗ ẩn, snap, tệp khoá, cookie, chmod 000,
+lối tắt ra /etc / vào .ssh / trong nhà, 12 MB+1, thư mục 1501 tệp lọt hộp thư, xếp mới nhất), `build/relay-blob-smoke.mjs`
+(+4 ca chiều máy → điện thoại, tệp 12 MB đúng từng byte). Chưa có: chạm đường dẫn trong câu trả lời của Claude để mở
+thẳng, tìm tệp theo tên, tệp >12 MB.

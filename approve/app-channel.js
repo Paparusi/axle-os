@@ -3,7 +3,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import crypto from 'node:crypto';
 import { b64u, commandString, decisionString, hoiString, idOf, newKeys, openBytes, openMsg, p256Verify, qrEncode, relayHeaders, requestHash,
-  sas, sealMsg, shellString, sha256, taskString } from '../app/proto.js';
+  sas, seal, sealMsg, shellString, sha256, taskString } from '../app/proto.js';
 import { writeDurable } from './rules.js';
 
 const DIR = process.env.AXLE_APPROVE_STATE_DIR || '/var/lib/axle-approve';
@@ -24,9 +24,9 @@ export function createAppChannel({ log, hostname, onDecision, onCommand, onHello
   const pending = new Map();         // pendingId → { device, sas, created }
   let pairWaiters = [];
 
-  async function call(method, p, body) {
+  async function call(method, p, body, ms = 30_000) {
     const raw = body ? JSON.stringify(body) : '';
-    const r = await fetch(cfg().relay + p, { method, body: raw || undefined, signal: AbortSignal.timeout(30_000),
+    const r = await fetch(cfg().relay + p, { method, body: raw || undefined, signal: AbortSignal.timeout(ms),
       headers: { ...relayHeaders(me, method, p, raw), 'content-type': 'application/json' } });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(`trạm ${r.status}: ${j.error || ''}`);
@@ -194,5 +194,14 @@ export function createAppChannel({ log, hostname, onDecision, onCommand, onHello
     startPair, waitPair, confirmPair, removeDevice, broadcast, sendTo, verifyDecision,
     // Lấy tệp đính kèm từ trạm (chỉ máy — người nhận — lấy được, một lần) rồi mở hộp ra byte
     layBlob: async (id) => openBytes(me.xPriv, me.xPub, (await call('GET', `/v1/blob/${id}`)).blob),
+    // Gửi tệp về một điện thoại đã ghép (xem tệp trên máy từ app, 24/9): niêm phong cho đúng điện thoại đó rồi gửi lên trạm
+    // (≤ 16 MB sau mã hoá); trả id để điện thoại lấy (chỉ nó lấy được, một lần). Tệp to từ mạng văn phòng → chờ tới 3 phút.
+    guiBlob: async (deviceId, bytes) => {
+      const d = devices.find((x) => x.id === deviceId);
+      if (!d) throw new Error('điện thoại chưa ghép');
+      const r = await call('POST', '/v1/blob', { to: d.id, blob: seal(d.dx, bytes) }, 180_000);
+      if (!r?.id) throw new Error('trạm không nhận tệp');
+      return r.id;
+    },
   };
 }

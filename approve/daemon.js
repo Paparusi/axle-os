@@ -18,6 +18,7 @@ import { addRule, addSession, autoLabel, canRemember, canSession, describeRule, 
   saveRules, tierLine, tierOf, writeDurable, chiDoc, khoaSong } from './rules.js';
 import { buildDigest } from './digest.js';
 import { banChoApp, gopNhatKy, lenhCongCu, tenTepAnToan } from './mota.js';
+import { docTep as tepDoc, lietKe as tepLietKe } from './tep.js';
 import { CHU_KY as MAY_BAO_CHU_KY, danhGia as mayBaoDanhGia, doDac as mayBaoDoDac, locSuKien as mayBaoLoc } from './may-bao.js';
 import { choApp as brainChoApp, docMoc as brainDocMoc, doThi as brainDoThi, sapToi as brainSapToi, tim as brainTim } from '../mcp/brain.js';
 import { createAppChannel } from './app-channel.js';
@@ -489,6 +490,27 @@ const app = createAppChannel({
     if (what === 'brain') { try { return app.sendTo(d.id, { type: 'state', what: 'brain', data: brainChoApp(brainDir) }); } catch (e) { return app.sendTo(d.id, { type: 'state', what: 'brain', data: { co: false, loi: e.message } }); } }
     // Mốc có ngày trong 60 ngày tới — app hẹn thông báo ngay trên iPhone (nội dung không đi qua trạm)
     if (what === 'brain-moc') return app.sendTo(d.id, { type: 'state', what: 'brain-moc', data: mocChoApp() });
+    // Xem tệp trên máy (chỉ đọc, chỉ trong nhà chủ, không chỗ ẩn / tệp khoá — approve/tep.js). `hoi` = đường app hỏi
+    // (lối tắt thì `duong` là chỗ thật) để app khớp câu trả lời với màn đang chờ.
+    if (what === 'tep') {
+      const hoi = String(msg?.duong ?? '').slice(0, 1000);
+      const xep = msg?.xep === 'moi' ? 'moi' : 'ten';
+      try { return app.sendTo(d.id, { type: 'state', what: 'tep', data: { ...tepLietKe(`/home/${ownerUser()}`, hoi, { xep }), hoi } }); } catch (e) {
+        return app.sendTo(d.id, { type: 'state', what: 'tep', data: { duong: hoi, hoi, ds: [], loi: e.message } });
+      }
+    }
+    if (what === 'tep-mo') {
+      const hoi = String(msg?.duong ?? '').slice(0, 1000);
+      try {
+        const t = tepDoc(`/home/${ownerUser()}`, hoi);
+        const blob = await app.guiBlob(d.id, t.bytes);
+        log({ app: 'mở tệp', device: d.name, duong: t.duong, co: t.co });
+        return app.sendTo(d.id, { type: 'state', what: 'tep-mo', data: { duong: t.duong, hoi, ten: t.ten, co: t.co, blob } });
+      } catch (e) {
+        log({ app: 'mở tệp hỏng', device: d.name, duong: hoi.slice(0, 200), loi: e.message });
+        return app.sendTo(d.id, { type: 'state', what: 'tep-mo', data: { duong: hoi, hoi, loi: e.message } });
+      }
+    }
     if (what === 'brain-graph') { try { return app.sendTo(d.id, { type: 'state', what: 'brain-graph', data: brainDoThi(brainDir) }); } catch (e) { return app.sendTo(d.id, { type: 'state', what: 'brain-graph', data: { nodes: [], edges: [], loi: e.message } }); } }
     if (what === 'brain-tim') {
       const tk = String(msg?.tu_khoa || '').slice(0, 200);

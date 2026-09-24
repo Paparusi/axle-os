@@ -44,6 +44,14 @@ try {
   const to = await call(dt, 'POST', '/v1/blob', { to: may.id, blob: 'A'.repeat(16 * 1024 * 1024 + 100) });
   ok(to.status === 413, `quá 16MB → 413 (${to.status})`);
   ok((await call(dt, 'POST', '/v1/send', { to: may.id, box: seal(may.xPub, 'x'.repeat(70 * 1024)) })).status === 413, 'hộp thư thường vẫn giới hạn 80KB thân');
+  // Chiều ngược (24/9, xem tệp trên máy từ app): máy gửi tệp cho điện thoại đã cho phép máy — tệp 12 MB (giới hạn tep.js) lọt
+  ok((await call(dt, 'POST', '/v1/link', { peer: may.id })).status === 200, 'điện thoại cho phép máy gửi vào hộp của mình');
+  const tepMay = crypto.randomBytes(12_000_000);
+  const upMay = await call(may, 'POST', '/v1/blob', { to: dt.id, blob: seal(dt.xPub, tepMay) });
+  ok(upMay.status === 200, `máy gửi tệp 12 MB cho điện thoại (${upMay.status})`);
+  const layMay = await call(dt, 'GET', `/v1/blob/${upMay.j.id}`);
+  ok(layMay.status === 200 && b64u(sha256(openBytes(dt.xPriv, dt.xPub, layMay.j.blob))) === b64u(sha256(tepMay)), 'điện thoại mở tệp của máy đúng từng byte');
+  ok((await call(may, 'GET', `/v1/blob/${upMay.j.id}`)).status === 404, 'máy (người gửi) không lấy lại được tệp đã gửi');
 } finally {
   srv.kill(); rmSync(D, { recursive: true, force: true });
 }
