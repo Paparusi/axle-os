@@ -104,6 +104,9 @@ const gioDoc = (d) => `${hai(d.getDate())}/${hai(d.getMonth() + 1)}/${d.getFullY
 
 function taoThuMuc(goc, hop, id, luc, chown) {
   const d = new Date(luc);
+  // Thư mục GỐC (~/Axle/Thu) cũng phải về tay chủ: bộ duyệt chạy root — 24/9 lượt thật đầu tiên tạo nó bằng root 0700
+  // (mkdir recursive của nhánh con), chủ / Claude / app đều "Permission denied" dù thư đã lấy về đủ
+  if (!existsSync(goc)) { mkdirSync(goc, { recursive: true, mode: 0o700 }); chown(goc); }
   let dir = goc;
   for (const phan of [hop, `${d.getFullYear()}-${hai(d.getMonth() + 1)}`, `${nhanLuc(d)}-${String(id).replace(/[^A-Za-z0-9-]/g, '').slice(0, 8)}`]) {
     dir = path.join(dir, phan);

@@ -64,6 +64,10 @@ try {
     subject: 'Hỏi giá cung ứng tháng 10', text: 'Chào anh Hiếu, bên em cần 20 người.', message_id: '<m1@omron.com>', html: '<p>khác</p>' };
   const e2 = { id: '9f8e7d6c-2222-4333-8444-555566667777', created_at: '2026-09-24T16:30:00Z', from: 'noreply@bank.vn', to: ['ke-toan@hrvn.asia'],
     subject: 'Sao kê', html: '<p>Số dư <b>12.000.000</b></p>' };
+  const chu = [];
+  const G = path.join(D, 'Axle', 'Thu');      // gốc CHƯA có — như lượt thật đầu tiên trên máy
+  T.luuThuDen(G, { ...e1, id: 'aaaaaaaa-0000' }, { chown: (f) => chu.push(f) });
+  ok(chu[0] === G && chu.some((f) => f.endsWith('thu.json')) && chu.length === 6, `bộ duyệt (root) tạo kho lần đầu: chown cả thư mục GỐC + Den + tháng + thư + 2 tệp (${chu.length})`);
   const lan = T.luuThuDen(D, e1, { tep: [{ ten: '../Yêu cầu (bản ký).pdf', bytes: Buffer.from('%PDF') }, { ten: 'to.zip', bo: '30 MB — quá 20 MB' }] });
   T.luuThuDen(D, e2);
   ok(existsSync(path.join(lan.dir, 'thu.json')) && existsSync(path.join(lan.dir, 'thu.md')) && existsSync(path.join(lan.dir, 'Yeu-cau-ban-ky.pdf'))
