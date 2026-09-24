@@ -2,7 +2,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { addRule, addSession, canRemember, chiDoc, findAuto, keyboard, loadRules, prune, saveRules, tierOf, tierLine, SESSION_MS } from './rules.js';
+import { addRule, addSession, canRemember, chiDoc, findAuto, keyboard, khoaSong, loadRules, prune, saveRules, tierOf, tierLine, SESSION_MS } from './rules.js';
 
 let fail = 0;
 const ok = (c, m) => { console.log(`  ${c ? '✓' : '✗'} ${m}`); if (!c) fail++; };
@@ -102,6 +102,15 @@ ok(nutBash === 'ahr' && !canRemember(claude({ command: 'mv a b' })), `Bash: ch�
 const mcpTool = { ...claude({}), params: { tool: 'mcp__axle__pm2_list', input: {}, command: null, file: null, nguy: false, mo: false, chiDoc: false } };
 ok(canRemember(mcpTool) && keyboard(mcpTool).flat().length === 4, 'công cụ Axle (MCP) vẫn có "Luôn"');
 ok(/1 giờ tới/.test(tierLine(claude({ command: 'mv a b' }))), 'tin xin duyệt của Claude nói rõ 1 giờ = tự làm việc thường');
+
+// 24/9: bộ dọn 3 giây/lần xoá phiên "1 giờ" của Claude có sẵn trên máy (nhãn ssh:claude, không có trong sổ khoá SSH)
+ok(khoaSong('chu:ssh:claude', []) && !khoaSong('chu:ssh:bot', []) && khoaSong('chu:ssh:bot', ['bot']) && khoaSong('phu:cog', ['cog'])
+  && !khoaSong('phu:claude', []) && khoaSong('chu:http:x', []), 'Claude có sẵn trên máy luôn sống; trợ lý SSH / agent phụ theo sổ');
+const RS = { next: 1, rules: [], sessions: [] };
+addSession(RS, claude({ command: 'mv a b' }), T0);
+prune(RS, (k) => khoaSong(k, []), T0 + 3000);
+ok(RS.sessions.length === 1 && findAuto(claude({ command: 'python3 x.py' }), RS, T0 + 60_000)?.kind === 'session',
+  'phiên 1 giờ của Claude qua được bộ dọn (sổ khoá SSH trống) → yêu cầu sau tự duyệt');
 
 if (fail) { console.log(`✗ ${fail} mục hỏng`); process.exit(1); }
 console.log('✓ luật duyệt 4 bậc đạt');

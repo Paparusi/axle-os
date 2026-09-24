@@ -380,6 +380,11 @@ link tới trang chưa có thành nút loại `thieu` (vẽ đứt nét đỏ; b
 (hộp trạm 64KB đã mã hoá) — wiki lớn thì giữ trang nhiều liên kết nhất, `bo_bot` = số trang bị ẩn (0.1.140).
 App: `query brain-graph` → tấm **Liên kết trong Bộ não** trong 📚: xếp lực (đẩy–kéo, 200 vòng ngay trên điện thoại),
 màu theo loại, chạm chấm → thấy nó nối với ai + nút "Hỏi về trang này". Thử: test-brain 32 ca (5 ca đồ thị).
+**"Bấm 1 giờ rồi mà vẫn hỏi" (24/9, 0.1.159):** lỗi CŨ từ đầu: `pruneRules` (3 giây/lần) coi khoá `chu:ssh:<tên>` là trợ lý
+SSH và xoá luật/phiên nếu <tên> không có trong /etc/axle/mcp-clients.json — mà Claude có sẵn trên máy (`axle mcp --as
+claude`, nhãn ssh:claude) không vào bằng khoá SSH nên không bao giờ có trong sổ → mọi phiên "1 giờ" và luật "Luôn" của
+Claude bị xoá vài giây sau khi tạo (nhật ký 11:49–11:50: 3 lần bấm 1 giờ, rules.json chỉ còn phiên mới nhất rồi trống).
+Sửa: `khoaSong()` trong rules.js — `TRO_LY_CO_SAN = {claude}` luôn sống; test-rules 77 ca (có ca tái hiện).
 **Chat kẹt "đang làm" (24/9, 0.1.158):** Bi chụp app quay mãi — câu trả lời chạy BÊN TRONG bộ duyệt (con của
 axle-approve), mà hai lần `axle update` lúc 11:28/11:36 khởi động lại bộ duyệt → systemd giết cả nhóm, app không bao giờ
 nhận hoi-result; bấm ■ thì máy nói "không có câu nào" mà app cũ không thôi quay. Sửa: bộ duyệt bắt SIGTERM → gửi

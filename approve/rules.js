@@ -168,6 +168,17 @@ export function addSession(R, r, now = Date.now()) {
   return id;
 }
 
+// Luật/phiên của ai còn "sống": agent phụ / trợ lý SSH phải còn trong sổ khoá (mcp-clients.json). Riêng Claude có sẵn
+// trên máy (`axle claude` → `axle mcp --as claude`, nhãn ssh:claude) KHÔNG vào bằng khoá SSH nên không bao giờ có trong sổ
+// — trước 24/9 bộ dọn 3 giây/lần coi nó là "đã gỡ" và xoá mọi phiên "1 giờ" / luật "Luôn" của nó ngay sau khi tạo
+// (Bi: "bấm 2 lần 1 giờ rồi mà vẫn vậy").
+export const TRO_LY_CO_SAN = new Set(['claude']);
+export function khoaSong(k, names = []) {
+  const m = /^(?:phu:|chu:ssh:)([a-z][a-z0-9-]{1,20})$/.exec(k);
+  if (!m) return true;
+  return names.includes(m[1]) || (k.startsWith('chu:ssh:') && TRO_LY_CO_SAN.has(m[1]));
+}
+
 // Bỏ phiên hết hạn và luật/phiên của agent đã bị gỡ. Trả true nếu có thay đổi.
 export function prune(R, isLive, now = Date.now()) {
   const before = R.rules.length + R.sessions.length;

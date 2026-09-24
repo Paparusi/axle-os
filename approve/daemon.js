@@ -15,7 +15,7 @@ import { appendFileSync, chownSync, closeSync, existsSync, fstatSync, lstatSync,
 import path from 'node:path';
 import { hostname } from 'node:os';
 import { addRule, addSession, autoLabel, canRemember, canSession, describeRule, findAuto, keyboard, loadRules, prune,
-  saveRules, tierLine, tierOf, writeDurable, chiDoc } from './rules.js';
+  saveRules, tierLine, tierOf, writeDurable, chiDoc, khoaSong } from './rules.js';
 import { buildDigest } from './digest.js';
 import { banChoApp, gopNhatKy, lenhCongCu, tenTepAnToan } from './mota.js';
 import { CHU_KY as MAY_BAO_CHU_KY, danhGia as mayBaoDanhGia, doDac as mayBaoDoDac, locSuKien as mayBaoLoc } from './may-bao.js';
@@ -1084,10 +1084,7 @@ syncAgentSockets();
 function pruneRules() {
   let names = [];
   try { names = Object.keys(JSON.parse(readFileSync(CLIENTS, 'utf8'))); } catch { return; }
-  const isLive = (k) => {
-    const m = /^(?:phu:|chu:ssh:)([a-z][a-z0-9-]{1,20})$/.exec(k);
-    return m ? names.includes(m[1]) : true;
-  };
+  const isLive = (k) => khoaSong(k, names);   // Claude có sẵn trên máy luôn sống (không nằm trong sổ khoá SSH)
   const R = loadRules();
   if (prune(R, isLive)) saveRules(R);
 }
