@@ -112,5 +112,19 @@ prune(RS, (k) => khoaSong(k, []), T0 + 3000);
 ok(RS.sessions.length === 1 && findAuto(claude({ command: 'python3 x.py' }), RS, T0 + 60_000)?.kind === 'session',
   'phiên 1 giờ của Claude qua được bộ dọn (sổ khoá SSH trống) → yêu cầu sau tự duyệt');
 
+// ---- gõ thay chủ trong web app THẬT của chủ (Zalo, Gmail…): bậc 3, không 1 giờ, không Luôn (25/9) ----
+{
+  const { goThayChu, tierOf: tier, canSession: phien, canRemember: nho } = await import('./rules.js');
+  ok(goThayChu('mcp__axle__web_type', { agent: null }) && goThayChu('mcp__axle__web_key', {}) && goThayChu('web_type', undefined),
+    'chủ: web_type / web_key là gõ thay chủ');
+  ok(!goThayChu('mcp__axle__web_type', { agent: 'conflux' }) && !goThayChu('mcp__axle__web_click', {})
+    && !goThayChu('mcp__axle__web_text', {}) && !goThayChu('mcp__axle__tay_type', {}) && !goThayChu('Bash', {}),
+    'agent phụ gõ trên màn hình riêng, bấm chọn, đọc, tay_type, Bash → không phải gõ thay chủ');
+  const go = { action: 'claude_tool', params: { tool: 'mcp__axle__web_type', thay: true }, who: { agent: null } };
+  const bam = { action: 'claude_tool', params: { tool: 'mcp__axle__web_click' }, who: { agent: null } };
+  ok(tier(go) === 3 && !phien(go) && !nho(go), 'gõ thay chủ: bậc 3, không 1 giờ, không Luôn');
+  ok(tier(bam) === 2 && phien(bam), 'bấm chọn trong app (mở nhóm, cuộn tới tin): vẫn bậc 2');
+}
+
 if (fail) { console.log(`✗ ${fail} mục hỏng`); process.exit(1); }
 console.log('✓ luật duyệt 4 bậc đạt');

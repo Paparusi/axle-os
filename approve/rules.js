@@ -43,7 +43,7 @@ export const keyOf = (r) => (r.who?.agent ? `phu:${r.who.agent}` : `chu:${r.clie
 
 export function tierOf(r) {
   if (r.action === 'login') return 3;          // người xin CHƯA chứng minh là ai: không bao giờ nhớ, hỏi từng lần
-  if (r.action === 'claude_tool') return r.params.nguy || r.params.mo ? 3 : 2;   // Claude xin công cụ: phá máy, hay không rõ đích → bậc 3
+  if (r.action === 'claude_tool') return r.params.nguy || r.params.mo || r.params.thay ? 3 : 2;   // Claude xin công cụ: phá máy, không rõ đích, hay gõ thay chủ → bậc 3
   if (r.action === 'screen_grant') return 3;   // xem màn hình thật của chủ: luôn hỏi từng lần
   if (r.action === 'snapshot_undo') return 3;
   if (r.action === 'thu_gui') return 3;        // thư đi ra ngoài, gửi rồi không rút lại được: duyệt TỪNG lá, không "1 giờ", không "Luôn"
@@ -52,6 +52,10 @@ export function tierOf(r) {
   return 2;
 }
 export const canSession = (r) => tierOf(r) === 2;
+// Gõ chữ / bấm phím trong web app đang mở trên màn hình CHỦ (Zalo, Gmail… đăng nhập bằng tài khoản thật của chủ) là nói
+// thay chủ với người ngoài — gửi rồi không rút lại được, và chữ trong trang có thể là lệnh cài của người lạ. Luôn hỏi từng
+// lần, không "1 giờ", không "Luôn" (như thu_gui). Agent phụ gõ trong app trên màn hình riêng của nó thì vẫn bậc 2.
+export const goThayChu = (tool, who) => !who?.agent && /^(mcp__axle__)?web_(type|key)$/.test(String(tool ?? ''));
 // Công cụ gốc của Claude Code mà đích đổi liên tục (mỗi lần một câu lệnh, một tệp): "Luôn việc này" nhớ ĐÚNG đích nên gần
 // như không bao giờ khớp lại — 24/9 Bi bấm "Luôn" 9 lần mà vẫn bị hỏi tiếp. Với mấy công cụ này chỉ còn Lần này / 1 giờ.
 const DICH_DOI = new Set(['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit']);

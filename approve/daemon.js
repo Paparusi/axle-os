@@ -15,7 +15,7 @@ import { appendFileSync, chownSync, closeSync, existsSync, fstatSync, lstatSync,
 import path from 'node:path';
 import { hostname } from 'node:os';
 import { addRule, addSession, autoLabel, canRemember, canSession, describeRule, findAuto, keyboard, loadRules, prune,
-  saveRules, tierLine, tierOf, writeDurable, chiDoc, khoaSong } from './rules.js';
+  saveRules, tierLine, tierOf, writeDurable, chiDoc, khoaSong, goThayChu } from './rules.js';
 import { buildDigest } from './digest.js';
 import { banChoApp, gopNhatKy, lenhCongCu, tenTepAnToan } from './mota.js';
 import { docTep as tepDoc, duongAn as tepDuongAn, lietKe as tepLietKe } from './tep.js';
@@ -266,7 +266,7 @@ const ACTIONS = {
   // Không có tác dụng phụ: "được duyệt" chính là kết quả — cổng MCP trả lời Claude Code allow/deny.
   // Đây là thứ biến "agent có tay chân + chủ nắm cổng bằng khuôn mặt mình" thành chuyện kiểm chứng được.
   claude_tool: {
-    validate(p) {
+    validate(p, who) {
       const tool = String(p.tool ?? '').slice(0, 64);
       if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(tool)) throw new Error('Tên công cụ lạ');
       let input = p.input && typeof p.input === 'object' ? p.input : {};
@@ -280,10 +280,12 @@ const ACTIONS = {
       let mo = false;
       const mcp = lenhCongCu(tool, input, tayBangCuaChu());
       if (mcp) { command = mcp.command; mo = mcp.mo; }
-      return { tool, input, command, file, nguy: nguyHiem(tool, command, file), mo, chiDoc: tool === 'Bash' && !mcp && chiDoc(command) };
+      return { tool, input, command, file, nguy: nguyHiem(tool, command, file), mo, thay: goThayChu(tool, who),
+        chiDoc: tool === 'Bash' && !mcp && chiDoc(command) };
     },
     describe(p) {
-      const dong = [`Claude trên máy xin dùng công cụ ${p.tool}${p.nguy ? ' ⚠️ NGUY HIỂM' : ''}${p.mo ? ' (không rõ đích — luôn hỏi)' : ''}`];
+      const dong = [`Claude trên máy xin dùng công cụ ${p.tool}${p.nguy ? ' ⚠️ NGUY HIỂM' : ''}${p.mo ? ' (không rõ đích — luôn hỏi)' : ''}`
+        + `${p.thay ? ' — gõ trên tài khoản THẬT của mày (duyệt từng lần)' : ''}`];
       if (/^(web_|tay_)/.test(p.command ?? '')) {
         dong.push(`Việc: ${cap(p.command, 400)}`);
         const chu = p.input?.chu;

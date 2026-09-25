@@ -37,7 +37,8 @@ export function registerTay(tool) {
   tool('tay_windows', {
     title: 'List open desktop windows',
     description: 'Windows currently open on the owner desktop (app · title · pid), focused one first. '
-      + 'Use the number with tay_snapshot to read a specific window.',
+      + 'Use the number with tay_snapshot to read a specific window. Windows of Axle web apps (class axle-web-<name>: '
+      + 'Zalo, Gmail…) are Chromium pages — read and act on them with web_text / web_snapshot (app: "<name>"), not tay_*.',
     inputSchema: {},
     annotations: { readOnlyHint: true },
   }, async () => chay(['cuaso']));
@@ -46,7 +47,8 @@ export function registerTay(tool) {
     title: 'Read a desktop window as a numbered element table',
     description: 'Accessibility tree of the focused window (or window N): role, name, current text, state and '
       + 'whether it accepts an action. Act on rows with tay_click / tay_type / tay_read by their number. '
-      + 'Re-read after every action — numbers are only valid for the latest snapshot. Big windows: use loc to filter.',
+      + 'Re-read after every action — numbers are only valid for the latest snapshot. Big windows: use loc to filter. '
+      + 'Page content of Axle web apps (Zalo, Gmail…) is not in this tree — use web_text / web_snapshot for those.',
     inputSchema: { cuaso: z.number().int().min(1).optional().describe('Số cửa sổ từ tay_windows; bỏ trống = cửa sổ đang có tiêu điểm'),
       loc: z.string().max(100).optional().describe('Chỉ hiện phần tử có chữ này'),
       sau: z.number().int().min(1).max(60).optional().describe('Độ sâu cây tối đa (mặc định 30)') },
@@ -72,6 +74,7 @@ export function registerTay(tool) {
 
   tool('tay_read', {
     title: 'Read the full text or value of an element',
+    description: 'Full text of one element from the latest tay_snapshot. For Axle web apps (Zalo, Gmail…) use web_text.',
     inputSchema: { so: SO },
     annotations: { readOnlyHint: true },
   }, async ({ so }) => chay(['doc', String(so)]));

@@ -388,8 +388,10 @@ export function buildServer({ allow, clientName } = {}) {
   // Màn hình riêng của agent (chỉ có khi chủ bật: sudo axle agent screen <tên> on)
   if (screen.hasDisplay()) screen.register(tool);
   else for (const [n, ro] of screen.TOOL_NAMES) TOOL_INFO.set(n, { readOnly: ro });
-  // Đọc web app thành BẢNG PHẦN TỬ ĐÁNH SỐ — chỉ có nghĩa khi agent có màn hình riêng để mở app
-  if (screen.hasDisplay() && web.coWeb()) web.registerWeb(tool);
+  // Đọc web app thành BẢNG PHẦN TỬ ĐÁNH SỐ: app agent tự mở trên màn hình riêng, HOẶC app đang mở trên màn hình chủ
+  // (Zalo, Gmail… — axle-web-<tên> chạy kèm cổng CDP, hồ sơ trong nhà chủ). 25/9: thiếu nhánh chủ → Claude của chủ
+  // (hỏi từ điện thoại, không có DISPLAY) chỉ còn tay_* mà Chromium không đưa chữ trang vào cây trợ năng → phải chụp màn hình.
+  if (web.coWeb() && (screen.hasDisplay() || tay.coTay())) web.registerWeb(tool);
   // Tay cho MỌI ứng dụng trên desktop của chủ (AT-SPI) — chỉ trong ngữ cảnh chủ có bus phiên đăng nhập
   if (tay.coTay()) tay.registerTay(tool);
   // Bộ não Axle (~/Axle/Brain): tra/ghi kho tri thức của chủ — chỉ trong ngữ cảnh chủ
