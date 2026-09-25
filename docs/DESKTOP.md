@@ -574,6 +574,12 @@ thiếu đường nối. Sửa:
 - Mô tả tay_* chỉ sang `web_*` cho cửa sổ axle-web-*; lời dặn `axle claude` thêm câu về app web.
 Thử: `mcp/test-web.mjs` (6 ca), `approve/test-rules.mjs` thêm 4 ca gõ thay chủ.
 
+**Lỗi lộ ra khi thử thật (0.1.173):** `core/web/domtable.mjs` `timTab` luôn MỞ TAB RIÊNG (thiết kế cho Chrome dùng chung cổng
+9444, để khỏi chiếm tab chủ đang xem) — với web app `--app` thì tab mới = một cửa sổ trắng bật lên trên màn hình, và
+web_text đọc cái tab trắng đó ra rỗng (lỗi có từ ngày có web_* cho web app, agent cũng dính). Sửa: có `AXLE_CDP_PROFILE`
+(web app) thì lấy chính trang http(s) của app, không bao giờ mở tab mới. Thử trên máy VP: đọc Zalo ra 7.338 ký tự / cây
+116 dòng, app vẫn đúng 1 trang.
+
 ## Lịch của Axle: nhắc đúng giờ + việc tự làm theo lịch (nhịp D17, 24/9, 0.1.166)
 
 Bi: "t chưa có ý tưởng app nào, m tìm hướng nâng cấp Axle đi". Trước nhịp này, bảo Axle "nhắc tao 3 giờ chiều gọi anh

@@ -112,6 +112,15 @@ async function idCuaTab(ctx, page) {
 
 // Tìm lại đúng tab của mình; chưa có thì mở tab mới và nhớ id lại.
 async function timTab(ctx, dich) {
+  // WEB APP của Axle (AXLE_CDP_PROFILE — cửa sổ --app một trang: Zalo, Gmail, Cargo…): trang cần đọc CHÍNH LÀ trang của app.
+  // Lấy nó, KHÔNG mở tab mới. 25/9: bản cũ luôn mở tab riêng → trên máy chủ bật lên một cửa sổ trắng, và web_text/web_snapshot
+  // đọc cái tab trắng đó ra rỗng (lỗi có từ ngày có web_* cho web app; lộ ra khi Claude của chủ đọc Zalo). Tab riêng chỉ dành
+  // cho trình duyệt dùng chung (Chrome thật cổng 9444) — ở đó mới có "tab người dùng đang xem" cần tránh.
+  if (process.env.AXLE_CDP_PROFILE) {
+    const trang = ctx.pages().filter((p) => /^https?:/.test(p.url()));
+    if (trang.length) return trang[0];
+    throw new Error('app đang mở nhưng chưa có trang nào — mở lại app rồi thử lại');
+  }
   let luu = null;
   try { luu = JSON.parse(readFileSync(TAB_LUU, 'utf8')).targetId; } catch { /* lần đầu */ }
   if (luu) {
