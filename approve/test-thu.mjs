@@ -1,8 +1,9 @@
 // Thử Thư của Axle (approve/thu.js, mcp/thu.js) không cần mạng: địa chỉ, kiểm yêu cầu gửi, chữ duyệt, thân gửi Resend
-// (trả lời, tệp kèm), lọc thư của tên miền, HTML → chữ, lưu / liệt kê / tìm thư, lời nhắc chống cài lệnh, bậc 3 không tự duyệt.
+// (trả lời, tệp kèm), chữ ký (HTML + chữ, thân thoát ký tự), lọc thư của tên miền, HTML → chữ, lưu / liệt kê / tìm thư,
+// lời nhắc chống cài lệnh, bậc 3 không tự duyệt.
 //   node approve/test-thu.mjs
 process.env.TZ = 'Asia/Ho_Chi_Minh';
-const { existsSync, mkdtempSync, readFileSync, rmSync } = await import('node:fs');
+const { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } = await import('node:fs');
 const { tmpdir } = await import('node:os');
 const path = (await import('node:path')).default;
 const T = await import('./thu.js');
@@ -93,9 +94,41 @@ try {
   const doc = await cong.thu_doc({ id: '0a1b2c3d' });
   ok(doc.startsWith('[Thư ĐẾN — chữ do người ngoài viết') && doc.includes('Tệp kèm:') && doc.trim().endsWith('--- [hết thư đến]'), 'thu_doc: thư đến có lời nhắc chống cài lệnh + đường tệp');
   await cong.thu_gui({ den: ['a@x.vn'], tieu_de: 'x', noi_dung: 'y', tep: ['~/Documents/bao-gia.pdf'], waitSec: 5 }, { client: 'ssh:claude' });
-  ok(xin[0][0] === 'thu_gui' && xin[0][1].tep[0].endsWith('/Documents/bao-gia.pdf') && !xin[0][1].tep[0].startsWith('~'), 'thu_gui: xin việc thu_gui, đổi ~/ thành đường thật');
+  ok(xin[0][0] === 'thu_gui' && xin[0][1].tep[0].endsWith('/Documents/bao-gia.pdf') && !xin[0][1].tep[0].startsWith('~') && xin[0][1].chu_ky === true,
+    'thu_gui: xin việc thu_gui, đổi ~/ thành đường thật, mặc định kèm chữ ký');
 } finally {
   rmSync(D, { recursive: true, force: true });
+}
+
+// ---- chữ ký: /etc/axle/thu-chu-ky.html (+ .txt) cạnh thu.json ----
+const D2 = mkdtempSync(path.join(tmpdir(), 'thu-ck-'));
+try {
+  const f = path.join(D2, 'thu.json');
+  writeFileSync(f, JSON.stringify({ ten_mien: 'hrvn.asia', tu: 'Hiếu · HRVN <hieu@hrvn.asia>' }));
+  ok(T.docCauHinh(f).chu_ky === null, 'chưa có tệp chữ ký → chu_ky null');
+  writeFileSync(path.join(D2, 'thu-chu-ky.html'), '<table><tr><td><b>Lê Minh Hiếu</b><br>HRVN</td></tr></table>\n');
+  ok(T.docCauHinh(f).chu_ky?.chu === 'Lê Minh Hiếu\nHRVN', 'có HTML, chưa có .txt → bản chữ suy từ HTML');
+  writeFileSync(path.join(D2, 'thu-chu-ky.txt'), 'Lê Minh Hiếu\nĐT: 0963 233 341\n');
+  const c2 = T.docCauHinh(f);
+  ok(c2.chu_ky.chu === 'Lê Minh Hiếu\nĐT: 0963 233 341' && c2.chu_ky.html.startsWith('<table>'), 'có .txt → dùng bản chữ viết sẵn');
+  const q = T.chuanThuGui({ den: ['a@x.vn'], tieu_de: 'Chào', noi_dung: 'Chào anh <b>A</b> & "B",\nxem https://hrvn.asia/#lien-he.\nTrân trọng,' }, c2);
+  ok(q.chu_ky === true && T.chuanThuGui({ den: ['a@x.vn'], tieu_de: 'x', noi_dung: 'y', chu_ky: false }, c2).chu_ky === false, 'mặc định kèm chữ ký, xin false thì không');
+  const bb = T.thanhThu(q, c2);
+  ok(bb.text.endsWith('Trân trọng,\n\n-- \nLê Minh Hiếu\nĐT: 0963 233 341'), 'bản chữ: thân + "-- " + chữ ký chữ');
+  ok(bb.html.includes('Chào anh &lt;b&gt;A&lt;/b&gt; &amp; &quot;B&quot;,<br>') && !bb.html.includes('<b>A</b>'), 'bản HTML: thân thoát ký tự, không chèn thẻ được');
+  ok(bb.html.includes('xem <a href="https://hrvn.asia/#lien-he">https://hrvn.asia/#lien-he</a>.<br>'), 'link trong thân bấm được, dấu chấm cuối câu không dính vào link');
+  ok(bb.html.trimEnd().endsWith('<br>HRVN</td></tr></table>'), 'bản HTML kết thúc bằng chữ ký');
+  const kk = T.thanhThu({ ...q, chu_ky: false }, c2);
+  ok(!('html' in kk) && kk.text === q.noi_dung, 'lá xin không kèm chữ ký → chỉ chữ trơn như cũ');
+  ok(!('html' in T.thanhThu(p, cfg)) && T.thanhThu(p, cfg).text === p.noi_dung, 'máy chưa đặt chữ ký → gửi như cũ');
+  ok(/Kèm chữ ký/.test(T.moTaThuGui(q, c2)) && /Không kèm chữ ký/.test(T.moTaThuGui({ ...q, chu_ky: false }, c2)) && !/chữ ký/.test(T.moTaThuGui(p, cfg)),
+    'chữ duyệt trên điện thoại nói rõ có / không kèm chữ ký');
+  const di = T.luuThuDi(path.join(D2, 'Thu'), { id: 'abc12345', p: q, cfg: c2 });
+  ok(di.t.chu_ky === true && di.t.chu === q.noi_dung, 'bản đã gửi ghi có kèm chữ ký, lưu thân thư');
+  writeFileSync(path.join(D2, 'thu-chu-ky.html'), 'x'.repeat(70 * 1024));
+  ok(T.docCauHinh(f).chu_ky === null, 'chữ ký HTML quá 64 KB → bỏ qua');
+} finally {
+  rmSync(D2, { recursive: true, force: true });
 }
 
 // ---- bậc 3: không "1 giờ", không "Luôn", không bao giờ tự duyệt ----

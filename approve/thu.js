@@ -2,6 +2,8 @@
 // gửi mail và nhận mail". Máy văn phòng KHÔNG tự làm máy chủ thư (cần nhà mạng đặt tên ngược cho IP + mở cổng 25 — Bi:
 // "phức tạp nhỉ") → Resend lo đường đi, thư vẫn về nằm trên máy.
 //   /etc/axle/thu.json { ten_mien, tu: "Tên <dia@chi>", bat } — `sudo axle thu setup`
+//   Chữ ký (25/9, Bi: "chữ ký mail xịn sò"): /etc/axle/thu-chu-ky.html (+ .txt bản chữ trơn) — `sudo axle thu chu-ky <tệp.html> [tệp.txt]`.
+//   Có chữ ký thì thư gửi đi có cả bản HTML (thân thoát ký tự + chữ ký) lẫn bản chữ (thân + "-- " + chữ ký chữ).
 //   Khoá Resend trong vault: RESEND_API_KEY → chỉ gửi tới api.resend.com. Bộ duyệt (root) gọi qua vault.
 //   NHẬN: bộ duyệt 2 phút hỏi GET /emails/receiving (danh sách của CẢ tài khoản → lọc thư tới @ten_mien), mỗi thư mới →
 //         ~chủ/Axle/Thu/Den/<YYYY-MM>/<YYYYMMDD-HHMM>-<id8>/ thu.json + thu.md + tệp đính kèm (của chủ; mở được từ nút Tệp
@@ -16,13 +18,21 @@ import { tenTepAnToan } from './mota.js';
 export const CAU_HINH = process.env.AXLE_THU_CFG || '/etc/axle/thu.json';
 export const TOI_DA_TEP_GUI = 10 * 1024 * 1024;    // tổng tệp một lá gửi đi (base64 ~13,3 MB < 16 MB của vault)
 export const TOI_DA_TEP_NHAN = 20 * 1024 * 1024;   // mỗi tệp thư đến
+export const TOI_DA_CHU_KY = 64 * 1024;
 
 export function docCauHinh(file = CAU_HINH) {
   try {
     const j = JSON.parse(readFileSync(file, 'utf8'));
     if (!j?.ten_mien || !j?.tu) return null;
-    return { bat: j.bat !== false, ten_mien: String(j.ten_mien).toLowerCase(), tu: String(j.tu) };
+    return { bat: j.bat !== false, ten_mien: String(j.ten_mien).toLowerCase(), tu: String(j.tu), chu_ky: docChuKy(path.dirname(file)) };
   } catch { return null; }
+}
+
+/** Chữ ký thư cạnh tệp cấu hình: thu-chu-ky.html (bắt buộc) + thu-chu-ky.txt (không có thì suy từ HTML). Quá 64 KB → bỏ. */
+export function docChuKy(dir) {
+  const doc = (f) => { try { const x = readFileSync(path.join(dir, f), 'utf8'); return x.length <= TOI_DA_CHU_KY ? x.trim() : ''; } catch { return ''; } };
+  const html = doc('thu-chu-ky.html');
+  return html ? { html, chu: doc('thu-chu-ky.txt') || htmlSangChu(html) } : null;
 }
 
 const DIA_CHI = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
@@ -51,7 +61,7 @@ export function chuanThuGui(p = {}, cfg) {
   const tep = (Array.isArray(p.tep) ? p.tep : p.tep ? [p.tep] : []).map(String);
   if (tep.length > 10) throw new Error('Tối đa 10 tệp đính kèm');
   const traLoi = p.tra_loi ? String(p.tra_loi).trim().slice(0, 80) : null;
-  return { den, cc, tieu_de: tieuDe, noi_dung: noiDung, tep, tra_loi: traLoi };
+  return { den, cc, tieu_de: tieuDe, noi_dung: noiDung, tep, tra_loi: traLoi, chu_ky: p.chu_ky !== false };
 }
 
 const kb = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1).replace('.', ',')} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`);
@@ -61,12 +71,30 @@ export function moTaThuGui(p, cfg, { tepCo = [], thuGoc = null } = {}) {
   return [`gửi thư từ ${cfg?.tu ?? '?'}`, `Tới: ${p.den.join(', ')}`, ...(p.cc.length ? [`Cc: ${p.cc.join(', ')}`] : []),
     `Tiêu đề: ${p.tieu_de}`, ...(thuGoc ? [`Trả lời thư của ${tenHien(thuGoc.tu)}: "${thuGoc.tieu_de}"`] : []),
     '─────', nd, '─────',
+    ...(cfg?.chu_ky ? [p.chu_ky === false ? 'Không kèm chữ ký' : 'Kèm chữ ký của máy (bản HTML + bản chữ)'] : []),
     tepCo.length ? `Đính kèm: ${tepCo.map((t) => `${t.ten} (${kb(t.co)})`).join(', ')}` : 'Không có tệp đính kèm'].join('\n');
 }
 
-/** Thân yêu cầu POST https://api.resend.com/emails */
+const THAN_HTML = '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#1b2430">';
+/** Chữ thân thư → HTML an toàn: thoát ký tự (không chèn thẻ được), link http(s) bấm được, xuống dòng → <br> */
+export function chuSangHtml(s) {
+  const esc = (x) => x.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  const t = String(s ?? '');
+  let ra = '';
+  let i = 0;
+  for (const m of t.matchAll(/https?:\/\/[^\s<>"']+/g)) {
+    const u = m[0].replace(/[.,;:!?)\]]+$/, '');
+    ra += `${esc(t.slice(i, m.index))}<a href="${esc(u)}">${esc(u)}</a>`;
+    i = m.index + u.length;
+  }
+  return (ra + esc(t.slice(i))).replace(/\n/g, '<br>\n');
+}
+
+/** Thân yêu cầu POST https://api.resend.com/emails (máy có chữ ký + không xin bỏ → thêm bản HTML) */
 export function thanhThu(p, cfg, { tep = [], thuGoc = null } = {}) {
-  const b = { from: cfg.tu, to: p.den, subject: p.tieu_de, text: p.noi_dung };
+  const ck = p.chu_ky !== false ? cfg.chu_ky : null;
+  const b = { from: cfg.tu, to: p.den, subject: p.tieu_de, text: ck ? `${p.noi_dung}\n\n-- \n${ck.chu}` : p.noi_dung };
+  if (ck) b.html = `${THAN_HTML}${chuSangHtml(p.noi_dung)}</div>\n<br>\n${ck.html}`;
   if (p.cc.length) b.cc = p.cc;
   if (thuGoc?.message_id) {
     const refs = [thuGoc.references, thuGoc.message_id].filter(Boolean).join(' ').trim();
@@ -152,6 +180,7 @@ export function luuThuDi(goc, { id, p, cfg, tepCo = [] }, { chown = () => {} } =
   const luc = new Date().toISOString();
   const dir = taoThuMuc(goc, 'Di', id || 'gui', luc, chown);
   const t = { id, luc, tu: cfg.tu, den: p.den, cc: p.cc, tieu_de: p.tieu_de, chu: p.noi_dung, tra_loi: p.tra_loi || null,
+    chu_ky: Boolean(cfg.chu_ky && p.chu_ky !== false),
     tep: tepCo.map((x) => ({ ten: x.ten, co: x.co })) };
   ghiTep(path.join(dir, 'thu.json'), JSON.stringify(t, null, 1), chown);
   ghiTep(path.join(dir, 'thu.md'), thuMd(t, false), chown);

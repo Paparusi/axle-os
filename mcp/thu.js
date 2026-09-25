@@ -29,7 +29,7 @@ export function register(tool, askAndWait) {
   }, async ({ hop, so, tim }) => {
     const cfg = docCauHinh();
     const ds = dsThu(THU_DIR, { hop, so, tim });
-    return JSON.stringify({ dia_chi: cfg?.tu ?? null, hop, so_thu: ds.length, ds });
+    return JSON.stringify({ dia_chi: cfg?.tu ?? null, chu_ky: Boolean(cfg?.chu_ky), hop, so_thu: ds.length, ds });
   });
 
   tool('thu_doc', {
@@ -55,7 +55,9 @@ export function register(tool, askAndWait) {
     title: "Send an email from the owner's domain (owner approves EACH email on the phone)",
     description: 'Sends from the address configured on this machine (thu_ds shows it). The owner sees every recipient, the subject, the '
       + 'body and the attachments on the phone and approves this one email — never assume it was sent until the result says so. '
-      + 'Plain text body; write it ready to send (greeting, content, signature), in the recipient\'s language. To reply, pass tra_loi = '
+      + 'Plain text body, in the recipient\'s language: greeting, content, closing ("Trân trọng,"). If the machine has an email '
+      + 'signature (thu_ds shows chu_ky: true) it is appended automatically as a designed HTML block + a plain-text copy — then do NOT '
+      + 'write your own name/phone/contact block; set chu_ky=false only for a very short personal reply. To reply, pass tra_loi = '
       + 'id of the incoming email (threading headers are added) and use subject "Re: <original subject>". tep: files in the owner\'s '
       + 'home (absolute or ~/…), total ≤ 10 MB; hidden folders and key files are refused.',
     inputSchema: {
@@ -65,13 +67,15 @@ export function register(tool, askAndWait) {
       noi_dung: z.string().min(1).max(50_000),
       tra_loi: z.string().max(80).optional().describe('id thư đến đang trả lời'),
       tep: z.array(z.string().max(1000)).max(10).optional(),
+      chu_ky: z.boolean().default(true).describe('Append the machine\'s email signature (when one is set)'),
       waitSec: z.number().int().min(0).max(110).default(100)
         .describe('Seconds to wait for the owner before returning (then use approval_status)'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
-  }, async ({ den, cc, tieu_de: tieuDe, noi_dung: noiDung, tra_loi: traLoi, tep, waitSec }, { client }) => {
+  }, async ({ den, cc, tieu_de: tieuDe, noi_dung: noiDung, tra_loi: traLoi, tep, chu_ky: chuKy, waitSec }, { client }) => {
     const nha = homedir();
     const tepAbs = (tep || []).map((t) => (t === '~' ? nha : t.startsWith('~/') ? path.join(nha, t.slice(2)) : t));
-    return askAndWait('thu_gui', { den, cc: cc || [], tieu_de: tieuDe, noi_dung: noiDung, tra_loi: traLoi || null, tep: tepAbs }, client, waitSec);
+    return askAndWait('thu_gui', { den, cc: cc || [], tieu_de: tieuDe, noi_dung: noiDung, tra_loi: traLoi || null, tep: tepAbs,
+      chu_ky: chuKy !== false }, client, waitSec);
   });
 }
