@@ -1302,6 +1302,9 @@ async function nhomTin(msg, { sua = false } = {}) {
     try { nhomGhiTin(nhaChu(), n.thu_muc, rec, { ids: ownerIds() }); } catch (e) { log({ warn: `nhóm ${n.thu_muc}: ${e.message}` }); }
     return;
   }
+  // Bot vào / rời (kể cả chính bot Axle bị xoá rồi thêm lại) là việc của my_chat_member — đừng hỏi chủ vì tin hệ thống đó.
+  // 26/9: chủ xoá bot để thêm lại → tin "bot rời nhóm" tới trước → Axle hỏi "Ghi lại tin của nhóm này?" ngay lúc bot vừa bị xoá.
+  if (rec.su_kien && rec.ai?.length && rec.ai.every((a) => a.bot)) return;
   if (n?.trang_thai !== 'cho') {
     n = soNhom.nhom[id] = { ...(n || {}), ten: String(msg.chat.title || '(nhóm)').slice(0, 200), loai: msg.chat.type, trang_thai: 'cho',
       thay_luc: new Date().toISOString() };
@@ -1322,6 +1325,11 @@ async function nhomThanhVien(u) {   // my_chat_member: bot được thêm vào /
       const e = { ...(n || {}), ten, loai: u.chat.type };
       const so = nhomBatDauGhi(id, e, 'chủ thêm bot');
       log({ nhom: 'ghi', thu_muc: e.thu_muc, boi: 'chủ thêm bot', tam: so });
+      if (e.hoi_msg) {   // câu hỏi Ghi / Rời còn treo từ trước → sửa cho hết nút (bấm nhầm Rời là bot bỏ nhóm)
+        tg('editMessageText', { chat_id: cfg().owner, message_id: e.hoi_msg, text: `✅ Đang ghi nhóm «${ten}».` }).catch(() => {});
+        delete e.hoi_msg;
+        luuSoNhom();
+      }
       const rieng = await cheDoRieng();
       await nhanChu(`✅ Bot Axle đã vào nhóm «${ten}» và bắt đầu ghi tin${so ? ` (kèm ${so} tin giữ tạm)` : ''}. ${huongDan()}`
         + (rieng ? CHE_DO_RIENG : '')).catch((x) => log({ warn: `báo nhóm: ${x.message}` }));

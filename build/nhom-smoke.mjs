@@ -38,7 +38,7 @@ const tgServer = createServer((req, res) => {
       return tra([]);
     }
     sent.push({ method, body });
-    if (method === 'sendMessage') return tra({ message_id: ++seqMsg });
+    if (method === 'sendMessage') { sent.at(-1).mid = ++seqMsg; return tra({ message_id: seqMsg }); }
     if (method === 'getMe') return tra({ id: 999, is_bot: true, can_read_all_group_messages: docDuocHet });
     if (method === 'getChatMemberCount') return tra(7);
     if (method === 'getChatMember') return tra({ status: members[body.chat_id] || 'left', user: { id: body.user_id } });
@@ -153,6 +153,21 @@ try {
   // 8. Bot bị xoá khỏi nhóm đang ghi → báo chủ, thôi ghi
   day({ my_chat_member: { chat: { id: -1004004, type: 'supergroup', title: 'Báo cáo HRVN' }, from: { id: 202 }, date: now(), old_chat_member: { status: 'member' }, new_chat_member: { status: 'kicked' } } });
   ok(await cho(() => tinGui('không còn trong nhóm')) && soSo().nhom['-1004004'].trang_thai === 'roi', 'bot bị xoá → báo chủ, trạng thái roi');
+  // 8b. Chủ xoá bot rồi thêm lại ở nhóm chưa ghi: tin hệ thống "bot rời / vào" không được làm Axle hỏi
+  const G5 = { id: -1005005, type: 'supergroup', title: 'Nhóm năm' };
+  const BOT = { id: 999, first_name: 'Axle', is_bot: true, username: 'axle_thu_bot' };
+  day({ message: { message_id: 50, chat: G5, date: now(), from: { id: CHU }, left_chat_member: BOT } });
+  day({ message: { message_id: 51, chat: G5, date: now(), from: { id: CHU }, new_chat_members: [BOT] } });
+  day({ my_chat_member: { chat: G5, from: { id: CHU }, date: now(), old_chat_member: { status: 'left' }, new_chat_member: { status: 'member' } } });
+  await cho(() => tinGui('✅ Bot Axle đã vào nhóm «Nhóm năm»'));
+  ok(!tinGui('«Nhóm năm» (7') && soSo().nhom['-1005005']?.trang_thai === 'ghi', 'xoá bot rồi thêm lại: không hỏi vì tin hệ thống, chỉ xác nhận');
+  // 8c. Câu hỏi Ghi/Rời còn treo mà chủ thêm bot lại → câu hỏi được sửa cho hết nút
+  const G6 = { id: -1006006, type: 'supergroup', title: 'Nhóm sáu' };
+  day({ message: { message_id: 60, chat: G6, date: now(), from: An, text: 'báo cáo' } });
+  const hoi6 = await cho(() => sent.find((s) => s.method === 'sendMessage' && String(s.body.text).includes('«Nhóm sáu»')));
+  day({ my_chat_member: { chat: G6, from: { id: CHU }, date: now(), old_chat_member: { status: 'left' }, new_chat_member: { status: 'member' } } });
+  ok(hoi6 && await cho(() => sent.find((s) => s.method === 'editMessageText' && s.body.message_id === hoi6.mid && s.body.text.includes('✅ Đang ghi nhóm «Nhóm sáu»')))
+    && tepNgay('nhom-sau').length === 1, 'câu hỏi còn treo → sửa thành "Đang ghi" khi chủ thêm bot, tin giữ tạm vào sổ');
   // 9. Tổng kết tự gửi khi tới giờ (giờ đặt = 1 phút trước lúc chạy; bộ duyệt xem mỗi phút)
   const tk = await cho(() => sent.find((s) => s.method === 'sendMessage' && String(s.body.text).startsWith('📋') && s !== bc), 75_000);
   ok(tk && tk.body.text.includes('«Báo cáo HRVN»') && soSo().tong_ket, 'tới giờ → tổng kết nhắn riêng chủ, ghi đã gửi hôm nay');
