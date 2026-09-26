@@ -1385,20 +1385,23 @@ async function nhomQuyet(data) {   // nút của chủ: nhom:<id chat>:ghi | roi
   }
   return 'Không hợp lệ';
 }
+let dangTongKet = false;
 async function tongKetNhom() {   // mỗi phút: tới giờ (cfg baoCaoGio, mặc định 18:00; false = tắt) thì nhắn riêng chủ một lần/ngày
   const c = cfg();
   const m = /^(\d{1,2}):(\d{2})$/.exec(String(gioTongKet()));
   const ds = nhomDangGhi();
-  if (!m || !c.owner || !ds.length) return;
+  if (!m || !c.owner || !ds.length || dangTongKet) return;
   const now = new Date();
   const ngay = nhomNgay(now);
   if (soNhom.tong_ket === ngay || now.getHours() * 60 + now.getMinutes() < +m[1] * 60 + +m[2]) return;
-  soNhom.tong_ket = ngay;
-  luuSoNhom();
+  const xong = () => { soNhom.tong_ket = ngay; luuSoNhom(); };
   const tks = ds.map((n) => ({ n, tk: nhomTongKet(baoCaoGoc(), n.thu_muc, ngay) }));
-  if (now.getDay() === 0 && tks.every((x) => !x.tk.so_tin)) return;   // Chủ nhật không ai gửi gì — khỏi nhắn
+  if (now.getDay() === 0 && tks.every((x) => !x.tk.so_tin)) { xong(); return; }   // Chủ nhật không ai gửi gì — khỏi nhắn
   const text = tks.map(({ n, tk }) => vanBanTongKet(n.ten, ngay, tk)).join('\n\n');
-  await nhanChu(text).catch((e) => log({ warn: `tổng kết nhóm: ${e.message}` }));
+  // Gửi được mới đánh dấu: 26/9 mạng máy VP rớt vài phút một lần — rớt đúng lúc 18:00 thì trước đây mất tổng kết cả ngày
+  dangTongKet = true;
+  try { await nhanChu(text); } catch (e) { log({ warn: `tổng kết nhóm: ${e.message} — phút sau thử lại` }); return; } finally { dangTongKet = false; }
+  xong();
   baoSuKien({ id: `bao-cao-${ngay}`, loai: 'bao-cao', luc: now.toISOString(), im: true, tieu_de: '📋 Tổng kết báo cáo nhóm',
     noi_dung: catGon(text.replace(/\n+/g, ' · '), 300) });
 }

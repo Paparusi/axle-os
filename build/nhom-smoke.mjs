@@ -22,6 +22,7 @@ let seqUpd = 1; let seqMsg = 500;
 const sent = [];       // { method, body }
 const members = {};    // chat id → trạng thái của CHỦ trong nhóm đó
 let docDuocHet = false;
+let hongTongKet = 0;   // > 0: làm hỏng từng ấy lần gửi tổng kết (giả mạng rớt đúng 18:00)
 const tgServer = createServer((req, res) => {
   let b = '';
   req.on('data', (c) => { b += c; });
@@ -36,6 +37,10 @@ const tgServer = createServer((req, res) => {
         await sleep(100);
       }
       return tra([]);
+    }
+    if (method === 'sendMessage' && hongTongKet > 0 && String(body.text).startsWith('📋 «')) {
+      hongTongKet--;
+      res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ ok: false, description: 'giả rớt mạng' }));
     }
     sent.push({ method, body });
     if (method === 'sendMessage') { sent.at(-1).mid = ++seqMsg; return tra({ message_id: seqMsg }); }
@@ -168,9 +173,14 @@ try {
   day({ my_chat_member: { chat: G6, from: { id: CHU }, date: now(), old_chat_member: { status: 'left' }, new_chat_member: { status: 'member' } } });
   ok(hoi6 && await cho(() => sent.find((s) => s.method === 'editMessageText' && s.body.message_id === hoi6.mid && s.body.text.includes('✅ Đang ghi nhóm «Nhóm sáu»')))
     && tepNgay('nhom-sau').length === 1, 'câu hỏi còn treo → sửa thành "Đang ghi" khi chủ thêm bot, tin giữ tạm vào sổ');
-  // 9. Tổng kết tự gửi khi tới giờ (giờ đặt = 1 phút trước lúc chạy; bộ duyệt xem mỗi phút)
-  const tk = await cho(() => sent.find((s) => s.method === 'sendMessage' && String(s.body.text).startsWith('📋') && s !== bc), 75_000);
-  ok(tk && tk.body.text.includes('«Báo cáo HRVN»') && soSo().tong_ket, 'tới giờ → tổng kết nhắn riêng chủ, ghi đã gửi hôm nay');
+  // 9. Tổng kết tự gửi khi tới giờ (giờ đặt = 1 phút trước lúc chạy; bộ duyệt xem mỗi phút). Lần gửi đầu hỏng (giả rớt mạng)
+  //    → không đánh dấu đã gửi, phút sau gửi lại
+  hongTongKet = 1;
+  // chờ cả tin tới lẫn sổ ghi "đã gửi" (bộ duyệt chỉ ghi SAU khi Telegram trả lời — đọc sổ ngay lúc tin tới là đua nhau)
+  const tk = await cho(() => { const t = sent.find((s) => s.method === 'sendMessage' && String(s.body.text).startsWith('📋') && s !== bc); return t && soSo().tong_ket ? t : null; }, 150_000);
+  ok(tk && tk.body.text.includes('«Báo cáo HRVN»') && soSo().tong_ket && hongTongKet === 0 && nhatKy().includes('phút sau thử lại'),
+    'tới giờ → tổng kết nhắn riêng chủ; lần đầu rớt mạng → phút sau gửi lại, gửi được mới ghi đã gửi');
+  ok(sent.filter((s) => s.method === 'sendMessage' && String(s.body.text).startsWith('📋') && s !== bc).length === 1, 'tổng kết chỉ tới một lần');
   ok(!/TypeError|ReferenceError/.test(nhatKy() + loiDaemon), 'không lỗi TypeError/ReferenceError trong nhật ký bộ duyệt');
 } finally {
   d.kill('SIGTERM');
