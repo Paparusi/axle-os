@@ -25,6 +25,8 @@ import { CHU_KY as MAY_BAO_CHU_KY, danhGia as mayBaoDanhGia, doDac as mayBaoDoDa
 import { choApp as brainChoApp, docMoc as brainDocMoc, doThi as brainDoThi, loiDanIngest as brainLoiDanIngest, sapToi as brainSapToi,
   themTep as brainThemTep, tim as brainTim } from '../mcp/brain.js';
 import { denHan as lichDenHan, docDaChay as lichDocDaChay, docLich as lichDoc, moTaLich } from '../mcp/lich.js';
+import { banGhi as nhomBanGhi, docSo as nhomDocSo, docTongKet as nhomTongKet, ghiThongTin as nhomGhiThongTin, ghiTin as nhomGhiTin,
+  laNhom, luuSo as nhomLuuSo, ngayCua as nhomNgay, ngayTuLenh as nhomNgayTuLenh, tenNguoi, thuMucMoi, vanBanTongKet } from './nhom.js';
 import { createAppChannel } from './app-channel.js';
 import { machineState } from './machine-state.js';
 import { requestHash } from '../app/proto.js';
@@ -810,7 +812,11 @@ async function handleMessage(msg) {
     return reply(`Đã quên #${id}. Việc đó sẽ phải hỏi lại.`);
   }
   if (cmd === '/tomtat') return reply(digestText(Date.now() - 24 * 3600 * 1000));
-  return reply('Lệnh: /agents · /dung <tên> · /mo <tên> · /luat · /quen <số|tat> · /tomtat');
+  if (cmd === '/baocao') {
+    const ngay = nhomNgayTuLenh(arg);
+    return reply(ngay ? vanBanBaoCao(ngay) : 'Cú pháp: /baocao (hôm nay) · /baocao hqua · /baocao 25/9');
+  }
+  return reply('Lệnh: /agents · /dung <tên> · /mo <tên> · /luat · /quen <số|tat> · /tomtat · /baocao [hqua|d/m]');
 }
 
 // Nhận nút bấm. Chỉ chủ; đúng mã; còn hạn; chưa quyết.
@@ -819,15 +825,28 @@ async function pollTelegram() {
   for (;;) {
     try {
       if (!cfg().owner) { await new Promise((s) => setTimeout(s, 5000)); continue; }
-      const updates = await tg('getUpdates', { offset, timeout: 20, allowed_updates: ['callback_query', 'message'] });
+      const updates = await tg('getUpdates', { offset, timeout: 20,
+        allowed_updates: ['callback_query', 'message', 'edited_message', 'my_chat_member'] });
       for (const u of updates) {
         offset = u.update_id + 1;
+        // Nhóm báo cáo: tin trong nhóm chỉ được GHI (nhomTin), không bao giờ vào handleMessage (lệnh của chủ)
+        const m = u.message || u.edited_message;
+        if (u.my_chat_member || (m && laNhom(m.chat))) {
+          try { await (u.my_chat_member ? nhomThanhVien(u.my_chat_member) : nhomTin(m, { sua: !u.message })); } catch (e) { log({ warn: `nhóm: ${e.message}` }); }
+          continue;
+        }
         if (u.message) { await handleMessage(u.message); continue; }
         const q = u.callback_query;
         if (!q) continue;
+        const fromOwner = Number(q.from?.id) === Number(cfg().owner);
+        if (String(q.data || '').startsWith('nhom:')) {
+          if (!fromOwner) log({ warn: `nút nhóm từ người lạ ${q.from?.id}, bỏ qua` });
+          const tl = fromOwner ? await nhomQuyet(q.data).catch((e) => `Lỗi: ${e.message}`) : 'Không hợp lệ';
+          tg('answerCallbackQuery', { callback_query_id: q.id, text: tl }).catch(() => {});
+          continue;
+        }
         const [id, nonce, d] = String(q.data || '').split(':');
         const r = requests.get(id);
-        const fromOwner = Number(q.from?.id) === Number(cfg().owner);
         let answer = 'Không hợp lệ';
         if (!fromOwner) log({ id, warn: `nút bấm từ người lạ ${q.from?.id}, bỏ qua` });
         else if (!r || r.nonce !== nonce) answer = 'Yêu cầu không tồn tại';
@@ -1179,6 +1198,203 @@ async function layThu() {
 }
 setTimeout(() => { layThu(); setInterval(layThu, 120_000); }, 30_000);
 
+// ---- Nhóm báo cáo (nhịp D19): bot Axle trong nhóm nhân viên → ghi tin về máy, chiều tổng kết riêng cho chủ ----
+// Lõi + lý do: approve/nhom.js. Chủ tự thêm bot → ghi ngay. Người khác thêm: chủ có trong nhóm thì hỏi chủ, không thì tự rời.
+// Nhóm có bot từ trước (thêm lúc bản cũ còn bỏ qua tin nhóm) → giữ tin tạm (root) + hỏi chủ bằng nút Ghi / Rời.
+const NHOM_SO = process.env.AXLE_NHOM_SO || '/var/lib/axle/nhom-bao-cao.json';
+const NHOM_CHO = process.env.AXLE_NHOM_CHO || '/var/lib/axle/nhom-cho';
+const nhaChu = () => process.env.AXLE_NHA_CHU || `/home/${ownerUser()}`;
+const baoCaoGoc = () => path.join(nhaChu(), 'Axle/BaoCao');
+let soNhom = nhomDocSo(NHOM_SO);
+const luuSoNhom = () => { try { nhomLuuSo(NHOM_SO, soNhom); } catch (e) { log({ warn: `sổ nhóm: ${e.message}` }); } };
+const nhanChu = (text, extra = {}) => tg('sendMessage', { chat_id: cfg().owner, text: cap(text, 4000), ...extra });
+const trongNhom = (m) => ['member', 'administrator', 'creator'].includes(m?.status) || (m?.status === 'restricted' && m.is_member === true);
+const gioTongKet = () => cfg().baoCaoGio ?? '18:00';
+const huongDan = () => `${/^\d{1,2}:\d{2}$/.test(String(gioTongKet())) ? `${gioTongKet()} hằng ngày Axle nhắn riêng mày ai đã gửi, ai chưa. ` : ''}`
+  + 'Xem lúc nào cũng được: /baocao. Hỏi nội dung thì hỏi Axle ("tóm tắt báo cáo hôm nay"). Thôi ghi: xoá bot khỏi nhóm.';
+const CHE_DO_RIENG = '\n\n⚠️ Bot còn bật chế độ riêng tư nên trong nhóm chỉ thấy tin có lệnh / nhắc tên bot. Vào @BotFather → /setprivacy → '
+  + 'chọn bot → Disable, rồi XOÁ bot khỏi nhóm và thêm lại (Telegram chỉ áp dụng khi thêm lại).';
+async function cheDoRieng() {   // true = bot còn bật privacy mode
+  try { return (await tg('getMe', {})).can_read_all_group_messages === false; } catch { return false; }
+}
+const nhomDangGhi = () => Object.values(soNhom.nhom).filter((n) => n.trang_thai === 'ghi' && n.thu_muc);
+function vanBanBaoCao(ngay) {
+  const ds = nhomDangGhi();
+  if (!ds.length) return 'Chưa ghi nhóm báo cáo nào. Thêm bot Axle vào nhóm nhân viên (trước đó @BotFather → /setprivacy → Disable).';
+  return ds.map((n) => vanBanTongKet(n.ten, ngay, nhomTongKet(baoCaoGoc(), n.thu_muc, ngay))).join('\n\n');
+}
+function nhomThongTin(n) {
+  try { nhomGhiThongTin(nhaChu(), n.thu_muc, { ten: n.ten, loai: n.loai, ghi_tu: n.ghi_tu, dang_ghi: n.trang_thai === 'ghi' }, { ids: ownerIds() }); }
+  catch (e) { log({ warn: `nhóm ${n.thu_muc}: ${e.message}` }); }
+}
+/** Bật ghi một nhóm: đặt thư mục, ghi nhom.json, đổ tin giữ tạm vào sổ. Trả số tin giữ tạm đã đổ. */
+function nhomBatDauGhi(id, n, boi) {
+  if (!n.thu_muc) {
+    const daCo = new Set(Object.values(soNhom.nhom).map((x) => x.thu_muc).filter(Boolean));
+    try { for (const d of readdirSync(baoCaoGoc())) daCo.add(d); } catch { /* chưa có */ }
+    n.thu_muc = thuMucMoi(n.ten, daCo);
+  }
+  Object.assign(n, { trang_thai: 'ghi', ghi_tu: n.ghi_tu || new Date().toISOString(), boi });
+  soNhom.nhom[id] = n;
+  luuSoNhom();
+  nhomThongTin(n);
+  let so = 0;
+  const f = path.join(NHOM_CHO, `${id}.jsonl`);
+  let t = '';
+  try { t = readFileSync(f, 'utf8'); } catch { return 0; }
+  for (const l of t.split('\n')) {
+    if (!l.trim()) continue;
+    try { nhomGhiTin(nhaChu(), n.thu_muc, JSON.parse(l), { ids: ownerIds() }); so++; } catch (e) { log({ warn: `nhóm ${n.thu_muc}: ${e.message}` }); }
+  }
+  rmSync(f, { force: true });
+  return so;
+}
+function nhomGiuTam(id, rec) {
+  try {
+    mkdirSync(NHOM_CHO, { recursive: true, mode: 0o700 });
+    const f = path.join(NHOM_CHO, `${id}.jsonl`);
+    let co = 0;
+    try { co = statSync(f).size; } catch { /* chưa có */ }
+    if (co > 5 * 1024 * 1024) { log({ warn: `nhóm ${id}: tin giữ tạm quá 5 MB, bỏ` }); return; }
+    appendFileSync(f, `${JSON.stringify(rec)}\n`, { mode: 0o600 });
+  } catch (e) { log({ warn: `giữ tạm nhóm ${id}: ${e.message}` }); }
+}
+async function nhomHoiChu(id, n) {
+  n.hoi_luc = new Date().toISOString();
+  luuSoNhom();
+  let so = '';
+  try { so = ` (${await tg('getChatMemberCount', { chat_id: Number(id) })} thành viên)`; } catch { /* không sao */ }
+  try {
+    const m = await nhanChu(`👥 Bot Axle đang ở trong nhóm «${n.ten}»${so}. Ghi lại tin của nhóm này để tổng kết báo cáo?\n\n`
+      + 'Tin chỉ được lưu làm dữ liệu trên máy — Axle không nói gì trong nhóm, không làm theo tin nhắn nào ở đó. Tin tới trong lúc '
+      + `chờ đang được giữ tạm.${(await cheDoRieng()) ? CHE_DO_RIENG : ''}`,
+    { reply_markup: { inline_keyboard: [[{ text: '✅ Ghi nhóm này', callback_data: `nhom:${id}:ghi` },
+      { text: '🚪 Rời nhóm', callback_data: `nhom:${id}:roi` }]] } });
+    n.hoi_msg = m.message_id;
+    luuSoNhom();
+  } catch (e) { log({ warn: `hỏi nhóm: ${e.message}` }); }
+}
+function nhomDoiMa(cu, moi) {   // nhóm thường lên supergroup: id chat đổi, giữ thư mục + trạng thái
+  if (!soNhom.nhom[cu] || soNhom.nhom[moi]) return;
+  const n = { ...soNhom.nhom[cu], loai: 'supergroup', doi_tu: cu };
+  if (n.trang_thai === 'cho') delete n.hoi_luc;   // nút cũ mang id cũ → hỏi lại bằng id mới
+  soNhom.nhom[moi] = n;
+  delete soNhom.nhom[cu];
+  luuSoNhom();
+  try { renameSync(path.join(NHOM_CHO, `${cu}.jsonl`), path.join(NHOM_CHO, `${moi}.jsonl`)); } catch { /* không có tin tạm */ }
+  log({ nhom: 'doi-ma', cu, moi });
+}
+async function nhomTin(msg, { sua = false } = {}) {
+  const id = String(msg.chat.id);
+  if (!/^-?\d{1,20}$/.test(id)) return;
+  if (msg.migrate_to_chat_id) { nhomDoiMa(id, String(msg.migrate_to_chat_id)); return; }
+  if (msg.migrate_from_chat_id) nhomDoiMa(String(msg.migrate_from_chat_id), id);
+  let n = soNhom.nhom[id];
+  if (n?.trang_thai === 'bo') { tg('leaveChat', { chat_id: msg.chat.id }).catch(() => {}); return; }
+  if (msg.new_chat_title && n) {
+    n.ten = String(msg.new_chat_title).slice(0, 200);
+    luuSoNhom();
+    if (n.trang_thai === 'ghi') nhomThongTin(n);
+  }
+  const rec = nhomBanGhi(msg, { chuId: cfg().owner, sua });
+  if (!rec) return;
+  if (n?.trang_thai === 'ghi') {
+    try { nhomGhiTin(nhaChu(), n.thu_muc, rec, { ids: ownerIds() }); } catch (e) { log({ warn: `nhóm ${n.thu_muc}: ${e.message}` }); }
+    return;
+  }
+  if (n?.trang_thai !== 'cho') {
+    n = soNhom.nhom[id] = { ...(n || {}), ten: String(msg.chat.title || '(nhóm)').slice(0, 200), loai: msg.chat.type, trang_thai: 'cho',
+      thay_luc: new Date().toISOString() };
+    delete n.hoi_luc;
+    luuSoNhom();
+  }
+  nhomGiuTam(id, rec);
+  if (!n.hoi_luc || Date.now() - Date.parse(n.hoi_luc) > 12 * 3600_000) await nhomHoiChu(id, n);
+}
+async function nhomThanhVien(u) {   // my_chat_member: bot được thêm vào / bị xoá khỏi một nhóm
+  if (!laNhom(u.chat)) return;
+  const id = String(u.chat.id);
+  if (!/^-?\d{1,20}$/.test(id)) return;
+  const n = soNhom.nhom[id];
+  const ten = String(u.chat.title || '(nhóm)').slice(0, 200);
+  if (trongNhom(u.new_chat_member) && !trongNhom(u.old_chat_member)) {
+    if (Number(u.from?.id) === Number(cfg().owner)) {
+      const e = { ...(n || {}), ten, loai: u.chat.type };
+      const so = nhomBatDauGhi(id, e, 'chủ thêm bot');
+      log({ nhom: 'ghi', thu_muc: e.thu_muc, boi: 'chủ thêm bot', tam: so });
+      const rieng = await cheDoRieng();
+      await nhanChu(`✅ Bot Axle đã vào nhóm «${ten}» và bắt đầu ghi tin${so ? ` (kèm ${so} tin giữ tạm)` : ''}. ${huongDan()}`
+        + (rieng ? CHE_DO_RIENG : '')).catch((x) => log({ warn: `báo nhóm: ${x.message}` }));
+      return;
+    }
+    // Người khác thêm: chủ có trong nhóm (vd. quản trị viên nhóm nhân viên thêm giùm) → hỏi chủ; không → tự rời
+    let chuCo = false;
+    try { chuCo = trongNhom(await tg('getChatMember', { chat_id: u.chat.id, user_id: Number(cfg().owner) })); } catch { /* coi như không */ }
+    if (chuCo) {
+      const e = soNhom.nhom[id] = { ...(n || {}), ten, loai: u.chat.type, trang_thai: 'cho', thay_luc: new Date().toISOString() };
+      delete e.hoi_luc;
+      luuSoNhom();
+      log({ nhom: 'cho', ten, boi: u.from?.id });
+      await nhomHoiChu(id, e);
+      return;
+    }
+    soNhom.nhom[id] = { ...(n || {}), ten, loai: u.chat.type, trang_thai: 'bo' };
+    luuSoNhom();
+    await tg('leaveChat', { chat_id: u.chat.id }).catch((x) => log({ warn: `rời nhóm: ${x.message}` }));
+    log({ warn: `người khác (${u.from?.id}) thêm bot vào nhóm không có chủ — đã rời` });
+    await nhanChu(`⚠️ ${tenNguoi(u.from)} vừa thêm bot Axle vào nhóm «${ten}» (không có mày trong đó) — Axle đã tự rời. `
+      + 'Muốn ghi nhóm nào thì chính mày thêm bot vào.').catch(() => {});
+    return;
+  }
+  if (!trongNhom(u.new_chat_member) && trongNhom(u.old_chat_member) && n?.trang_thai === 'ghi') {
+    n.trang_thai = 'roi';
+    luuSoNhom();
+    nhomThongTin(n);
+    log({ nhom: 'bi-xoa', thu_muc: n.thu_muc });
+    await nhanChu(`ℹ️ Bot Axle không còn trong nhóm «${n.ten}» — thôi ghi. Tin đã ghi vẫn còn trên máy.`).catch(() => {});
+  }
+}
+async function nhomQuyet(data) {   // nút của chủ: nhom:<id chat>:ghi | roi
+  const [, id, d] = String(data).split(':');
+  const n = soNhom.nhom[id];
+  if (!n) return 'Không có nhóm này';
+  const suaHoi = (text) => { if (n.hoi_msg) tg('editMessageText', { chat_id: cfg().owner, message_id: n.hoi_msg, text }).catch(() => {}); };
+  if (d === 'ghi') {
+    if (n.trang_thai === 'ghi') return 'Đang ghi rồi';
+    const so = nhomBatDauGhi(id, n, 'chủ bấm Ghi');
+    log({ nhom: 'ghi', thu_muc: n.thu_muc, boi: 'chủ bấm Ghi', tam: so });
+    suaHoi(`✅ Đang ghi nhóm «${n.ten}»${so ? ` — đã lưu ${so} tin giữ tạm` : ''}. ${huongDan()}`);
+    return 'Đã bật ghi';
+  }
+  if (d === 'roi') {
+    n.trang_thai = 'bo';
+    luuSoNhom();
+    rmSync(path.join(NHOM_CHO, `${id}.jsonl`), { force: true });
+    await tg('leaveChat', { chat_id: Number(id) }).catch((e) => log({ warn: `rời nhóm: ${e.message}` }));
+    log({ nhom: 'bo', ten: n.ten });
+    suaHoi(`🚪 Đã rời nhóm «${n.ten}», bỏ tin giữ tạm.`);
+    return 'Đã rời nhóm';
+  }
+  return 'Không hợp lệ';
+}
+async function tongKetNhom() {   // mỗi phút: tới giờ (cfg baoCaoGio, mặc định 18:00; false = tắt) thì nhắn riêng chủ một lần/ngày
+  const c = cfg();
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(gioTongKet()));
+  const ds = nhomDangGhi();
+  if (!m || !c.owner || !ds.length) return;
+  const now = new Date();
+  const ngay = nhomNgay(now);
+  if (soNhom.tong_ket === ngay || now.getHours() * 60 + now.getMinutes() < +m[1] * 60 + +m[2]) return;
+  soNhom.tong_ket = ngay;
+  luuSoNhom();
+  const tks = ds.map((n) => ({ n, tk: nhomTongKet(baoCaoGoc(), n.thu_muc, ngay) }));
+  if (now.getDay() === 0 && tks.every((x) => !x.tk.so_tin)) return;   // Chủ nhật không ai gửi gì — khỏi nhắn
+  const text = tks.map(({ n, tk }) => vanBanTongKet(n.ten, ngay, tk)).join('\n\n');
+  await nhanChu(text).catch((e) => log({ warn: `tổng kết nhóm: ${e.message}` }));
+  baoSuKien({ id: `bao-cao-${ngay}`, loai: 'bao-cao', luc: now.toISOString(), im: true, tieu_de: '📋 Tổng kết báo cáo nhóm',
+    noi_dung: catGon(text.replace(/\n+/g, ' · '), 300) });
+}
+
 function layBan() {
   const c = cfg();
   const pending = [...requests.values()].filter((r) => r.state === 'pending').map((r) => ({
@@ -1319,7 +1535,7 @@ async function maybeDigest() {
 }
 
 setInterval(() => { syncAgentSockets(); cancelSuspended(); pruneRules(); }, 3000);
-setInterval(() => { maybeDigest().catch(() => {}); }, 60_000);
+setInterval(() => { maybeDigest().catch(() => {}); tongKetNhom().catch((e) => log({ warn: `tổng kết nhóm: ${e.message}` })); }, 60_000);
 // Rút quyền hết hạn (thư mục: gỡ ACL + tháo khỏi hộp cát; mạng: bỏ khỏi danh sách)
 setInterval(() => { runAxle(['agent', 'expire']).then((r) => { if (r.output.trim()) log({ expire: r.output.trim() }); }); }, 60_000);
 pollTelegram();

@@ -16,6 +16,7 @@ import * as tay from './tay.js';
 import * as brain from './brain.js';
 import * as lich from './lich.js';
 import * as thu from './thu.js';
+import * as baocao from './baocao.js';
 
 const AUDIT = process.env.AXLE_AUDIT || path.join(homedir(), '.local/state/axle/audit.jsonl');
 const SNAP = process.env.AXLE_SNAP || '/usr/local/lib/axle/axle-snap';
@@ -400,6 +401,8 @@ export function buildServer({ allow, clientName } = {}) {
   if (lich.coLich()) lich.register(tool);
   // Thư của Axle (~/Axle/Thu, approve/thu.js): đọc thư dùng thẳng; gửi thư = việc thu_gui, chủ duyệt từng lá
   if (thu.coThu()) thu.register(tool, askAndWait);
+  // Nhóm báo cáo (~/Axle/BaoCao, approve/nhom.js): bộ duyệt ghi tin các nhóm Telegram có bot Axle — Claude đọc thẳng
+  if (baocao.coBaoCao()) baocao.register(tool);
   // Màn hình THẬT của chủ: luôn khai báo, nhưng dịch vụ duyệt chỉ cho qua khi chủ đã cấp quyền còn hạn
   screen.registerOwnerScreen(tool, approve);
 
