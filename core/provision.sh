@@ -190,7 +190,12 @@ set -euo pipefail
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] || curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/$1/install.sh" | bash >/dev/null
 . "$NVM_DIR/nvm.sh"
-nvm install "$2" >/dev/null 2>&1
+# Mỗi lần cập nhật nvm lên mạng tìm bản $2 mới nhất — mạng chập chờn (VP 26–28/9) là hụt, cả lần cập nhật quay về + bản bị
+# ghi "bỏ qua". Tải không được mà máy đã có Node $2 thì dùng bản đó, lần sau tải tiếp.
+if ! nvm install "$2" >/dev/null 2>&1; then
+  nvm use "$2" >/dev/null 2>&1 || { echo "✗ không cài được Node $2 và máy chưa có bản nào (mạng?)" >&2; exit 1; }
+  echo "  (không tải được Node $2 mới nhất — tạm dùng $(node -v) đã có)"
+fi
 # nvm TỪ CHỐI chạy khi ~/.npmrc có `prefix` hoặc `globalconfig` — ai lỡ đặt (vd để `npm -g` khỏi cần root)
 # là `axle update` chết đứng ở đây, kèm một dòng lỗi chẳng liên quan gì tới Axle. Gỡ trước, đừng để nó chặn.
 if grep -qE '^\s*(prefix|globalconfig)\s*=' "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}" 2>/dev/null; then
