@@ -136,5 +136,22 @@ const r = { action: 'thu_gui', params: { den: ['a@x.vn'] }, client: 'ssh:claude'
 const luat = { rules: [{ id: 1, key: 'chu:ssh:claude', action: 'thu_gui', match: {} }], sessions: [{ id: 2, key: 'chu:ssh:claude', action: 'thu_gui', scope: {}, until: new Date(Date.now() + 3600e3).toISOString() }], next: 3 };
 ok(R.tierOf(r) === 3 && !R.canSession(r) && !R.canRemember(r) && R.findAuto(r, luat) === null, 'thu_gui bậc 3: không 1 giờ, không Luôn, có luật/phiên cũ cũng không tự duyệt');
 
+// ---- báo thư đến qua bot Telegram ----
+{
+  const d = mkdtempSync(path.join(tmpdir(), 'axle-thu-tg-'));
+  const f = path.join(d, 'thu.json');
+  writeFileSync(f, JSON.stringify({ bat: true, ten_mien: 'hrvn.asia', tu: 'Hiếu <hieu@hrvn.asia>', telegram: { khoa: 'HRVN_TG_TOKEN', chat: '123456789' } }));
+  ok(JSON.stringify(T.docCauHinh(f).telegram) === '{"khoa":"HRVN_TG_TOKEN","chat":"123456789"}', 'cấu hình telegram: tên khoá vault + chat');
+  writeFileSync(f, JSON.stringify({ bat: true, ten_mien: 'hrvn.asia', tu: 'Hiếu <hieu@hrvn.asia>', telegram: { khoa: 'x}}{{secret.RESEND_API_KEY', chat: '1' } }));
+  ok(T.docCauHinh(f).telegram === undefined, 'tên khoá lạ (chèn {{secret…}}) → bỏ, không báo');
+  rmSync(d, { recursive: true, force: true });
+  const tin = T.tinTelegramThu({ tu: 'Chị Lan <hr@deneast.com>', den: ['hieu@hrvn.asia'], tieu_de: 'Re: HRVN – cung ứng công nhân', chu: 'Chào anh,\r\n\n\n\nBên em cần 20 người.',
+    tep: [{ ten: 'yeu-cau.xlsx' }, { ten: 'to.pdf', bo: 'quá 20 MB' }] });
+  ok(tin.startsWith('📧 Thư mới tới hieu@hrvn.asia\nTừ: Chị Lan <hr@deneast.com>\nTiêu đề: Re: HRVN') && tin.includes('📎 2 tệp: yeu-cau.xlsx, to.pdf (không lấy về được)')
+    && tin.endsWith('Chào anh,\n\nBên em cần 20 người.'), 'tin báo: người gửi, tiêu đề, tệp, thân gọn dòng trống');
+  const dai = T.tinTelegramThu({ tu: 'a@b.vn', den: ['hieu@hrvn.asia'], tieu_de: 'x', chu: 'y'.repeat(9000) });
+  ok(dai.length <= 4096 && dai.includes('(còn tiếp'), 'thư dài → cắt vừa giới hạn 4.096 ký tự của Telegram');
+}
+
 if (fail) { console.log(`✗ ${fail} mục hỏng`); process.exit(1); }
 console.log('✓ thư của Axle đạt');

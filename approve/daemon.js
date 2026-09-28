@@ -20,6 +20,7 @@ import { buildDigest } from './digest.js';
 import { banChoApp, gopNhatKy, lenhCongCu, tenTepAnToan } from './mota.js';
 import { docTep as tepDoc, duongAn as tepDuongAn, lietKe as tepLietKe } from './tep.js';
 import { chuanThuGui, cuaMinh as thuCuaMinh, docCauHinh as thuCauHinh, luuThuDen, luuThuDi, moTaThuGui, thanhThu, timThu,
+  tinTelegramThu as thuTinTelegram,
   TOI_DA_TEP_GUI, TOI_DA_TEP_NHAN } from './thu.js';
 import { CHU_KY as MAY_BAO_CHU_KY, danhGia as mayBaoDanhGia, doDac as mayBaoDoDac, locSuKien as mayBaoLoc } from './may-bao.js';
 import { choApp as brainChoApp, docMoc as brainDocMoc, doThi as brainDoThi, loiDanIngest as brainLoiDanIngest, sapToi as brainSapToi,
@@ -1189,6 +1190,13 @@ async function layThu() {
         noi_dung: `${String(t.chu || '').replace(/\s+/g, ' ').slice(0, 200)}${t.tep.length ? ` · ${t.tep.length} tệp kèm` : ''}`,
         tep: path.relative(`/home/${owner}`, path.join(dir, 'thu.md')) });
       log({ thu: 'thư đến', tu: t.tu, tieu_de: String(t.tieu_de).slice(0, 120), tep: t.tep.length });
+      if (cfg.telegram) {   // bot báo thư của chủ (vd bot HRVN): token trong vault, bộ duyệt không thấy
+        vaultRequest({ method: 'POST', url: `https://api.telegram.org/bot{{secret.${cfg.telegram.khoa}}}/sendMessage`,
+          headers: { 'content-type': 'application/json' }, body: JSON.stringify({ chat_id: cfg.telegram.chat, text: thuTinTelegram(t),
+            link_preview_options: { is_disabled: true } }) })
+          .then((r) => { if (r.status !== 200) log({ warn: `báo thư Telegram → ${r.status}` }); })
+          .catch((x) => log({ warn: `báo thư Telegram: ${x.message}` }));
+      }
     }
   } catch (e) {
     log({ warn: `lấy thư: ${e.message}` });

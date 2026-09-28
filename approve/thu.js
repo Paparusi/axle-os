@@ -24,7 +24,12 @@ export function docCauHinh(file = CAU_HINH) {
   try {
     const j = JSON.parse(readFileSync(file, 'utf8'));
     if (!j?.ten_mien || !j?.tu) return null;
-    return { bat: j.bat !== false, ten_mien: String(j.ten_mien).toLowerCase(), tu: String(j.tu), chu_ky: docChuKy(path.dirname(file)) };
+    // Báo thư đến qua một bot Telegram (28/9, bot HRVN của Bi): token nằm trong vault (tên khoá), chỉ gửi tới đúng một chat
+    const tg = j.telegram;
+    const telegram = tg && /^[A-Z][A-Z0-9_]{1,63}$/.test(String(tg.khoa)) && /^-?\d{1,20}$/.test(String(tg.chat))
+      ? { khoa: String(tg.khoa), chat: String(tg.chat) } : null;
+    return { bat: j.bat !== false, ten_mien: String(j.ten_mien).toLowerCase(), tu: String(j.tu), chu_ky: docChuKy(path.dirname(file)),
+      ...(telegram ? { telegram } : {}) };
   } catch { return null; }
 }
 
@@ -235,4 +240,15 @@ export function timThu(goc, id) {
     }
   }
   return null;
+}
+
+/** Thư đến → tin Telegram báo chủ (chữ trơn, ≤ 4.000 ký tự): người gửi, tiêu đề, đoạn đầu, tệp kèm. t = thu.json của luuThuDen */
+export function tinTelegramThu(t) {
+  const chu = String(t.chu || '').replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim();
+  const tep = (t.tep || []).map((x) => x.ten + (x.bo ? ' (không lấy về được)' : ''));
+  const dau = [`📧 Thư mới tới ${(t.den || []).join(', ')}`, `Từ: ${t.tu}`, `Tiêu đề: ${t.tieu_de || '(không tiêu đề)'}`,
+    ...(tep.length ? [`📎 ${tep.length} tệp: ${tep.join(', ')}`] : [])].join('\n');
+  const con = 3900 - dau.length;
+  const than = chu.length > con ? `${chu.slice(0, con)}…\n(còn tiếp — đọc đủ trên máy / hỏi Axle)` : chu || '(thư không có chữ)';
+  return `${dau}\n\n${than}`;
 }

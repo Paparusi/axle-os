@@ -964,6 +964,18 @@ thu_cmd() {   # axle thu [ds [--di] [--tim x]|doc <id>|setup|chu-ky] — Thư c�
       curl -sf --unix-socket "$VAULT_SOCK" http://vault/secrets | jq -e 'any(.name == "RESEND_API_KEY")' >/dev/null \
         || echo "Còn thiếu khoá: sudo axle vault set RESEND_API_KEY --host api.resend.com"
       systemctl try-restart axle-approve 2>/dev/null || true ;;
+    telegram)   # sudo axle thu telegram <KHOÁ_VAULT> <chat id> | tat — thư đến báo qua một bot Telegram (token trong vault)
+      [ "$(id -u)" = 0 ] || { echo "Cần sudo: sudo axle thu telegram <KHOÁ> <chat id> | tat" >&2; exit 1; }
+      [ -f /etc/axle/thu.json ] || { echo "Chưa bật Thư của Axle (sudo axle thu setup …)" >&2; exit 1; }
+      if [ "${2:-}" = tat ]; then jq 'del(.telegram)' /etc/axle/thu.json > /etc/axle/thu.json.tmp && mv /etc/axle/thu.json.tmp /etc/axle/thu.json
+        chmod 0644 /etc/axle/thu.json; echo "Thôi báo thư qua Telegram"; systemctl try-restart axle-approve 2>/dev/null || true; return; fi
+      [[ "${2:-}" =~ ^[A-Z][A-Z0-9_]{1,63}$ && "${3:-}" =~ ^-?[0-9]{1,20}$ ]] || { echo "sudo axle thu telegram <KHOÁ_VAULT> <chat id>  (vd HRVN_TG_TOKEN 123456789)" >&2; exit 2; }
+      curl -sf --unix-socket "$VAULT_SOCK" http://vault/secrets | jq -e --arg k "$2" 'any(.name == $k)' >/dev/null \
+        || { echo "Vault chưa có khoá $2: sudo axle vault set $2 --host api.telegram.org" >&2; exit 1; }
+      jq --arg k "$2" --arg c "$3" '.telegram = {khoa: $k, chat: $c}' /etc/axle/thu.json > /etc/axle/thu.json.tmp && mv /etc/axle/thu.json.tmp /etc/axle/thu.json
+      chmod 0644 /etc/axle/thu.json
+      echo "Thư đến sẽ báo qua bot (khoá $2) tới chat $3"
+      systemctl try-restart axle-approve 2>/dev/null || true ;;
     ds|"")
       shift || true
       local hop=den tim=""
