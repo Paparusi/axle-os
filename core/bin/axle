@@ -740,6 +740,26 @@ claude_cmd() {
     [ -n "$ld" ] || { echo "✗ Không đưa được tệp nào vào Bộ não — không hỏi." >&2; exit 1; }
     jq -r '.ds[] | "📎 \(.ten) → Bộ não\(if .moi then "" else " (đã có từ \(.da_co_tu[0:10]))" end)"' <<<"$kq"
     cau+=$'\n\n'"$ld"
+    # Móc tệp mới của chủ — như ngả điện thoại (approve/daemon.js chayMocTepMoi): script trong ~/Axle/hooks/tep-moi.d,
+    # chỉ nhận thư mục + script của chính người chạy mà nhóm/người khác không ghi được; mỗi script tối đa 120 giây.
+    # Dòng "BAO: …" in ra cho chủ thấy; chữ còn lại nối vào câu hỏi cho Claude báo lại.
+    local moc_dir="$HOME/Axle/hooks/tep-moi.d" moc_ra="" m dong
+    local abs=(); mapfile -t abs < <(jq -r '.ds[].abs // empty' <<<"$kq" 2>/dev/null)
+    if [ "${#abs[@]}" -gt 0 ] && [ -d "$moc_dir" ] && [ ! -L "$moc_dir" ] && [ "$(stat -c %u "$moc_dir")" = "$(id -u)" ] \
+        && [ $(( 0$(stat -c %a "$moc_dir") & 022 )) -eq 0 ]; then
+      for m in "$moc_dir"/*; do
+        case "$(basename "$m")" in .*|*~) continue ;; esac
+        [ -f "$m" ] && [ ! -L "$m" ] && [ -x "$m" ] && [ "$(stat -c %u "$m")" = "$(id -u)" ] \
+          && [ $(( 0$(stat -c %a "$m") & 022 )) -eq 0 ] || continue
+        while IFS= read -r dong; do
+          case "$dong" in
+            BAO:*) dong="${dong#BAO:}"; dong="${dong%% #bang=*}"; echo "🔔${dong/ | / — }" ;;
+            *) [ -n "$dong" ] && moc_ra+="$dong"$'\n' ;;
+          esac
+        done < <(timeout 120 "$m" "${abs[@]}" 2>&1)
+      done
+      [ -n "$moc_ra" ] && cau+=$'\n\n'"(Máy đã tự chạy móc xử lý tệp của chủ — kết quả dưới đây; báo lại chủ phần đáng chú ý, đừng chạy lại:)"$'\n'"${moc_ra:0:3000}"
+    fi
   fi
   # --phien <uuid>: mỗi CUỘC một id riêng (app một, Bàn một) — trước đây --tiep = --continue "cuộc gần nhất trong thư
   # mục", Bàn và app hỏi chen nhau là lẫn mạch. Không --phien thì giữ nếp cũ.
