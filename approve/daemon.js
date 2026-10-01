@@ -640,7 +640,8 @@ const app = createAppChannel({
         }
         if (giu.daDung) return thoiGiu('Đã dừng theo yêu cầu.');
       }
-      try { cauDay = `${cau}\n\n${brainLoiDanIngest(ds, brain)}`; } catch (e) {
+      const moc = await chayMocTepMoi(owner, ds, env);
+      try { cauDay = `${cau}\n\n${brainLoiDanIngest(ds, brain)}${moc ? `\n\n${moc}` : ''}`; } catch (e) {
         log({ warn: `tệp đính kèm: ${e.message}` });
         return thoiGiu(`Không đưa được tệp vào Bộ não (${e.message}) — gửi lại nhé.`);
       }
@@ -716,6 +717,38 @@ async function tatNhe(sig) {
 }
 process.on('SIGTERM', () => { tatNhe('SIGTERM'); });
 process.on('SIGINT', () => { tatNhe('SIGINT'); });
+
+// Móc "tệp mới" (chủ máy cho phép 1/10): chủ tự đặt script chạy được vào ~/Axle/hooks/tep-moi.d/ — mỗi lần điện thoại gửi
+// tệp lên, máy chạy từng script (thứ tự tên) bằng TÀI KHOẢN CHỦ (không phải root) với đường dẫn các tệp, tối đa 120 giây.
+// Chỉ nhận script thuộc chủ máy và không ai khác ghi được (thư mục cũng vậy). Dòng "BAO: tiêu đề | nội dung" → thông báo
+// lên điện thoại + Bàn; phần chữ còn lại nối vào câu hỏi để Claude báo lại. Dành cho nghiệp vụ riêng (vd sổ lương).
+async function chayMocTepMoi(owner, ds, env) {
+  const thuMuc = `/home/${owner}/Axle/hooks/tep-moi.d`;
+  const { uid } = ownerIds();
+  const anToan = (st) => uid != null && st.uid === uid && (st.mode & 0o022) === 0;   // của chủ, nhóm/người khác không ghi được
+  let moc = [];
+  try {
+    if (!anToan(lstatSync(thuMuc)) || !lstatSync(thuMuc).isDirectory()) { log({ warn: 'móc tệp mới: thư mục không an toàn, bỏ qua' }); return ''; }
+    moc = readdirSync(thuMuc).filter((f) => !f.startsWith('.') && !f.endsWith('~')).sort().map((f) => path.join(thuMuc, f))
+      .filter((f) => { try { const st = lstatSync(f); return st.isFile() && (st.mode & 0o111) !== 0 && anToan(st); } catch { return false; } });
+  } catch { return ''; }
+  if (!moc.length || !ds.length) return '';
+  const chu = [];
+  for (const m of moc) {
+    const r = await runProc('timeout', ['120', 'runuser', '-u', owner, '--', m, ...ds.map((t) => t.abs)], { env, cwd: `/home/${owner}` });
+    const giu = [];
+    for (const dong of String(r.output || '').split('\n')) {
+      const b = dong.match(/^BAO:\s*(.+?)\s*(?:\|\s*(.*))?$/);
+      if (b) {
+        baoSuKien({ id: `moc-${Date.now().toString(36)}-${chu.length}-${giu.length}`, loai: 'moc', tieu_de: b[1].slice(0, 200),
+          noi_dung: (b[2] || '').slice(0, 1000), luc: new Date().toISOString() });
+      } else if (dong.trim()) giu.push(dong);
+    }
+    log({ moc: path.basename(m), code: r.exitCode, byte: (r.output || '').length });
+    if (giu.length) chu.push(`[${path.basename(m)}]\n${cap(giu.join('\n'), 3000)}`);
+  }
+  return chu.length ? `(Máy đã tự chạy móc xử lý tệp của chủ — kết quả dưới đây; báo lại chủ phần đáng chú ý, đừng chạy lại:)\n${chu.join('\n')}` : '';
+}
 
 function dungHoi(deviceId) {
   const p = dangHoi.get(deviceId);
