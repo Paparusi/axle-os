@@ -571,6 +571,21 @@ const app = createAppChannel({
         return app.sendTo(d.id, { type: 'state', what: 'tep-mo', data: { duong: hoi, hoi, loi: e.message } });
       }
     }
+    // Bảng của chủ (~/Axle/bang/<id>.json, vd sổ lương — công cụ riêng của chủ xuất ra): danh mục nhỏ gửi thẳng; nội dung
+    // (vài trăm KB) niêm phong cho riêng điện thoại này, đưa qua trạm như mở tệp. Chỉ ĐỌC tệp của chủ, không ai khác ghi được.
+    if (what === 'bang') return app.sendTo(d.id, { type: 'state', what: 'bang', data: bangDanhMuc() });
+    if (what === 'bang-mo') {
+      const id = String(msg?.id ?? '');
+      try {
+        const f = bangTep(id);
+        const bytes = readFileSync(f);
+        const blob = await app.guiBlob(d.id, bytes);
+        log({ app: 'mở bảng', device: d.name, id, byte: bytes.length });
+        return app.sendTo(d.id, { type: 'state', what: 'bang-mo', data: { id, blob } });
+      } catch (e) {
+        return app.sendTo(d.id, { type: 'state', what: 'bang-mo', data: { id, loi: e.message } });
+      }
+    }
     if (what === 'brain-graph') { try { return app.sendTo(d.id, { type: 'state', what: 'brain-graph', data: brainDoThi(brainDir) }); } catch (e) { return app.sendTo(d.id, { type: 'state', what: 'brain-graph', data: { nodes: [], edges: [], loi: e.message } }); } }
     if (what === 'brain-tim') {
       const tk = String(msg?.tu_khoa || '').slice(0, 200);
@@ -718,14 +733,49 @@ async function tatNhe(sig) {
 process.on('SIGTERM', () => { tatNhe('SIGTERM'); });
 process.on('SIGINT', () => { tatNhe('SIGINT'); });
 
+// Tệp/thư mục "của chủ, không ai khác ghi được" — điều kiện để bộ duyệt (root) chạy móc hay đọc bảng của chủ
+function cuaChu(st) {
+  const { uid } = ownerIds();
+  return uid != null && st.uid === uid && (st.mode & 0o022) === 0;
+}
+const BANG_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
+function bangThuMuc() {
+  const dir = `/home/${ownerUser()}/Axle/bang`;
+  const st = lstatSync(dir);
+  if (!st.isDirectory() || !cuaChu(st)) throw new Error('thư mục bảng không an toàn');
+  return dir;
+}
+function bangTep(id) {
+  if (!BANG_ID.test(id)) throw new Error('tên bảng không hợp lệ');
+  const f = path.join(bangThuMuc(), `${id}.json`);
+  const st = lstatSync(f);
+  if (!st.isFile() || !cuaChu(st)) throw new Error('tệp bảng không an toàn');
+  if (st.size > 12 * 1024 * 1024) throw new Error('bảng quá 12 MB');
+  return f;
+}
+function bangDanhMuc() {
+  let ds = [];
+  try {
+    ds = readdirSync(bangThuMuc()).filter((x) => x.endsWith('.json')).map((x) => x.slice(0, -5)).filter((id) => BANG_ID.test(id));
+  } catch { return []; }
+  const out = [];
+  for (const id of ds) {
+    try {
+      const f = bangTep(id);
+      const j = JSON.parse(readFileSync(f, 'utf8'));
+      out.push({ id, tieu_de: String(j.tieu_de || id).slice(0, 80), cap_nhat: String(j.cap_nhat || ''), kb: Math.round(statSync(f).size / 1024) });
+    } catch { /* tệp hỏng / không an toàn: bỏ */ }
+  }
+  return out;
+}
+
 // Móc "tệp mới" (chủ máy cho phép 1/10): chủ tự đặt script chạy được vào ~/Axle/hooks/tep-moi.d/ — mỗi lần điện thoại gửi
 // tệp lên, máy chạy từng script (thứ tự tên) bằng TÀI KHOẢN CHỦ (không phải root) với đường dẫn các tệp, tối đa 120 giây.
 // Chỉ nhận script thuộc chủ máy và không ai khác ghi được (thư mục cũng vậy). Dòng "BAO: tiêu đề | nội dung" → thông báo
 // lên điện thoại + Bàn; phần chữ còn lại nối vào câu hỏi để Claude báo lại. Dành cho nghiệp vụ riêng (vd sổ lương).
 async function chayMocTepMoi(owner, ds, env) {
   const thuMuc = `/home/${owner}/Axle/hooks/tep-moi.d`;
-  const { uid } = ownerIds();
-  const anToan = (st) => uid != null && st.uid === uid && (st.mode & 0o022) === 0;   // của chủ, nhóm/người khác không ghi được
+  const anToan = cuaChu;
   let moc = [];
   try {
     if (!anToan(lstatSync(thuMuc)) || !lstatSync(thuMuc).isDirectory()) { log({ warn: 'móc tệp mới: thư mục không an toàn, bỏ qua' }); return ''; }
@@ -740,8 +790,11 @@ async function chayMocTepMoi(owner, ds, env) {
     for (const dong of String(r.output || '').split('\n')) {
       const b = dong.match(/^BAO:\s*(.+?)\s*(?:\|\s*(.*))?$/);
       if (b) {
+        // đuôi "#bang=<id>" → bấm thông báo trên app mở thẳng bảng đó
+        const mb = (b[2] || '').match(/\s*#bang=([a-z0-9][a-z0-9-]{0,39})\s*$/);
+        const noiDung = mb ? (b[2] || '').slice(0, mb.index) : (b[2] || '');
         baoSuKien({ id: `moc-${Date.now().toString(36)}-${chu.length}-${giu.length}`, loai: 'moc', tieu_de: b[1].slice(0, 200),
-          noi_dung: (b[2] || '').slice(0, 1000), luc: new Date().toISOString() });
+          noi_dung: noiDung.slice(0, 1000), luc: new Date().toISOString(), ...(mb ? { bang: mb[1] } : {}) });
       } else if (dong.trim()) giu.push(dong);
     }
     log({ moc: path.basename(m), code: r.exitCode, byte: (r.output || '').length });
