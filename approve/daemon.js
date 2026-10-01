@@ -511,7 +511,14 @@ const app = createAppChannel({
     app.sendTo(d.id, { type: 'state', what: 'so', data: banChoApp(layBan()) });   // mở app là có sổ ngay; app cũ bỏ qua, vô hại
     app.sendTo(d.id, { type: 'state', what: 'may-bao', data: mayBao.su_kien.slice(0, 20) });   // sự cố lỡ đẩy (máy mất mạng) vẫn thấy
     app.sendTo(d.id, { type: 'state', what: 'brain-moc', data: mocChoApp() });   // mốc có ngày → app hẹn thông báo ngay trên iPhone
-    app.sendTo(d.id, { type: 'state', what: 'hoi', data: { dang_chay: dangHoi.has(d.id) } });   // app đang quay mà máy không chạy → thôi quay
+    // Chỉ báo "không chạy" khi máy THẬT SỰ mất câu của điện thoại này (bộ duyệt chết giữa lúc trả lời, ghi ở HOI_DANG).
+    // Trước 1/10 báo theo dangHoi lúc chào: điện thoại gửi tệp → Face ID → chào lại TRƯỚC khi câu tới máy → tin "false"
+    // cũ về muộn đúng lúc app vừa gửi → app tưởng máy khởi động lại, đóng lượt hỏi, rồi bỏ mất câu trả lời thật.
+    if (hoiMat.has(d.id) && !dangHoi.has(d.id)) {
+      hoiMat.delete(d.id);
+      ghiHoiDang();
+      app.sendTo(d.id, { type: 'state', what: 'hoi', data: { dang_chay: false } });
+    }
   },
   async onTask(d, task) {
     // Dừng câu hỏi đang trả lời (nút Dừng ở thẻ Hỏi Axle): ký như việc nhanh, tác động chỉ tới câu của chính điện thoại đó
@@ -607,6 +614,11 @@ const app = createAppChannel({
     // bản/PDF bằng LibreOffice dưới tài khoản chủ (doi-tep.sh) — Read không đọc được .xlsx/.docx nhị phân; rồi nhắc
     // Claude INGEST vào wiki theo QUY-UOC.md (brain.js loiDanIngest — cũng một bản cho mọi ngả).
     let cauDay = cau;
+    // Giữ chỗ ngay từ đầu: lấy tệp + đổi bằng LibreOffice có khi mất cả phút — trong lúc đó câu vẫn tính là "đang chạy"
+    // (chặn câu thứ hai, nút Dừng vẫn ăn).
+    const giu = { daDung: false, kill() { this.daDung = true; } };
+    dangHoi.set(d.id, giu);
+    const thoiGiu = (text) => { if (dangHoi.get(d.id) === giu) dangHoi.delete(d.id); if (text) app.sendTo(d.id, { type: 'hoi-result', ok: false, text }); };
     if (tep?.length) {
       const brain = `/home/${owner}/Axle/Brain`;
       const { uid, gid } = ownerIds();
@@ -624,10 +636,14 @@ const app = createAppChannel({
             toiDa: 12 * 1024 * 1024, i: i + 1 }));
         } catch (e) {
           log({ warn: `tệp đính kèm: ${e.message}` });
-          return app.sendTo(d.id, { type: 'hoi-result', ok: false, text: `Không lấy được tệp từ trạm (${e.message}) — gửi lại nhé.` });
+          return thoiGiu(`Không lấy được tệp từ trạm (${e.message}) — gửi lại nhé.`);
         }
+        if (giu.daDung) return thoiGiu('Đã dừng theo yêu cầu.');
       }
-      cauDay = `${cau}\n\n${brainLoiDanIngest(ds, brain)}`;
+      try { cauDay = `${cau}\n\n${brainLoiDanIngest(ds, brain)}`; } catch (e) {
+        log({ warn: `tệp đính kèm: ${e.message}` });
+        return thoiGiu(`Không đưa được tệp vào Bộ não (${e.message}) — gửi lại nhé.`);
+      }
     }
     // 30 phút: Claude có thể phải chờ chủ duyệt (10 phút/yêu cầu) rồi làm tiếp. Không qua bash -l: bị giết thì bash in
     // "Session terminated, killing shell…" lên app (thấy 21/9); axle tự tìm claude ở ~/.local/bin, không cần profile.
@@ -635,7 +651,9 @@ const app = createAppChannel({
     log({ app: 'hỏi Axle', device: d.name, cau: cap(cau, 300), tiep, ...(phien ? { phien } : {}), ...(tep?.length ? { tep: tep.map((t) => t.ten) } : {}) });
     const p = spawn('timeout', ['-k', '5', String(giay), 'runuser', '-u', owner, '--', AXLE, 'claude', cauDay, '--dong', ...(tiep ? ['--tiep'] : []), ...(phien ? ['--phien', phien] : [])],
       { cwd: `/home/${owner}`, env: { ...process.env, HOME: `/home/${owner}` }, stdio: ['ignore', 'pipe', 'pipe'] });
+    if (giu.daDung) return thoiGiu('Đã dừng theo yêu cầu.');
     dangHoi.set(d.id, p);
+    ghiHoiDang();
     publishBan();   // ban.json dang_hoi: `axle update` chờ câu này xong rồi mới khởi động lại bộ duyệt
     let buf = ''; let dau = ''; let tong = 0; let timer = null; let cat = false;
     const day = () => { if (!buf) return; const t = buf; buf = ''; app.sendTo(d.id, { type: 'hoi-chunk', text: t }); };
@@ -656,6 +674,7 @@ const app = createAppChannel({
       const bi_dung = dangHoi.get(d.id)?.daDung === true;
       const biNgat = p.biNgat === true;   // bộ duyệt đang tắt: đã báo "bị ngắt" cho app rồi
       dangHoi.delete(d.id);
+      ghiHoiDang();
       publishBan();
       if (biNgat) return;
       const ma = code ?? (signal ? 143 : -1);
@@ -669,6 +688,17 @@ const app = createAppChannel({
 const HOI_CFG = process.env.AXLE_APP_HOI || '/etc/axle/app-hoi.json';
 const hoiCfg = () => { try { return { enabled: true, timeoutSec: 1800, ...JSON.parse(readFileSync(HOI_CFG, 'utf8')) }; } catch { return { enabled: true, timeoutSec: 1800 }; } };
 const dangHoi = new Map();   // id điện thoại → tiến trình đang trả lời (để Dừng)
+// Điện thoại có câu đang chạy, ghi xuống đĩa: bộ duyệt chết bất ngờ (không kịp báo "bị ngắt") thì lần khởi động sau
+// biết đúng máy nào mất câu → lúc chào mới báo dang_chay:false cho riêng máy đó.
+const HOI_DANG = process.env.AXLE_HOI_DANG || '/var/lib/axle-approve/hoi-dang.json';
+const hoiMat = new Set((() => { try { return JSON.parse(readFileSync(HOI_DANG, 'utf8')); } catch { return []; } })());
+function ghiHoiDang() {
+  try {
+    const ds = [...new Set([...dangHoi.keys(), ...hoiMat])];
+    writeFileSync(`${HOI_DANG}.tmp`, JSON.stringify(ds));
+    renameSync(`${HOI_DANG}.tmp`, HOI_DANG);
+  } catch (e) { log({ warn: `hoi-dang: ${e.message}` }); }
+}
 // Bộ duyệt bị tắt (systemd khi cập nhật / khởi động lại): câu trả lời chạy bên trong nó sẽ chết theo → báo app trước
 // ("bị ngắt, gõ tiếp tục") rồi mới thoát, kẻo app quay "đang làm" mãi (24/9, máy văn phòng, hai lần cập nhật giữa lúc chat).
 let dangTat = false;
